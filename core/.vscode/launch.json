@@ -1,0 +1,14 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug test_schema.py (venv o)",
+			"type": "python",
+			"request": "launch",
+			"program": "${workspaceFolder}/test_schema.py",
+			"console": "integratedTerminal",
+			"justMyCode": false,
+			"pythonPath": "/Users/alexander/vnv/o/bin/python"
+		}
+	]
+}
