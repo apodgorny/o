@@ -9,37 +9,49 @@ class Object(o.Module):
 	__uncast_map__  = {}  # type_id     → python_type
 	__python_type__ = None
 
+	# Register type
 	# ----------------------------------------------------------------------
-	def __init__(self):
-		self.__id__   = None
-		self.__data__ = None
+	@classmethod
+	def register(cls):
+		cls.__o_module__ = f'o.T.{cls.__name__}'
 
-	# ----------------------------------------------------------------------
-	def __init_subclass__(cls, **kwargs):
-		super().__init_subclass__(**kwargs)
+		# Produce hash id from class name
+		# - - - - - - - - - - - - - - - - - - - -
+		hashed   = hashlib.sha256(cls.__o_module__.encode()).digest()
+		type_id  = int.from_bytes(hashed[:2], 'little', signed=False)
+		existing = o.types.get(type_id)
 
-		h = hashlib.sha256(cls.__o_module__.encode()).digest()
-		cls.__type_id__ = int.from_bytes(h[:8], 'little', signed=False)
+		# Type does not exist
+		# - - - - - - - - - - - - - - - - - - - -
+		if existing is None:
+			o.types[type_id] = cls
+			cls.__type_id__  = type_id
 
-		if cls.__type_id__ in o.types:
-			raise RuntimeError(f'duplicate type_id `{cls.__type_id__}`')
+			# Add python_type to cast/uncast maps
+			# - - - - - - - - - - - - - - - - - - - -
+			if cls.__python_type__ is not None:
+				Object.__cast_map__[cls.__python_type__] = cls
+				Object.__uncast_map__[type_id]           = cls.__python_type__
 
-		o.types[cls.__type_id__] = cls
+		# Type already exists
+		# - - - - - - - - - - - - - - - - - - - -
+		else:
+			if existing is not cls:
+				raise RuntimeError(f'Type `{o.types[type_id].__o_module__}` already exists.')
 
-		if cls.__python_type__ is not None:
-			Object.__cast_map__[cls.__python_type__] = cls
-			Object.__uncast_map__[cls.__type_id__]   = cls.__python_type__
-		
+	# Representation
 	# ----------------------------------------------------------------------
 	def __repr__(self):
 		return f'<{self.__o_module__} id={self.__id__}>'
 
-	# ----------------------------------------------------------------------
-	# FALLBACK FOR NORMAL METHODS
+	# Get Attribute
 	# ----------------------------------------------------------------------
 
 	def __getattr__(self, name):
-		base = self.__cast__()
+		if name.startswith('__'):
+			raise AttributeError(name)
+			
+		base = self.__cast_out__()
 
 		if hasattr(base, name):
 			attr = getattr(base, name)
@@ -47,35 +59,61 @@ class Object(o.Module):
 			if callable(attr):
 				def wrapper(*args, **kwargs):
 					result = attr(*args, **kwargs)
-					self.__uncast__(base)
+					self.__cast_in__(base)
 					return result
 				return wrapper
+			# TODO: Implement this with respect to refcounts
 
 			return attr
 
 		raise AttributeError(name)
 
-	# ------------------------------------------------------------
-	# CORE CAST BRIDGE
-	# ------------------------------------------------------------
+	# ======================================================================
+	# CUSTOM FRAMEWORK METHODS
+	# ======================================================================
 
-	def __cast__(self):
-		return self.__read__()
+	# Increment refcount
+	# ----------------------------------------------------------------------
+	def __inc_refcount__(self):
+		raise NotImplementedError
 
-	def __uncast__(self, value):
-		self.__write__(value)
+	# Decrement refcount
+	# ----------------------------------------------------------------------
+	def __dec_refcount__(self):
+		raise NotImplementedError
 
-	def __coerce_other__(self, other):
-		return other.__cast__() if isinstance(other, Object) else other
+	# Cast Python structure into internal container state
+	# ----------------------------------------------------------------------
+	def __cast_in__(self):
+		raise NotImplementedError
 
+	# Convert internal container state back into Python structure
+	# ----------------------------------------------------------------------
+	def __cast_out__(self):
+		raise NotImplementedError
 
-	# ------------------------------------------------------------
-	# BINARY OPERATORS
-	# ------------------------------------------------------------
+	# Read full container state from storage
+	# ----------------------------------------------------------------------
+	def __read__(self):
+		raise NotImplementedError
+
+	# Persist full container state to storage
+	# ----------------------------------------------------------------------
+	def __write__(self):
+		raise NotImplementedError
+
+	# Delete object from storage
+	# ----------------------------------------------------------------------
+	def __delete__(self):
+		raise NotImplementedError
+
+	# ======================================================================
+	# OPERATOR OVERRIDES
+	# ======================================================================
 
 	def __binary_op__(self, op, other, reflected=False):
-		base  = self.__cast__()
-		other = self.__coerce_other__(other)
+		base  = self.__cast_out__()
+		other = other.__cast_out__() if isinstance(other, Object) else other
 
 		if reflected:
 			return op(other, base)
@@ -104,18 +142,16 @@ class Object(o.Module):
 	def __rpow__(self, other): return self.__binary_op__(operator.pow, other, True)
 
 
-	# ------------------------------------------------------------
 	# UNARY OPERATORS
-	# ------------------------------------------------------------
+	# ----------------------------------------------------------------------
 
-	def __neg__(self): return operator.neg(self.__cast__())
-	def __pos__(self): return operator.pos(self.__cast__())
-	def __abs__(self): return operator.abs(self.__cast__())
+	def __neg__(self): return operator.neg(self.__cast_in__())
+	def __pos__(self): return operator.pos(self.__cast_in__())
+	def __abs__(self): return operator.abs(self.__cast_in__())
 
 
-	# ------------------------------------------------------------
 	# COMPARISONS
-	# ------------------------------------------------------------
+	# ----------------------------------------------------------------------
 
 	def __eq__(self, other): return self.__binary_op__(operator.eq, other)
 	def __ne__(self, other): return self.__binary_op__(operator.ne, other)
@@ -125,38 +161,36 @@ class Object(o.Module):
 	def __ge__(self, other): return self.__binary_op__(operator.ge, other)
 
 
-	# ------------------------------------------------------------
 	# CONTAINER PROTOCOL
-	# ------------------------------------------------------------
+	# ----------------------------------------------------------------------
 
 	def __len__(self):
-		return len(self.__cast__())
+		return len(self.__cast_out__())
 
 	def __iter__(self):
-		return iter(self.__cast__())
+		return iter(self.__cast_out__())
 
 	def __contains__(self, item):
-		return item in self.__cast__()
+		return item in self.__cast_out__()
 
 	def __getitem__(self, key):
-		return self.__cast__()[key]
+		return self.__cast_out__()[key]
 
 	def __setitem__(self, key, value):
-		base = self.__cast__()
+		base = self.__cast_in__()
 		base[key] = value
-		self.__uncast__(base)
+		self.__cast_out__(base)
 
 	def __delitem__(self, key):
-		base = self.__cast__()
+		base = self.__cast_in__()
 		del base[key]
-		self.__uncast__(base)
+		self.__cast_out__(base)
 
 
-	# ------------------------------------------------------------
 	# TYPE CONVERSIONS
-	# ------------------------------------------------------------
+	# ----------------------------------------------------------------------
 
-	def __int__(self): return int(self.__cast__())
-	def __float__(self): return float(self.__cast__())
-	def __bool__(self): return bool(self.__cast__())
-	def __str__(self): return str(self.__cast__())
+	def __int__   (self) : return int   (self.__cast_out__())
+	def __float__ (self) : return float (self.__cast_out__())
+	def __bool__  (self) : return bool  (self.__cast_out__())
+	def __str__   (self) : return str   (self.__cast_out__())

@@ -1,7 +1,4 @@
-import o
-
-import inspect
-
+import inspect, hashlib
 
 import o
 
@@ -25,7 +22,7 @@ class TestInt(o.Test):
 	@classmethod
 	def test_cast_consistency(cls):
 		x = o.Int(15)
-		assert int(x) == x.__cast__()
+		assert int(x) == x.__cast_out__()
 
 	@classmethod
 	def test_non_mutating_method(cls):
@@ -61,11 +58,14 @@ class TestInt(o.Test):
 		name = 'temp_type'
 		word = 'q'
 
-		t1 = o.services.One.define(name, word)
+		type_id = int.from_bytes(hashlib.sha256(name.encode('utf-8')).digest()[:4], 'little')
+
+		t1 = o.services.One.define(name, type_id, word)
 		o.services.One.undefine(name)
-		t2 = o.services.One.define(name, word)
+		t2 = o.services.One.define(name, type_id, word)
 
 		assert t1 == t2, 'Type id must be deterministic and stable'
+		assert t1 == type_id, 'Returned type id must match provided one'
 
 
 if __name__ == '__main__':

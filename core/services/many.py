@@ -1,3 +1,5 @@
+import os, struct
+
 import o
 
 
@@ -9,7 +11,16 @@ class Many(o.Service):
 		self.words  = {}   # id : struct
 		self.files  = {}   # id : file handle
 		self.dirty  = set()
-		self.max_id = 0
+		self.max_id = self._scan_max_id()
+
+	def _scan_max_id(self):
+		max_id = 0
+		for name in os.listdir(self.dir.path):
+			if name.isdigit():
+				id_ = int(name)
+				if id_ > max_id:
+					max_id = id_
+		return max_id
 
 	# ======================================================================
 	# PUBLIC METHODS

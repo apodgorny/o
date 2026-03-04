@@ -2,13 +2,14 @@ import o
 
 
 class Node(o.Many):
+	__fields__ = {}  # For T
 
 	# ------------------------------------------------------------------
-	def __init__(self, id=None, data=None):
-		super().__init__(word='QHQ', id=id, data=data)
+	def __init__(self, data):
+		super().__init__(data, word='QHQ')
 
 	# ======================================================================
-	# Item-Wise Methods
+	# CUSTOM FRAMEWORK METHODS - ITEM-WISE
 	# ======================================================================
 
 	# ----------------------------------------------------------------------
@@ -28,7 +29,7 @@ class Node(o.Many):
 			key_id, _, _        = self.__items__[idx]
 			self.__items__[idx] = (key_id, type_id, item_id)
 		else:
-			key_id = o.Key(data=accessor).__id__
+			key_id = o.Key(accessor).__id__
 			idx    = len(self.__items__)
 			self.__items__.append((key_id, type_id, item_id))
 			self.__index__[accessor] = idx
@@ -41,9 +42,12 @@ class Node(o.Many):
 			raise AttributeError(accessor)
 
 		idx = self.__index__.pop(accessor)
+
+		key_id, _, _ = self.__items__[idx]
+		o.Key.bind(key_id).__delete__()
+
 		self.__items__.pop(idx)
 
-		# reindex positions after removal
 		for _accessor, _idx in self.__index__.items():
 			if _idx > idx:
 				self.__index__[_accessor] = _idx - 1
@@ -51,41 +55,74 @@ class Node(o.Many):
 		self.__write__()
 
 	# ======================================================================
-	# Object-Wise Methods
+	# CUSTOM FRAMEWORK METHODS - SELF-WISE
 	# ======================================================================
+
+	# ----------------------------------------------------------------------
+	def __cast_in__(self, data=None):
+		raise RuntimeError('Node does not support cast')
+
+	# ----------------------------------------------------------------------
+	def __cast_out__(self):
+		raise RuntimeError('Node does not support uncast')
 
 	# ----------------------------------------------------------------------
 	def __read__(self):
-		items = o.services.Many.read(self.__id__)
-		index = {}
+		self.__items__ = super().__read__()
+		self.__index__ = {}
 
-		for pos, (key_id, _, _) in enumerate(items):
-			accessor = o.Key(id=key_id).__uncast__()
-			index[accessor] = pos
-
-		return items, index
+		for pos, (key_id, _, _) in enumerate(self.__items__):
+			accessor = o.Key.bind(key_id).__cast_out__()
+			self.__index__[accessor] = pos
 
 	# ----------------------------------------------------------------------
 	def __write__(self):
-		return o.services.Many.write(self.__id__, self.__items__)
+		return super().__write__()
+
+	# ----------------------------------------------------------------------
+	def __delete__(self):
+		for key_id, _, _ in self.__items__:
+			o.Key.bind(key_id).__delete__()
+
+		return super().__delete__()
+
+	# ----------------------------------------------------------------------
+	def __clear__(self):
+		for key_id, _, _ in self.__items__:
+			o.Key.bind(key_id).__delete__()
+
+		self.__items__ = []
+		self.__index__ = {}
+
+		super().__clear__()
 
 	# ======================================================================
-	
-	# ----------------------------------------------------------------------
+	# PYTHON INTERFACE
+	# ======================================================================
+
 	def __getattr__(self, name):
 		if name.startswith('_'):
 			raise AttributeError(name)
 
-		type_id, item_id = self.__get__(name)
-		obj = o.types[type_id](id=item_id)
-		return self.__uncast_item__(obj)
-
+		if name in self.__index__:
+			type_id, item_id = self.__get__(name)
+			t_object         = o.types[type_id].bind(item_id)
+			
+			if isinstance(t_object, o.Many):
+				value = t_object
+			else:
+				value = t_object.__cast_out__()
+		else:
+			value = super().__getattr__(name)
+		
+		return value
+		
 	# ----------------------------------------------------------------------
 	def __setattr__(self, name, value):
 		if name.startswith('_'):
 			return super().__setattr__(name, value)
 
-		value = self.__cast_item__(value)
+		value = self.__cast_in_item__(value)
 
 		self.__set__(
 			accessor = name,
@@ -99,3 +136,7 @@ class Node(o.Many):
 			return super().__delattr__(name)
 
 		self.__unset__(name)
+
+	# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
