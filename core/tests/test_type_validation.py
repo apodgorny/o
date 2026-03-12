@@ -1,167 +1,67 @@
 import o
 
 
-class a(): pass
-class b(): pass
-class c(): pass
-class d(): pass
-class e(): pass
-
-
 class TestTypeValidation(o.Test):
 
-	# ============================================================
-	# STRUCTURAL SIGNATURE DIFFERENCES
-	# ============================================================
+	@classmethod
+	def test_union_id_is_canonical_order(cls):
+		a = o.Annotation(int | str)
+		b = o.Annotation(str | int)
+
+		assert a.id == b.id
+		assert a.id == 'int | str'
 
 	@classmethod
-	def test_dict_key_value_swap(cls):
-		t1 = o.Type(dict[a,b]).signature
-		t2 = o.Type(dict[b,a]).signature
-		assert t1 != t2
-
-
-	@classmethod
-	def test_list_inner_variation(cls):
-		t1 = o.Type(list[a]).signature
-		t2 = o.Type(list[b]).signature
-		assert t1 != t2
-
+	def test_annotation_equality_for_equivalent_unions(cls):
+		a = o.Annotation(int | str)
+		b = o.Annotation(str | int)
+		assert a == b
 
 	@classmethod
-	def test_nested_list_vs_flat(cls):
-		t1 = o.Type(list[list[a]]).signature
-		t2 = o.Type(list[a]).signature
-		assert t1 != t2
-
+	def test_homogenous_list_is_marked_homogenous(cls):
+		t = o.Annotation(list[int])
+		assert t.is_homogenous == True
 
 	@classmethod
-	def test_dict_value_depth_difference(cls):
-		t1 = o.Type(dict[a,list[b]]).signature
-		t2 = o.Type(dict[a,b]).signature
-		assert t1 != t2
-
+	def test_union_list_is_marked_non_homogenous(cls):
+		t = o.Annotation(list[int | float])
+		assert t.is_homogenous == False
 
 	@classmethod
-	def test_double_container_variation(cls):
-		t1 = o.Type(list[dict[a,b]]).signature
-		t2 = o.Type(dict[list[a],b]).signature
-		assert t1 != t2
+	def test_inferred_heterogenous_list_is_union_not_ordered_sequence(cls):
+		t1 = o.Annotation.annotate([1, 2.0, '3'])
+		t2 = o.Annotation.annotate(['3', 1, 2.0])
 
-
-	@classmethod
-	def test_deep_branch_difference(cls):
-		t1 = o.Type(list[dict[a,list[b]]]).signature
-		t2 = o.Type(list[dict[a,list[c]]]).signature
-		assert t1 != t2
-
-
-	@classmethod
-	def test_same_depth_different_shape(cls):
-		t1 = o.Type(list[dict[a,b]]).signature
-		t2 = o.Type(list[list[dict[a,b]]]).signature
-		assert t1 != t2
-
-
-	@classmethod
-	def test_empty_container_vs_typed(cls):
-		t1 = o.Type(list).signature
-		t2 = o.Type(list[a]).signature
-		assert t1 != t2
-
-
-	@classmethod
-	def test_dict_vs_list_root(cls):
-		t1 = o.Type(list[a]).signature
-		t2 = o.Type(dict[a,b]).signature
-		assert t1 != t2
-
-
-	# ============================================================
-	# PREFIX SEMANTICS ( actual in expected )
-	# ============================================================
-
-	@classmethod
-	def test_prefix_simple(cls):
-		expected = o.Type(list)
-		actual   = o.Type(list[a])
-		assert actual in expected
-
-
-	@classmethod
-	def test_prefix_deep(cls):
-		expected = o.Type(list)
-		actual   = o.Type(list[dict[a,b]])
-		assert actual in expected
-
-
-	@classmethod
-	def test_prefix_chain(cls):
-		expected = o.Type(list[list])
-		actual   = o.Type(list[list[a]])
-		assert actual in expected
-
-
-	@classmethod
-	def test_prefix_reverse(cls):
-		expected = o.Type(list[a])
-		actual   = o.Type(list)
-		assert not (actual in expected)
-
-
-	@classmethod
-	def test_exact_match(cls):
-		expected = o.Type(list[dict[a,b]])
-		actual   = o.Type(list[dict[a,b]])
-		assert actual in expected
-		assert expected in actual
-
-
-	@classmethod
-	def test_different_root(cls):
-		expected = o.Type(list[a])
-		actual   = o.Type(dict[a,b])
-		assert not (actual in expected)
-		assert not (expected in actual)
-
-
-	@classmethod
-	def test_sibling_branches(cls):
-		parent = o.Type(list)
-		a1     = o.Type(list[a])
-		b1     = o.Type(list[b])
-
-		assert a1 in parent
-		assert b1 in parent
-		assert not (a1 in b1)
-		assert not (b1 in a1)
-
-
-	@classmethod
-	def test_deep_incompatible(cls):
-		expected = o.Type(list[dict[a,list[b]]])
-		actual   = o.Type(list[dict[a,list[c]]])
-
-		assert not (actual in expected)
-		assert not (expected in actual)
-
-
-	# ============================================================
-	# STABILITY & DETERMINISM
-	# ============================================================
-
-	@classmethod
-	def test_signature_determinism(cls):
-		t1 = o.Type(list[dict[a,b]]).signature
-		t2 = o.Type(list[dict[a,b]]).signature
+		assert t1.is_list
+		assert t1.value is not None
+		assert t1.value.is_union
 		assert t1 == t2
-
+		assert t1.id == t2.id
 
 	@classmethod
-	def test_signature_independent_instances(cls):
-		t1 = o.Type(list[dict[a,b]])
-		t2 = o.Type(list[dict[a,b]])
-		assert t1.signature == t2.signature
+	def test_inferred_heterogenous_dict_is_union_for_keys_and_values(cls):
+		t = o.Annotation.annotate({1: 'a', '2': 3})
+
+		assert t.is_dict
+		assert t.key is not None
+		assert t.value is not None
+		assert t.key.is_union
+		assert t.value.is_union
+		assert {option.id for option in t.key.options} == {'int', 'str'}
+		assert {option.id for option in t.value.options} == {'int', 'str'}
+
+	@classmethod
+	def test_optional_detection(cls):
+		t = o.Annotation(int | None)
+		assert t.is_union
+		assert t.is_optional
+
+	@classmethod
+	def test_determinism_for_same_structure(cls):
+		t1 = o.Annotation.annotate([1, {'x': 2.0}])
+		t2 = o.Annotation.annotate([1, {'x': 2.0}])
+		assert t1.id == t2.id
+		assert t1 == t2
 
 
 if __name__ == '__main__':

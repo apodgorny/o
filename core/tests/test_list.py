@@ -130,8 +130,6 @@ class TestList(o.Test):
 		l.append('x')
 		l.append(True)
 		l.append(1.5)
-		print(l.__cast_out__())
-		print([type(x) for x in l.__cast_out__()])
 		assert l.__cast_out__() == [1, 'x', True, 1.5]
 
 	@classmethod
@@ -169,15 +167,13 @@ class TestList(o.Test):
 
 			item = l[0]
 
-			# Returned back as Python composite
-			print('test_python_composite_items_are_supported', item, data[0])
 			assert item == data[0]
 
 			if isinstance(data[0], list):
-				assert isinstance(item, list)
+				assert isinstance(item, o.List)
 
 			elif isinstance(data[0], dict):
-				assert isinstance(item, dict)
+				assert isinstance(item, o.Dict)
 
 	@classmethod
 	def test_wrapped_composite_items_roundtrip(cls):
@@ -189,9 +185,9 @@ class TestList(o.Test):
 		l0 = l[0]
 		l1 = l[1]
 
-		# Composite возвращаются как Python-структуры
-		assert isinstance(l0, list)
-		assert isinstance(l1, dict)
+		# Composite возвращаются как wrapper-объекты
+		assert isinstance(l0, o.List)
+		assert isinstance(l1, o.Dict)
 
 		assert l0 == [1, 2]
 		assert l1 == {'a': 1}
@@ -267,7 +263,7 @@ class TestList(o.Test):
 	@classmethod
 	def test_bind_snapshot_requires_reload(cls):
 		l1 = o.List([1])
-		l2 = o.List.bind(l1.__id__)
+		l2 = o.List.instantiate(l1.__id__)
 
 		l1.append(2)
 		l2.__read__()
@@ -280,14 +276,14 @@ class TestList(o.Test):
 	@classmethod
 	def test_persistence_reopen_by_id(cls):
 		l1 = o.List([1, 2, 3])
-		l2 = o.List.bind(l1.__id__)
+		l2 = o.List.instantiate(l1.__id__)
 		assert l2.__cast_out__() == [1, 2, 3]
 
 	@classmethod
 	def test_commit_persistence(cls):
 		l1 = o.List([1, 2, 3])
 		o.services.Many.commit()
-		l2 = o.List.bind(l1.__id__)
+		l2 = o.List.instantiate(l1.__id__)
 		assert l2.__cast_out__() == [1, 2, 3]
 
 	@classmethod
@@ -305,7 +301,7 @@ class TestList(o.Test):
 		l.__delete__()
 
 		try:
-			o.List.bind(id_)
+			o.List.instantiate(id_)
 			assert False
 		except KeyError:
 			pass
@@ -355,3 +351,10 @@ class TestList(o.Test):
 		assert isinstance(c, list)
 		assert c == [1, 2, 2, 3]
 		assert l.__cast_out__() == [1, 2, 2, 3]
+
+	@classmethod
+	def test_overwrite(cls):
+		d = o.List([0,2])
+		d[0] = 1
+		d[0] = 2
+		assert d[0] == 2

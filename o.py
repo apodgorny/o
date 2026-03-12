@@ -5,20 +5,19 @@ from whitelabel.wl import WL
 
 
 def initialize(o):
+	o.F
 	for module in o:
-		t = module.load()
-		if isinstance(t, type) and issubclass(t, o.Object):
-			t.register()
+		print(module.name)
+		module.load()
 
 
 o = WL.define(
 	'o',
 	__file__,
-	types = {},  # class_name -> class
 
-	# __cache_by_id__          = defaultdict(dict),  # class_name -> id          -> instance
-	# __cache_by_key__         = defaultdict(dict),  # class_name -> key         -> instance
-	# __cache_by_instance_id__ = defaultdict(dict)   # class_name -> instance_id -> instance
+	__types_by_id__   = {},  # type_id    -> type_class
+	__types_by_name__ = {},  # type_o_module -> type_class
+	__cast_map__      = {},  # Annotation -> o.T subclass
 
 	on_initialize = initialize
 )

@@ -91,6 +91,21 @@ class TestDict(o.Test):
 		assert d['f'] == 1.5
 
 	@classmethod
+	def test_non_homogenous_values_are_supported(cls):
+		d = o.Dict()
+		d['i'] = 10
+		d['s'] = 'x'
+		d['l'] = [1, 2]
+		d['d'] = {'k': 1}
+
+		assert d['i'] == 10
+		assert d['s'] == 'x'
+		assert isinstance(d['l'], o.List)
+		assert isinstance(d['d'], o.Dict)
+		assert d['l'] == [1, 2]
+		assert d['d'] == {'k': 1}
+
+	@classmethod
 	def test_value_as_object_roundtrip(cls):
 		d = o.Dict()
 
@@ -111,7 +126,7 @@ class TestDict(o.Test):
 		d1['a'] = 1
 		d1['b'] = 2
 
-		d2 = o.Dict.bind(d1.__id__)
+		d2 = o.Dict.instantiate(d1.__id__)
 
 		assert d2['a'] == 1
 		assert d2['b'] == 2
@@ -123,7 +138,7 @@ class TestDict(o.Test):
 
 		o.services.Many.commit()
 
-		d2 = o.Dict.bind(d1.__id__)
+		d2 = o.Dict.instantiate(d1.__id__)
 		assert d2['a'] == 1
 
 	# ----------------------------------------------------------------------
@@ -142,7 +157,9 @@ class TestDict(o.Test):
 		assert d2['a'] == 2
 
 	# ----------------------------------------------------------------------
-	# KEY BEHAVIOR (CURRENT CONTRACT: key must be str)
+	# KEY BEHAVIOR
+	# - Dict keys may be any hashable value.
+	# - Composite unhashable keys must fail.
 	# ----------------------------------------------------------------------
 
 	@classmethod
@@ -153,6 +170,28 @@ class TestDict(o.Test):
 		d[key] = 1
 
 		assert d[key] == 1
+
+	@classmethod
+	def test_tuple_key_not_supported(cls):
+		d = o.Dict()
+		key = ('a', 'b')
+
+		try:
+			d[key] = 'ok'
+			assert False
+		except TypeError as e:
+			assert 'Unsupported cast type `tuple`' in str(e)
+
+	@classmethod
+	def test_hashable_object_key_roundtrip(cls):
+		class ObjKey(o.Str):
+			pass
+
+		d = o.Dict()
+		key = ObjKey('x')
+
+		d[key] = 7
+		assert d[key] == 7
 
 	# ----------------------------------------------------------------------
 	# MANY REINDEX AFTER DELETE
@@ -183,7 +222,7 @@ class TestDict(o.Test):
 	@classmethod
 	def test_bind_snapshot_requires_reload(cls):
 		d1 = o.Dict()
-		d2 = o.Dict.bind(d1.__id__)
+		d2 = o.Dict.instantiate(d1.__id__)
 
 		d1['a'] = 1
 		d2.__read__()
@@ -260,7 +299,7 @@ class TestDict(o.Test):
 		d.__delete__()
 
 		try:
-			o.Dict.bind(id_)['a']
+			o.Dict.instantiate(id_)['a']
 			assert False
 		except Exception:
 			pass
@@ -276,8 +315,8 @@ class TestDict(o.Test):
 		v0 = d['a']
 		v1 = d['b']
 
-		assert isinstance(v0, list)
-		assert isinstance(v1, dict)
+		assert isinstance(v0, o.List)
+		assert isinstance(v1, o.Dict)
 
 		assert v0 == [1, 2]
 		assert v1 == {'x': 10}
@@ -293,9 +332,9 @@ class TestDict(o.Test):
 		list_obj = d['a']
 		dict_obj = d['b']
 
-		# Composite всегда возвращаются как Python
-		assert isinstance(list_obj, list)
-		assert isinstance(dict_obj, dict)
+		# Composite всегда возвращаются как wrapper
+		assert isinstance(list_obj, o.List)
+		assert isinstance(dict_obj, o.Dict)
 
 		assert list_obj == [1, 2]
 		assert dict_obj == {'x': 10}
@@ -311,7 +350,7 @@ class TestDict(o.Test):
 		del d['a']
 
 		try:
-			o.types[key_t].bind(key_i).__cast_out__()
+			o.__types_by_id__[key_t].instantiate(key_i).__cast_out__()
 			assert False
 		except (KeyError, ValueError):
 			pass

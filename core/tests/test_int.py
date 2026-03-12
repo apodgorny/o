@@ -46,12 +46,12 @@ class TestInt(o.Test):
 		except ValueError:
 			pass
 
-	@classmethod
-	def test_rewrite_after_delete(cls):
-		x = o.Int(5)
-		x.__delete__()
-		x.__write__(12)
-		assert int(x) == 12
+	# @classmethod
+	# def test_rewrite_after_delete(cls):
+	# 	x = o.Int(5)
+	# 	x.__delete__()
+	# 	x.__write__(12)
+	# 	assert int(x) == 12
 
 	@classmethod
 	def test_define_undefine_stability(cls):

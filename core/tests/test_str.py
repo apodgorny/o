@@ -187,14 +187,14 @@ class TestStr(o.Test):
 	@classmethod
 	def test_bind_reopen_by_id(cls):
 		s1 = o.Str('hello')
-		s2 = o.Str.bind(s1.__id__)
+		s2 = o.Str.instantiate(s1.__id__)
 		assert str(s2) == 'hello'
 
 	@classmethod
 	def test_commit_persistence(cls):
 		s1 = o.Str('hello')
 		o.services.Many.commit()
-		s2 = o.Str.bind(s1.__id__)
+		s2 = o.Str.instantiate(s1.__id__)
 		assert str(s2) == 'hello'
 
 	@classmethod
@@ -211,7 +211,7 @@ class TestStr(o.Test):
 		s.__delete__()
 
 		try:
-			o.Str.bind(id_)
+			o.Str.instantiate(id_)
 			assert False
 		except KeyError:
 			pass

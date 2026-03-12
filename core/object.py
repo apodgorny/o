@@ -1,196 +1,265 @@
-import operator, hashlib
-
 import o
 
 
-class Object(o.Module):
+class Object(o.Many):
+	__annotation__ = None
 
-	__cast_map__    = {}  # python_type → o_class
-	__uncast_map__  = {}  # type_id     → python_type
-	__python_type__ = None
-
-	# Register type
+	# Constructor
 	# ----------------------------------------------------------------------
-	@classmethod
-	def register(cls):
-		cls.__o_module__ = f'o.T.{cls.__name__}'
-
-		# Produce hash id from class name
-		# - - - - - - - - - - - - - - - - - - - -
-		hashed   = hashlib.sha256(cls.__o_module__.encode()).digest()
-		type_id  = int.from_bytes(hashed[:2], 'little', signed=False)
-		existing = o.types.get(type_id)
-
-		# Type does not exist
-		# - - - - - - - - - - - - - - - - - - - -
-		if existing is None:
-			o.types[type_id] = cls
-			cls.__type_id__  = type_id
-
-			# Add python_type to cast/uncast maps
-			# - - - - - - - - - - - - - - - - - - - -
-			if cls.__python_type__ is not None:
-				Object.__cast_map__[cls.__python_type__] = cls
-				Object.__uncast_map__[type_id]           = cls.__python_type__
-
-		# Type already exists
-		# - - - - - - - - - - - - - - - - - - - -
-		else:
-			if existing is not cls:
-				raise RuntimeError(f'Type `{o.types[type_id].__o_module__}` already exists.')
-
-	# Representation
-	# ----------------------------------------------------------------------
-	def __repr__(self):
-		return f'<{self.__o_module__} id={self.__id__}>'
-
-	# Get Attribute
-	# ----------------------------------------------------------------------
-
-	def __getattr__(self, name):
-		if name.startswith('__'):
-			raise AttributeError(name)
+	def __init__(self, data=o.undefined, **kwargs):
+		if kwargs:
+			data = kwargs
 			
-		base = self.__cast_out__()
+		super().__init__(data, word='QIQ')
 
-		if hasattr(base, name):
-			attr = getattr(base, name)
-
-			if callable(attr):
-				def wrapper(*args, **kwargs):
-					result = attr(*args, **kwargs)
-					self.__cast_in__(base)
-					return result
-				return wrapper
-			# TODO: Implement this with respect to refcounts
-
-			return attr
-
-		raise AttributeError(name)
+		if data == o.undefined:
+			self.__items__ = []
+			self.__index__ = {}
+			self.__refs__  = {}
+		else:
+			self.__cast_in__(data)
 
 	# ======================================================================
-	# CUSTOM FRAMEWORK METHODS
+	# CUSTOM FRAMEWORK METHODS - ITEM-WISE
 	# ======================================================================
 
-	# Increment refcount
+	# Iterate child instances
 	# ----------------------------------------------------------------------
-	def __inc_refcount__(self):
-		raise NotImplementedError
+	def __children__(self):
+		for fname in self.__class__.__fields__:
+			yield fname, getattr(self, fname)
 
-	# Decrement refcount
+	# Get value type and id by accessor
 	# ----------------------------------------------------------------------
-	def __dec_refcount__(self):
-		raise NotImplementedError
+	def __get__(self, accessor):
+		if accessor not in self.__index__:
+			raise AttributeError(accessor)
 
-	# Cast Python structure into internal container state
+		idx = self.__index__[accessor]
+		_, type_id, item_id = self.__items__[idx]
+
+		return type_id, item_id
+
+	# Set value type and id by accessor
 	# ----------------------------------------------------------------------
-	def __cast_in__(self):
-		raise NotImplementedError
+	def __set__(self, accessor, type_id, item_id, value_obj):
+		if accessor in self.__index__:
+			idx                 = self.__index__[accessor]
+			key_id, _, _        = self.__items__[idx]
+			self.__items__[idx] = (key_id, type_id, item_id)
+			key_obj = self.__refs__[accessor][0]
+		else:
+			key_obj = o.Key(accessor)
+			key_id  = key_obj.__id__
+			idx     = len(self.__items__)
+			self.__items__.append((key_id, type_id, item_id))
+			self.__index__[accessor] = idx
 
-	# Convert internal container state back into Python structure
+		self.__refs__[accessor] = (key_obj, value_obj)
+
+		self.__write__()
+
+	# Delete accessor and reindex entries
+	# ----------------------------------------------------------------------
+	def __unset__(self, accessor):
+		if accessor not in self.__index__:
+			raise AttributeError(accessor)
+
+		idx = self.__index__.pop(accessor)
+
+		key_id, _, _ = self.__items__[idx]
+		key_ref = self.__refs__.pop(accessor, None)
+		if key_ref is None:
+			raise RuntimeError(f'Missing ref for accessor `{accessor}`')
+		else:
+			key_obj = key_ref[0]
+
+		key_obj.__delete__()
+
+		self.__items__.pop(idx)
+
+		for _accessor, _idx in self.__index__.items():
+			if _idx > idx:
+				self.__index__[_accessor] = _idx - 1
+
+		self.__write__()
+
+	# ======================================================================
+	# CUSTOM FRAMEWORK METHODS - SELF-WISE
+	# ======================================================================
+
+	# Cast Python dict into node state
+	# ----------------------------------------------------------------------
+	def __cast_in__(self, data=None):
+		if not isinstance(data, dict):
+			raise TypeError('Node expects dict')
+
+		old_refs = getattr(self, '__refs__', {})
+
+		self.__items__ = []
+		self.__index__ = {}
+		self.__refs__ = {}
+
+		for accessor, value in data.items():
+			pair = old_refs.get(accessor, None)
+
+			key_obj = None
+			reuse_item = None
+			if pair is None:
+				key_obj = o.Key(accessor)
+			else:
+				key_obj, reuse_item = pair
+
+			value_obj = self.__cast_in_item__(value, reuse_item=reuse_item)
+
+			idx = len(self.__items__)
+			self.__items__.append((key_obj.__id__, value_obj.__type_id__, value_obj.__id__))
+			self.__index__[accessor] = idx
+			self.__refs__[accessor] = (key_obj, value_obj)
+
+	# Cast node state into Python dict
 	# ----------------------------------------------------------------------
 	def __cast_out__(self):
-		raise NotImplementedError
+		result = {}
 
-	# Read full container state from storage
+		for accessor, idx in self.__index__.items():
+			key_id, type_id, item_id = self.__items__[idx]
+
+			pair = self.__refs__.get(accessor, None)
+			if pair is None:
+				key_obj = o.Key.instantiate(key_id)
+				value_obj = o.__types_by_id__[type_id].instantiate(item_id)
+				self.__refs__[accessor] = (key_obj, value_obj)
+			else:
+				_, value_obj = pair
+
+			result[accessor] = self.__cast_out_item__(value_obj)
+
+		return result
+
+	# Read node state and reconcile refs
 	# ----------------------------------------------------------------------
 	def __read__(self):
-		raise NotImplementedError
+		old_items = getattr(self, '__items__', [])
+		old_index = getattr(self, '__index__', {})
+		old_refs  = getattr(self, '__refs__', {})
 
-	# Persist full container state to storage
+		old_entries = {}
+		for accessor, (key_obj, value_obj) in old_refs.items():
+			idx = old_index.get(accessor, None)
+			if idx is None or idx >= len(old_items):
+				continue
+
+			key_id, type_id, item_id = old_items[idx]
+			old_entries[key_id] = ((type_id, item_id), key_obj, value_obj)
+
+		self.__items__ = super().__read__()
+		self.__index__ = {}
+		self.__refs__  = {}
+
+		for pos, (key_id, type_id, item_id) in enumerate(self.__items__):
+			entry = old_entries.get(key_id, None)
+
+			if entry is None:
+				key_obj = o.Key.instantiate(key_id)
+				value_obj = o.__types_by_id__[type_id].instantiate(item_id)
+			else:
+				old_value_ref, key_obj, value_obj = entry
+				if old_value_ref != (type_id, item_id):
+					value_obj = o.__types_by_id__[type_id].instantiate(item_id)
+
+			accessor = key_obj.__cast_out__()
+			self.__index__[accessor] = pos
+			self.__refs__[accessor] = (key_obj, value_obj)
+
+	# Write node state to storage
 	# ----------------------------------------------------------------------
 	def __write__(self):
-		raise NotImplementedError
+		return super().__write__()
 
-	# Delete object from storage
+	# Delete node and key objects
 	# ----------------------------------------------------------------------
 	def __delete__(self):
-		raise NotImplementedError
+		for key_obj, _ in self.__refs__.values():
+			key_obj.__delete__()
+
+		self.__refs__ = {}
+
+		return super().__delete__()
+
+	# Clear node and key objects
+	# ----------------------------------------------------------------------
+	def __clear__(self):
+		for key_obj, _ in self.__refs__.values():
+			key_obj.__delete__()
+
+		self.__refs__ = {}
+
+		self.__items__ = []
+		self.__index__ = {}
+
+		super().__clear__()
 
 	# ======================================================================
-	# OPERATOR OVERRIDES
+	# PYTHON INTERFACE
 	# ======================================================================
 
-	def __binary_op__(self, op, other, reflected=False):
-		base  = self.__cast_out__()
-		other = other.__cast_out__() if isinstance(other, Object) else other
-
-		if reflected:
-			return op(other, base)
-		return op(base, other)
-
-
-	def __add__(self, other): return self.__binary_op__(operator.add, other)
-	def __radd__(self, other): return self.__binary_op__(operator.add, other, True)
-
-	def __sub__(self, other): return self.__binary_op__(operator.sub, other)
-	def __rsub__(self, other): return self.__binary_op__(operator.sub, other, True)
-
-	def __mul__(self, other): return self.__binary_op__(operator.mul, other)
-	def __rmul__(self, other): return self.__binary_op__(operator.mul, other, True)
-
-	def __truediv__(self, other): return self.__binary_op__(operator.truediv, other)
-	def __rtruediv__(self, other): return self.__binary_op__(operator.truediv, other, True)
-
-	def __floordiv__(self, other): return self.__binary_op__(operator.floordiv, other)
-	def __rfloordiv__(self, other): return self.__binary_op__(operator.floordiv, other, True)
-
-	def __mod__(self, other): return self.__binary_op__(operator.mod, other)
-	def __rmod__(self, other): return self.__binary_op__(operator.mod, other, True)
-
-	def __pow__(self, other): return self.__binary_op__(operator.pow, other)
-	def __rpow__(self, other): return self.__binary_op__(operator.pow, other, True)
-
-
-	# UNARY OPERATORS
+	# Read node field value
 	# ----------------------------------------------------------------------
+	def __getattr__(self, name):
+		o.Timer.start('o.Object.__getattr__')
+		if name.startswith('_'):
+			raise AttributeError(name)
 
-	def __neg__(self): return operator.neg(self.__cast_in__())
-	def __pos__(self): return operator.pos(self.__cast_in__())
-	def __abs__(self): return operator.abs(self.__cast_in__())
-
-
-	# COMPARISONS
+		if name in self.__index__:
+			t_object = self.__refs__[name][1]
+			value = self.__cast_out_item__(t_object)
+		else:
+			value = super().__getattr__(name)
+		
+		o.Timer.stop('o.Object.__getattr__')
+		return value
+		
+	# Set node field value
 	# ----------------------------------------------------------------------
+	def __setattr__(self, name, value):
+		o.Timer.start('o.Object.__setattr__')
+		if name.startswith('_'):
+			super().__setattr__(name, value)
+		else:
+			exists = name in self.__index__
+			reuse_item = None
+			if exists:
+				reuse_item = self.__refs__[name][1]
 
-	def __eq__(self, other): return self.__binary_op__(operator.eq, other)
-	def __ne__(self, other): return self.__binary_op__(operator.ne, other)
-	def __lt__(self, other): return self.__binary_op__(operator.lt, other)
-	def __le__(self, other): return self.__binary_op__(operator.le, other)
-	def __gt__(self, other): return self.__binary_op__(operator.gt, other)
-	def __ge__(self, other): return self.__binary_op__(operator.ge, other)
+			value = self.__cast_in_item__(value, reuse_item=reuse_item)
 
+			if exists:
+				idx = self.__index__[name]
+				_, old_t, old_i = self.__items__[idx]
+				next_ref = (value.__type_id__, value.__id__)
+				if (old_t, old_i) != next_ref:
+					self.__set__(
+						accessor  = name,
+						type_id   = value.__type_id__,
+						item_id   = value.__id__,
+						value_obj = value
+					)
+			else:
+				self.__set__(
+					accessor  = name,
+					type_id   = value.__type_id__,
+					item_id   = value.__id__,
+					value_obj = value
+				)
+		o.Timer.stop('o.Object.__setattr__')
 
-	# CONTAINER PROTOCOL
+	# Delete node field value
 	# ----------------------------------------------------------------------
+	def __delattr__(self, name):
+		if name.startswith('_'):
+			return super().__delattr__(name)
 
-	def __len__(self):
-		return len(self.__cast_out__())
+		self.__unset__(name)
 
-	def __iter__(self):
-		return iter(self.__cast_out__())
-
-	def __contains__(self, item):
-		return item in self.__cast_out__()
-
-	def __getitem__(self, key):
-		return self.__cast_out__()[key]
-
-	def __setitem__(self, key, value):
-		base = self.__cast_in__()
-		base[key] = value
-		self.__cast_out__(base)
-
-	def __delitem__(self, key):
-		base = self.__cast_in__()
-		del base[key]
-		self.__cast_out__(base)
-
-
-	# TYPE CONVERSIONS
-	# ----------------------------------------------------------------------
-
-	def __int__   (self) : return int   (self.__cast_out__())
-	def __float__ (self) : return float (self.__cast_out__())
-	def __bool__  (self) : return bool  (self.__cast_out__())
-	def __str__   (self) : return str   (self.__cast_out__())
+	

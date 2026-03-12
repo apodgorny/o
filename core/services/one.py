@@ -111,6 +111,9 @@ class One(o.Service):
 			else:
 				offset = f.seek(0, os.SEEK_END)
 				instance_id = offset // size
+		# else:
+		# 	if instance_id in free:
+		# 		raise ValueError(f'Found id {instance_id} in heap')
 
 		f.seek(size * instance_id)
 		f.write(data)
@@ -123,12 +126,22 @@ class One(o.Service):
 		size = self.words[type_id].size
 		f    = self.files[type_id]
 		free = self.free[type_id]
+		deleted = False
 
-		heapq.heappush(free, instance_id)
 		f.seek(size * instance_id)
-		f.write(b'\x00' * size)
-		self.dirty.add(type_id)
-		return True
+		raw = f.read(size)
+
+		if len(raw) != size:
+			raise IOError('Corrupted record')
+
+		if raw[0] == self.IS_ACTIVE:
+			f.seek(size * instance_id)
+			f.write(b'\x00' * size)
+			heapq.heappush(free, instance_id)
+			self.dirty.add(type_id)
+			deleted = True
+
+		return deleted
 
 	# Iterate over all records sequentially yielding id, payload and active flag
 	# ----------------------------------------------------------------------

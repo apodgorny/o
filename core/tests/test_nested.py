@@ -3,127 +3,78 @@ import o
 
 class TestNested(o.Test):
 
-	# --------------------------------------------------------------
 	@classmethod
-	def test_T_inside_T_unique(cls):
+	def test_list_contains_nested_dict_and_list(cls):
+		l = o.List([
+			1,
+			{'a': [2, 3.0, None]},
+			[True, {'x': 'y'}],
+		])
 
-		class B1(o.T):
-			x: int
+		assert l[0] == 1
 
-		class A1(o.T):
-			b: B1
+		d0 = l[1]
+		l0 = l[2]
 
-		b = B1(x=10)
-		a = A1(b=b)
+		assert isinstance(d0, o.Dict)
+		assert isinstance(l0, o.List)
 
-		assert isinstance(a.b, B1)
-		assert a.b.__class__ is B1
-		assert a.b.x == 10
+		assert isinstance(d0['a'], o.List)
+		assert d0['a'][0] == 2
+		assert d0['a'][1] == 3.0
+		assert d0['a'][2] is None
 
+		assert l0[0] == True
+		assert isinstance(l0[1], o.Dict)
+		assert l0[1]['x'] == 'y'
 
-	# --------------------------------------------------------------
 	@classmethod
-	def test_list_of_T_unique(cls):
+	def test_dict_contains_nested_list_and_dict(cls):
+		d = o.Dict({
+			'numbers': [1, 2.0, '3'],
+			'obj': {'k': 10},
+		})
 
-		class B2(o.T):
-			x: int
+		assert isinstance(d['numbers'], o.List)
+		assert isinstance(d['obj'], o.Dict)
 
-		class A2(o.T):
-			items: list[B2]
+		assert d['numbers'][0] == 1
+		assert d['numbers'][1] == 2.0
+		assert d['numbers'][2] == '3'
+		assert d['obj']['k'] == 10
 
-		b1 = B2(x=1)
-		b2 = B2(x=2)
-
-		a = A2(items=[b1, b2])
-
-		assert len(a.items) == 2
-		assert isinstance(a.items[0], B2)
-		assert isinstance(a.items[1], B2)
-		assert a.items[0].x == 1
-		assert a.items[1].x == 2
-
-
-	# --------------------------------------------------------------
 	@classmethod
-	def test_dict_of_T_unique(cls):
+	def test_deep_nesting_roundtrip(cls):
+		d1 = o.Dict({'k': [1, {'x': [2, 3]}]})
+		id_ = d1.__id__
+		d2 = o.Dict.instantiate(id_)
 
-		class B3(o.T):
-			x: int
+		assert isinstance(d2['k'], o.List)
+		assert d2['k'][0] == 1
+		assert isinstance(d2['k'][1], o.Dict)
+		assert isinstance(d2['k'][1]['x'], o.List)
+		assert d2['k'][1]['x'][0] == 2
+		assert d2['k'][1]['x'][1] == 3
 
-		class A3(o.T):
-			items: dict[str, B3]
-
-		b1 = B3(x=5)
-		b2 = B3(x=6)
-
-		a = A3(items={"a": b1, "b": b2})
-
-		assert isinstance(a.items["a"], B3)
-		assert isinstance(a.items["b"], B3)
-		assert a.items["a"].x == 5
-		assert a.items["b"].x == 6
-
-
-	# --------------------------------------------------------------
-	@classmethod
-	def test_deep_nesting_roundtrip_unique(cls):
-
-		class B4(o.T):
-			x: int
-
-		class A4(o.T):
-			items: dict[str, list[B4]]
-
-		b1 = B4(x=7)
-		b2 = B4(x=8)
-
-		a = A4(items={"k": [b1, b2]})
-
-		id_ = a.__id__
-		a2  = A4.bind(id_)
-
-		assert isinstance(a2.items["k"][0], B4)
-		assert isinstance(a2.items["k"][1], B4)
-		assert a2.items["k"][0].x == 7
-		assert a2.items["k"][1].x == 8
-
-
-	# --------------------------------------------------------------
 	@classmethod
 	def test_multiple_bind_consistency(cls):
+		d1 = o.Dict({'a': [1, 2]})
+		id_ = d1.__id__
 
-		class B5(o.T):
-			x: int
+		d2 = o.Dict.instantiate(id_)
+		d3 = o.Dict.instantiate(id_)
 
-		class A5(o.T):
-			b: B5
+		assert isinstance(d2['a'], o.List)
+		assert isinstance(d3['a'], o.List)
+		assert d2['a'][0] == 1
+		assert d3['a'][1] == 2
 
-		b = B5(x=42)
-		a = A5(b=b)
-
-		id_ = a.__id__
-
-		a2 = A5.bind(id_)
-		a3 = A5.bind(id_)
-
-		assert isinstance(a2.b, B5)
-		assert isinstance(a3.b, B5)
-		assert a2.b.x == 42
-		assert a3.b.x == 42
-
-
-	# --------------------------------------------------------------
 	@classmethod
-	def test_type_identity_stable(cls):
+	def test_type_identity_stable_for_wrappers(cls):
+		i = o.Int(99)
+		l = o.List([i])
 
-		class B6(o.T):
-			x: int
+		item_obj = l.__refs__[0]
 
-		class A6(o.T):
-			b: B6
-
-		b = B6(x=99)
-		a = A6(b=b)
-
-		assert B6.__type_id__ == b.__class__.__type_id__
-		assert a.b.__class__.__type_id__ == B6.__type_id__
+		assert i.__class__.__type_id__ == o.Int.__type_id__
+		assert item_obj.__class__.__type_id__ == o.Int.__type_id__

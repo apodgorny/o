@@ -2,12 +2,15 @@ import o
 
 
 class Str(o.Many):
-	__python_type__ = str
+	__annotation__ = str
 
 	# ------------------------------------------------------------------
 	def __init__(self, data=None):
 		data = '' if data is None else data
 		super().__init__(data, word='I')
+
+	def __hash__(self):
+		return hash(self.__cast_out__())
 
 	# ======================================================================
 	# CUSTOM FRAMEWORK METHODS - ITEM-WISE
@@ -74,7 +77,7 @@ class Str(o.Many):
 			codes = self.__items__[start:stop:step]
 
 			new_id = o.services.Many.create('I')
-			obj    = Str.bind(new_id)
+			obj    = Str.instantiate(new_id)
 
 			obj.__items__ = list(codes)
 			obj.__write__()
@@ -112,7 +115,7 @@ class Str(o.Many):
 		codes = self.__items__ + other.__items__
 
 		new_id = o.services.Many.create('I')
-		obj    = Str.bind(new_id)
+		obj    = Str.instantiate(new_id)
 
 		obj.__items__ = list(codes)
 		obj.__write__()
