@@ -65,37 +65,37 @@ class TestStr(o.Test):
 			pass
 
 	@classmethod
-	def test_slice_returns_str_object(cls):
+	def test_slice_returns_python_str(cls):
 		s = o.Str('abcdef')
 		part = s[1:4]
-		assert isinstance(part, o.Str)
-		assert str(part) == 'bcd'
+		assert isinstance(part, str)
+		assert part == 'bcd'
 
 	@classmethod
 	def test_slice_empty_when_out_of_range(cls):
 		s = o.Str('abc')
 		part = s[99:100]
-		assert isinstance(part, o.Str)
-		assert str(part) == ''
+		assert isinstance(part, str)
+		assert part == ''
 
 	@classmethod
 	def test_slice_with_step(cls):
 		s = o.Str('abcdef')
 		part = s[::2]
-		assert str(part) == 'ace'
+		assert part == 'ace'
 
 	@classmethod
 	def test_slice_negative_indices(cls):
 		s = o.Str('abcdef')
 		part = s[-4:-1]
-		assert str(part) == 'cde'
+		assert part == 'cde'
 
 	@classmethod
 	def test_add_with_python_str(cls):
 		s = o.Str('ab')
 		out = s + 'cd'
-		assert isinstance(out, o.Str)
-		assert str(out) == 'abcd'
+		assert isinstance(out, str)
+		assert out == 'abcd'
 		assert str(s) == 'ab'
 
 	@classmethod
@@ -103,8 +103,8 @@ class TestStr(o.Test):
 		a = o.Str('ab')
 		b = o.Str('cd')
 		out = a + b
-		assert isinstance(out, o.Str)
-		assert str(out) == 'abcd'
+		assert isinstance(out, str)
+		assert out == 'abcd'
 		assert str(a) == 'ab'
 		assert str(b) == 'cd'
 

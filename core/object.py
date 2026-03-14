@@ -7,17 +7,9 @@ class Object(o.Many):
 	# Constructor
 	# ----------------------------------------------------------------------
 	def __init__(self, data=o.undefined, **kwargs):
-		if kwargs:
-			data = kwargs
-			
+		if kwargs              : data = kwargs
+		if data == o.undefined : data = {}
 		super().__init__(data, word='QIQ')
-
-		if data == o.undefined:
-			self.__items__ = []
-			self.__index__ = {}
-			self.__refs__  = {}
-		else:
-			self.__cast_in__(data)
 
 	# ======================================================================
 	# CUSTOM FRAMEWORK METHODS - ITEM-WISE
@@ -180,7 +172,7 @@ class Object(o.Many):
 	# Delete node and key objects
 	# ----------------------------------------------------------------------
 	def __delete__(self):
-		for key_obj, _ in self.__refs__.values():
+		for key_obj, _ in getattr(self, '__refs__', {}).values():
 			key_obj.__delete__()
 
 		self.__refs__ = {}
@@ -190,7 +182,7 @@ class Object(o.Many):
 	# Clear node and key objects
 	# ----------------------------------------------------------------------
 	def __clear__(self):
-		for key_obj, _ in self.__refs__.values():
+		for key_obj, _ in getattr(self, '__refs__', {}).values():
 			key_obj.__delete__()
 
 		self.__refs__ = {}

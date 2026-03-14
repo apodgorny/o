@@ -19,8 +19,6 @@ class TestPythonDelegation(o.Test):
 
 		l.sort()
 
-		print(l)
-
 		assert l[0] == 1
 		assert l[1] == 2
 		assert l[2] == 3

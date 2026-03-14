@@ -110,7 +110,7 @@ class TMeta(type(o.Module)):
 	# Create new type
 	# ----------------------------------------------------------------------
 	def __new__(mcls, name, bases, namespace, **kwargs):
-		o.Timer.start('o.T.__init_subclass__')
+		o.Timer.start('o.TMeta.__new__')
 
 		# Accept second baseclass (annotation)
 		# Enable cool things like: class Users(o.T, list[o.User]): pass
@@ -165,7 +165,7 @@ class TMeta(type(o.Module)):
 		if not cls.__has_own_module__:
 			o.services.Definition.define(cls)
 
-		o.Timer.stop('o.T.__init_subclass__')
+		o.Timer.stop('o.TMeta.__new__')
 		return cls
 
 

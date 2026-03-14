@@ -177,7 +177,7 @@ class Dict(o.Many):
 	# Delete dict and key objects
 	# ----------------------------------------------------------------------
 	def __delete__(self):
-		for key_obj, _ in self.__refs__.values():
+		for key_obj, _ in getattr(self, '__refs__', {}).values():
 			key_obj.__delete__()
 
 		self.__refs__ = {}
@@ -187,7 +187,7 @@ class Dict(o.Many):
 	# Clear dict and key objects
 	# ----------------------------------------------------------------------
 	def __clear__(self):
-		for key_obj, _ in self.__refs__.values():
+		for key_obj, _ in getattr(self, '__refs__', {}).values():
 			key_obj.__delete__()
 
 		self.__refs__ = {}

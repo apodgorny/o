@@ -75,14 +75,7 @@ class Str(o.Many):
 		if isinstance(index, slice):
 			start, stop, step = index.indices(len(self))
 			codes = self.__items__[start:stop:step]
-
-			new_id = o.services.Many.create('I')
-			obj    = Str.instantiate(new_id)
-
-			obj.__items__ = list(codes)
-			obj.__write__()
-
-			return obj
+			return ''.join(chr(code[0]) for code in codes)
 
 		return chr(self.__get__(index))
 
@@ -112,12 +105,4 @@ class Str(o.Many):
 		if not isinstance(other, Str):
 			return NotImplemented
 
-		codes = self.__items__ + other.__items__
-
-		new_id = o.services.Many.create('I')
-		obj    = Str.instantiate(new_id)
-
-		obj.__items__ = list(codes)
-		obj.__write__()
-
-		return obj
+		return self.__cast_out__() + other.__cast_out__()

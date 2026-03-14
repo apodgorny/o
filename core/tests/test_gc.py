@@ -45,19 +45,17 @@ class TestGc(o.Test):
 
 		a = o.Int(1)
 		instance_id = a.__id__
-		type_id = o.Int.__type_id__
-		before_count = o.services.One.free[type_id].count(instance_id)
-
 		b = o.Int.instantiate(instance_id)
+		assert b is a
 
 		del a
 		gc.collect()
 
+		assert cls._read_int(instance_id) == 1
+
 		del b
 		gc.collect()
 
-		after_count = o.services.One.free[type_id].count(instance_id)
-		assert after_count == before_count + 1
 		cls._assert_inactive_int(instance_id)
 
 	@classmethod
@@ -100,15 +98,12 @@ class TestGc(o.Test):
 		container_id = l1.__id__
 
 		l2 = o.List.instantiate(container_id)
+		assert l2 is l1
 
 		del l1
 		gc.collect()
 
-		try:
-			l2.__cast_out__()
-			assert False
-		except ValueError:
-			pass
+		assert l2.__cast_out__() == [1, 2, 3]
 
 	@classmethod
 	def test_free_heap_has_no_duplicates(cls):

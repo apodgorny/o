@@ -44,19 +44,22 @@ class Many(o.Service):
 	# Delete container file and remove internal references
 	# ----------------------------------------------------------------------
 	def delete(self, id):
-		f = self.files.get(id, None)
+		f       = self.files.get(id, None)
+		path    = os.path.join(self.dir.path, str(id))
+		existed = False
 
 		if f is not None:
 			f.close()
 			del self.files[id]
 			del self.words[id]
+			existed = True
 
-		path = os.path.join(self.dir.path, str(id))
 		if os.path.exists(path):
 			os.remove(path)
+			existed = True
 
 		self.dirty.discard(id)
-		return True
+		return existed
 
 	# Read entire container file and unpack sequential records
 	# ----------------------------------------------------------------------
