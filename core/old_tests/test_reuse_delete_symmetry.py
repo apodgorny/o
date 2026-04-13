@@ -69,9 +69,9 @@ class TestReuseDeleteSymmetry(o.Test):
 
 		x = User1({'age': 10})
 
-		before = x.__refs__['age'][1].__id__
+		before = x.__dict__['_attributes']['age']
 		x.age = 20
-		after = x.__refs__['age'][1].__id__
+		after = x.__dict__['_attributes']['age']
 
 		assert before == after
 		assert x.age == 20
@@ -84,15 +84,15 @@ class TestReuseDeleteSymmetry(o.Test):
 
 		x = User2({'value': 10})
 
-		before_type = x.__refs__['value'][1].__class__
-		before_id   = x.__refs__['value'][1].__id__
+		before_id = x.__dict__['_attributes']['value']
+		before_module, _, _, _, _, _, _ = o.services.Store.read(before_id)
 
 		x.value = 'abc'
 
-		after_type = x.__refs__['value'][1].__class__
-		after_id   = x.__refs__['value'][1].__id__
+		after_id = x.__dict__['_attributes']['value']
+		after_module, _, _, _, _, _, _ = o.services.Store.read(after_id)
 
-		assert before_type is not after_type
+		assert before_module != after_module
 		assert before_id != after_id
 		assert x.value == 'abc'
 
@@ -131,13 +131,11 @@ class TestReuseDeleteSymmetry(o.Test):
 
 		x = User3({'name': 'alex', 'age': 10})
 
-		assert 'age' in x.__index__
-		assert 'age' in x.__refs__
+		assert 'age' in x.__dict__['_attributes']
 
 		del x.age
 
-		assert 'age' not in x.__index__
-		assert 'age' not in x.__refs__
+		assert 'age' not in x.__dict__['_attributes']
 		assert x.name == 'alex'
 
 	# ----------------------------------------------------------------------
@@ -184,9 +182,7 @@ class TestReuseDeleteSymmetry(o.Test):
 
 		x.__clear__()
 
-		assert len(x.__items__) == 0
-		assert len(x.__index__) == 0
-		assert len(x.__refs__) == 0
+		assert len(x.__dict__['_attributes']) == 0
 		assert x.__cast_out__() == {}
 
 

@@ -67,7 +67,7 @@ class One(o.T):
 		id = o.services.One.write(type_id, id, data)
 
 		if is_new:
-			o.__instances__[(type_id, id)] = self
+			o.__instances_by_id__[(type_id, id)] = self
 
 		if is_new and is_custom_type:
 			o.services.Definition.inc_count(type_id)
@@ -95,7 +95,7 @@ class One(o.T):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def instantiate(cls, id):
-		obj = o.__instances__.get((cls.__type_id__, id))
+		obj = o.__instances_by_id__.get((cls.__type_id__, id))
 		if obj is not None and obj.__dict__.get('__id__', None) == id:
 			return obj
 

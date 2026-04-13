@@ -108,7 +108,7 @@ class Many(o.T):
 		o.services.Many.write(id, self.__items__)
 
 		if is_new:
-			o.__instances__[(self.__type_id__, id)] = self
+			o.__instances_by_id__[(self.__type_id__, id)] = self
 
 		if is_new and is_custom_type:
 			o.services.Definition.inc_count(self.__type_id__)
@@ -160,7 +160,7 @@ class Many(o.T):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def instantiate(cls, id):
-		obj = o.__instances__.get((cls.__type_id__, id))
+		obj = o.__instances_by_id__.get((cls.__type_id__, id))
 		if obj is not None and obj.__dict__.get('__id__', None) == id:
 			return obj
 

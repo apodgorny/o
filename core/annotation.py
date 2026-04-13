@@ -4,6 +4,24 @@ import typing as t
 
 import o
 
+def normalize(annotation):
+	origin = t.get_origin(annotation)
+	args   = t.get_args(annotation)
+	value  = annotation
+
+	if origin in (types.UnionType, t.Union):
+		parts = tuple(normalize(arg) for arg in args)
+		value = parts[0]
+
+		for part in parts[1:]:
+			value = value | part
+
+	elif origin is not None:
+		parts = tuple(normalize(arg) for arg in args)
+		value = origin[parts]
+
+	return value
+
 
 class Annotation(o.Module):
 
@@ -12,30 +30,54 @@ class Annotation(o.Module):
 
 		if isinstance(annotation, Annotation):
 			annotation = annotation.annotation
+		elif isinstance(annotation, str):
+			annotation = eval(annotation)
+
+		annotation = normalize(annotation)
+		origin     = t.get_origin(annotation) or annotation
 
 		self.annotation      = annotation
-		self.origin          = t.get_origin(annotation) or annotation
+		self.origin          = origin
+		self.args            = t.get_args(annotation)
 		self.is_none         = annotation in (None, type(None))
 		self.options         = self._get_options()
 		self.is_module       = isinstance(annotation, o.Module)
 		self.is_union        = bool(self.options)
 		self.is_optional     = any(option.is_none for option in self.options)
-		self.is_list         = self.origin is list
-		self.is_dict         = self.origin is dict
-		self.is_set          = self.origin is set
-		self.is_tuple        = self.origin is tuple
-		self.is_atomic       = self.origin not in (list, dict, set, tuple)
+		self.is_list         = origin is list
+		self.is_dict         = origin is dict
+		self.is_set          = origin is set
+		self.is_tuple        = origin is tuple
+		self.is_bool         = origin is bool
+		self.is_atomic       = origin not in (list, dict, set, tuple)
+		self.is_simple       = not self.args and not self.is_union
 		self.key, self.value = self._get_key_value()
 		self.is_homogenous   = self._get_is_homogenous()
 		self.id              = self._get_id()
 
 		self._validate()
 
+	# Returns 'list[dict[str,int]]' - like string
 	# ----------------------------------------------------------------------
+	def __str__(self):
+		text = None
 
-	def __repr__ (self): return self.id
-	def __str__  (self): return self.id
-	def __hash__ (self): return hash(self.id)
+		if self.is_none:
+			text = 'None'
+		elif self.is_union:
+			text = '|'.join(sorted(str(option) for option in self.options))
+		elif self.args:
+			args = ','.join(str(o.Annotation(arg)) for arg in self.args)
+			text = f'{self.origin.__name__}[{args}]'
+		elif hasattr(self.annotation, '__name__'):
+			text = self.annotation.__name__
+		else:
+			text = str(self.annotation)
+
+		return text
+
+	def __repr__ (self): return str(self)
+	def __hash__ (self): return o.String.hash(self.id, 15)
 	def __eq__   (self, other):
 		return self.id == other.id if isinstance(other, Annotation) else False
 
@@ -152,6 +194,15 @@ class Annotation(o.Module):
 	# PUBLIC METHODS
 	# ======================================================================
 
+	@classmethod
+	@classmethod
+	def is_annotation(cls, notation):
+		return (
+			isinstance(notation, type) or
+			isinstance(notation, types.GenericAlias) or
+			isinstance(notation, types.UnionType)
+		)
+
 	# Derive value annotation
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -224,6 +275,14 @@ class Annotation(o.Module):
 				result = {}
 				for k, v in value.items():
 					result[self.key.cast(k)] = self.value.cast(v)
+
+		elif self.is_bool:
+			if value in (True, 'True', 1, '1'):
+				result = True
+			elif value in (False, 'False', 0, '0'):
+				result = False
+			else:
+				raise TypeError(f'Expected `bool`, got `{value}`')
 
 		else:
 			if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):

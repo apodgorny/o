@@ -1,8 +1,15 @@
 import o
 
 
-class Float(o.One):
+class Float(o.Atom):
 	__annotation__ = float
 
-	def __init__(self, value=None):
-		super().__init__(value, word='d')
+	# Cast atomic bytes out
+	# ----------------------------------------------------------------------
+	def __cast_out__(self, value):
+		return float(value.decode('utf-8'))
+
+	# Cast atomic value into bytes
+	# ----------------------------------------------------------------------
+	def __cast_in__(self, value):
+		return str(value).encode('utf-8')

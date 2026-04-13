@@ -51,13 +51,16 @@ class TestRuntimeTypesInContainers(o.Test):
 
 		assert x.age == 33
 		assert x.name == 'alex'
-		assert isinstance(x.__refs__['age'][1], Age)
+		age_id = x.__dict__['_attributes']['age']
+		age_module, _, _, _, _, _, _ = o.services.Store.read(age_id)
+		assert age_module == Age.__o_module__
 
-		y = User.instantiate(x.__id__)
+		y = User.__load__(x.__id__)
 
 		assert y.age == 33
 		assert y.name == 'alex'
-		assert isinstance(y.__refs__['age'][1], Age)
+		assert y.__cast_out__() == {'age': 33, 'name': 'alex'}
+		assert set(y.__dict__['_attributes'].keys()) == {'age', 'name'}
 
 	# ----------------------------------------------------------------------
 	@classmethod

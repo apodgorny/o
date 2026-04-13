@@ -1,4 +1,4 @@
-import hashlib
+import time
 
 import o
 
@@ -29,7 +29,7 @@ class TestPerformance(o.Test):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def trigger_dict_getitem(cls, n):
-		x = o.Dict({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
+		x    = o.Dict({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
 		keys = ['a', 'b', 'c', 'd', 'e']
 
 		for i in range(n):
@@ -40,7 +40,7 @@ class TestPerformance(o.Test):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def trigger_dict_setitem(cls, n):
-		x = o.Dict({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
+		x    = o.Dict({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
 		keys = ['a', 'b', 'c', 'd', 'e']
 
 		for i in range(n):
@@ -50,13 +50,9 @@ class TestPerformance(o.Test):
 	# Trigger object getattr and setattr
 	# ----------------------------------------------------------------------
 	@classmethod
-	def trigger_object_attr(cls, n):
-
-		class APerfAttr(o.T):
-			x: int
-			y: int
-
-		x = APerfAttr(x=1, y=2)
+	def trigger_object_attr(cls, n, root_cls):
+		APerfAttr = root_cls.extend('APerfAttr', x=int, y=int)
+		x         = APerfAttr(x=1, y=2)
 
 		for i in range(n):
 			x.x
@@ -67,36 +63,28 @@ class TestPerformance(o.Test):
 	# Trigger define
 	# ----------------------------------------------------------------------
 	@classmethod
-	def trigger_define(cls, n):
-		defined = 0
-		i       = 0
-
-		while defined < n:
+	def trigger_define(cls, n, root_cls):
+		for i in range(n):
 			type_name = f'APerfDefine{i}'
-			o_module  = f'o.{type_name}'
-			type_id   = int.from_bytes(hashlib.sha256(o_module.encode()).digest()[:2], 'little', signed=False)
+			attempt   = 0
 
-			# Skip hash-occupied ids to avoid false "already exists" collisions.
-			if type_id in o.__types_by_id__:
-				i += 1
-				continue
+			while hasattr(root_cls, type_name):
+				attempt  += 1
+				type_name = f'APerfDefine{i}_{attempt}'
 
-			type(
-				type_name,
-				(o.T,),
-				{'__annotations__': {'x': int, 'y': int}},
-			)
-			defined += 1
-			i += 1
+			root_cls.extend(type_name, x=int, y=int)
 
 	# Performance test
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_performance(cls):
-		n_attr    = 100_000
-		n_list    = 100_000
-		n_dict    = 100_000
-		n_define  = 10_000
+		n_attr   = 10_000
+		n_list   = 10_000
+		n_dict   = 10_000
+		n_define = 10_000
+		run_id   = time.time_ns()
+		root_name = f'APerfRun{run_id}'
+		PerfRoot  = o.T.extend(root_name)
 
 		o.Timer.reset()
 
@@ -104,8 +92,8 @@ class TestPerformance(o.Test):
 		cls.trigger_list_setitem(n_list)
 		cls.trigger_dict_getitem(n_dict)
 		cls.trigger_dict_setitem(n_dict)
-		cls.trigger_object_attr(n_attr)
-		cls.trigger_define(n_define)
+		cls.trigger_object_attr(n_attr, PerfRoot)
+		cls.trigger_define(n_define, PerfRoot)
 
 		print()
 		print(f'n_list   = {n_list}')

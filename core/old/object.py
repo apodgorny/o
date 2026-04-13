@@ -114,16 +114,12 @@ class Object(o.Many):
 	def __cast_out__(self):
 		result = {}
 
-		for accessor, idx in self.__index__.items():
-			key_id, type_id, item_id = self.__items__[idx]
-
+		for accessor in self.__index__:
 			pair = self.__refs__.get(accessor, None)
 			if pair is None:
-				key_obj = o.Key.instantiate(key_id)
-				value_obj = o.__types_by_id__[type_id].instantiate(item_id)
-				self.__refs__[accessor] = (key_obj, value_obj)
-			else:
-				_, value_obj = pair
+				raise RuntimeError(f'Incomplete refs for accessor `{accessor}`')
+
+			_, value_obj = pair
 
 			result[accessor] = self.__cast_out_item__(value_obj)
 
@@ -136,14 +132,15 @@ class Object(o.Many):
 		old_index = getattr(self, '__index__', {})
 		old_refs  = getattr(self, '__refs__', {})
 
-		old_entries = {}
+		old_entries   = {}
+		old_items_len = len(old_items)
+
 		for accessor, (key_obj, value_obj) in old_refs.items():
 			idx = old_index.get(accessor, None)
-			if idx is None or idx >= len(old_items):
-				continue
 
-			key_id, type_id, item_id = old_items[idx]
-			old_entries[key_id] = ((type_id, item_id), key_obj, value_obj)
+			if idx is not None and idx < old_items_len:
+				key_id, type_id, item_id = old_items[idx]
+				old_entries[key_id] = ((type_id, item_id), key_obj, value_obj)
 
 		self.__items__ = super().__read__()
 		self.__index__ = {}
@@ -153,16 +150,17 @@ class Object(o.Many):
 			entry = old_entries.get(key_id, None)
 
 			if entry is None:
-				key_obj = o.Key.instantiate(key_id)
+				key_obj   = o.Key.instantiate(key_id)
 				value_obj = o.__types_by_id__[type_id].instantiate(item_id)
 			else:
 				old_value_ref, key_obj, value_obj = entry
+
 				if old_value_ref != (type_id, item_id):
 					value_obj = o.__types_by_id__[type_id].instantiate(item_id)
 
 			accessor = key_obj.__cast_out__()
 			self.__index__[accessor] = pos
-			self.__refs__[accessor] = (key_obj, value_obj)
+			self.__refs__[accessor]  = (key_obj, value_obj)
 
 	# Write node state to storage
 	# ----------------------------------------------------------------------
