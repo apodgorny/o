@@ -7,11 +7,7 @@ class List(o.T):
 	# Initialize list
 	# ----------------------------------------------------------------------
 	def __init__(self, value):
-		ids = []
-
-		for item in value:
-			child = o.T(item)
-			ids.append(child.id)
+		ids = [o.T(item).id for item in value]
 
 		self.__disk_instance__.list.items = ids
 
@@ -20,11 +16,11 @@ class List(o.T):
 	def __getitem__(self, index):
 		o.Timer.start('o.List.__getitem__')
 
-		id    = self.__disk_instance__.list.get(index)
-		value = o.get(id)
+		child = o.get(self.__disk_instance__.list.get(index))
+		value = child
 
-		if isinstance(value, o.Atom):
-			value = value.__value__
+		if isinstance(child, o.Atom):
+			value = child.__value__
 
 		o.Timer.stop('o.List.__getitem__')
 
@@ -35,19 +31,16 @@ class List(o.T):
 	def __setitem__(self, index, value):
 		o.Timer.start('o.List.__setitem__')
 
-		value_instance = o.T(value)
-		self.__disk_instance__.list.set(index, value_instance.id)
+		child = o.T(value)
+
+		self.__disk_instance__.list.set(index, child.id)
 
 		o.Timer.stop('o.List.__setitem__')
 
 	# Delete list item
 	# ----------------------------------------------------------------------
 	def __delitem__(self, index):
-		items = self.__disk_instance__.list.items
-
-		del items[index]
-
-		self.__disk_instance__.list.items = items
+		self.__disk_instance__.list.delete(index)
 
 	# Get list length
 	# ----------------------------------------------------------------------
@@ -63,9 +56,9 @@ class List(o.T):
 	# Append list item
 	# ----------------------------------------------------------------------
 	def append(self, value):
-		items          = self.__disk_instance__.list.items
-		value_instance = o.T(value)
+		child = o.T(value)
+		ids   = list(self.__disk_instance__.list.items)
 
-		items.append(value_instance.id)
+		ids.append(child.id)
 
-		self.__disk_instance__.list.items = items
+		self.__disk_instance__.list.items = ids

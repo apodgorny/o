@@ -43,8 +43,8 @@ class Class(o.disk.Entity):
 
 	# Constructor
 	# ----------------------------------------------------------------------
-	def __init__(self, path):
-		super().__init__(path)
+	def __init__(self, path, id=o.undefined):
+		super().__init__(path, id=id)
 
 		os.makedirs(self.path, exist_ok=True)
 

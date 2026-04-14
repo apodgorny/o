@@ -57,4 +57,3 @@ if __name__ == '__main__':
 	test_count, method_count = o.Test.run()
 	print(f'\n ✅ All {test_count} tests passed ({method_count} methods ran)')
 	print()
-	o.Timer.report()

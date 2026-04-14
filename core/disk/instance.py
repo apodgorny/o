@@ -40,9 +40,8 @@ class Instance(o.disk.Entity):
 
 	# Constructor
 	# ----------------------------------------------------------------------
-	def __init__(self, path, annotation=o.undefined):
-		super().__init__(path)
-		os.makedirs(self.path, exist_ok=True)
+	def __init__(self, path, annotation=o.undefined, id=o.undefined):
+		super().__init__(path, id=id)
 
 		self.annotation = o.Annotation(annotation)
 		self.attributes = o.disk.Attributes(self.path)

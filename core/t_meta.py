@@ -32,10 +32,12 @@ class TMeta(type(o.Module)):
 		proto      = f'{base_proto}.{name}'
 		disk_class = o.disk.Class(proto)
 		o_module   = disk_class.o_module
+		module_name = namespace.get('__module__')
+		is_current_source_load = o_module == module_name
 
 		# Class does not have __o_module__ on disk
 		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		if o_module is o.undefined:
+		if o_module is o.undefined or is_current_source_load:
 			fields, namespace = mcls.__define__(namespace)
 
 			cls = super().__new__(mcls, name, bases, namespace)

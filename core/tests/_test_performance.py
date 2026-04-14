@@ -1,4 +1,5 @@
 import time
+from tqdm import tqdm
 
 import o
 
@@ -11,7 +12,7 @@ class TestPerformance(o.Test):
 	def trigger_list_getitem(cls, n):
 		x = o.List([1, 2, 3, 4, 5])
 
-		for i in range(n):
+		for i in tqdm(range(n), desc='list_getitem'):
 			k = i % 5
 			x[k]
 
@@ -21,7 +22,7 @@ class TestPerformance(o.Test):
 	def trigger_list_setitem(cls, n):
 		x = o.List([1, 2, 3, 4, 5])
 
-		for i in range(n):
+		for i in tqdm(range(n), desc='list_setitem'):
 			k    = i % 5
 			x[k] = i
 
@@ -32,7 +33,7 @@ class TestPerformance(o.Test):
 		x    = o.Dict({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
 		keys = ['a', 'b', 'c', 'd', 'e']
 
-		for i in range(n):
+		for i in tqdm(range(n), desc='dict_getitem'):
 			k = keys[i % 5]
 			x[k]
 
@@ -43,7 +44,7 @@ class TestPerformance(o.Test):
 		x    = o.Dict({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
 		keys = ['a', 'b', 'c', 'd', 'e']
 
-		for i in range(n):
+		for i in tqdm(range(n), desc='dict_setitem'):
 			k    = keys[i % 5]
 			x[k] = i
 
@@ -54,7 +55,7 @@ class TestPerformance(o.Test):
 		APerfAttr = root_cls.extend('APerfAttr', x=int, y=int)
 		x         = APerfAttr(x=1, y=2)
 
-		for i in range(n):
+		for i in tqdm(range(n), desc='object_attr'):
 			x.x
 			x.y
 			x.x = i
@@ -64,7 +65,7 @@ class TestPerformance(o.Test):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def trigger_define(cls, n, root_cls):
-		for i in range(n):
+		for i in tqdm(range(n), desc='define'):
 			type_name = f'APerfDefine{i}'
 			attempt   = 0
 
@@ -78,10 +79,10 @@ class TestPerformance(o.Test):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_performance(cls):
-		n_attr   = 10_000
-		n_list   = 10_000
-		n_dict   = 10_000
-		n_define = 10_000
+		n_attr   = 2_000
+		n_list   = 2_000
+		n_dict   = 2_000
+		n_define = 2_000
 		run_id   = time.time_ns()
 		root_name = f'APerfRun{run_id}'
 		PerfRoot  = o.T.extend(root_name)
@@ -101,3 +102,9 @@ class TestPerformance(o.Test):
 		print(f'n_attr   = {n_attr}')
 		print(f'n_define = {n_define}')
 		print()
+
+		o.Timer.report()
+
+
+if __name__ == '__main__':
+	TestPerformance.test_performance()

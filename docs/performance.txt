@@ -61,3 +61,180 @@ o.Dict.__getitem__   : 1.95x slower
 o.Dict.__setitem__   : 17.10x slower
 o.TMeta.__new__      : 3.30x slower
 o.Object.__setattr__ : 18.49x slower
+
+----------------------------------------------------------------------
+GC Implementaton
+
+Latest change preserved or slightly improved read performance, but made writes dramatically more expensive:
+List.__setitem__ became 7.05x slower, Dict.__setitem__ 5.34x slower, Object.__setattr__ 4.91x slower.
+This indicates the new overhead is concentrated in mutation/commit path, while read path remains healthy.
+
+o.T.__new__          : 7.268s    ≈ 8038 x 904.190µs ( 464.875µs - 52.809ms)
+o.List.__getitem__   : 69.413ms  ≈ 2000 x 34.707µs  ( 32.625µs  - 129.375µs)
+o.List.__setitem__   : 10.408s   ≈ 2000 x 5.204ms   ( 4.516ms   - 19.123ms)
+o.Dict.__getitem__   : 201.682ms ≈ 2000 x 100.841µs ( 95.542µs  - 195.167µs)
+o.Dict.__setitem__   : 10.970s   ≈ 2000 x 5.485ms   ( 4.780ms   - 58.608ms)
+o.TMeta.__new__      : 3.668s    ≈ 2001 x 1.833ms   ( 1.243ms   - 33.929ms)
+o.Object.__setattr__ : 22.455s   ≈ 4004 x 5.608ms   ( 1.365ms   - 58.945ms)
+
+o.T.__new__          : 735.831 → 904.190 µs  = 1.23x slower
+o.List.__getitem__   : 37.211 → 34.707 µs    = 1.07x faster
+o.List.__setitem__   : 738.020 µs → 5.204 ms = 7.05x slower
+o.Dict.__getitem__   : 115.256 → 100.841 µs  = 1.14x faster
+o.Dict.__setitem__   : 1.027 → 5.485 ms      = 5.34x slower
+o.TMeta.__new__      : 1.754 → 1.833 ms      = 1.05x slower
+o.Object.__setattr__ : 1.141 → 5.608 ms      = 4.91x slower
+
+
+----------------------------------------------------------------------
+GC -> binary format
+
+Binary refcount / compatible GC path materially improved the mutation and birth paths: writes became about 1.9–2.0x faster, T.__new__ 1.8x faster, TMeta.__new__ 1.21x faster, while read paths stayed essentially flat.
+
+o.T.__new__          : 4.400s    ≈ 8038 x 547.403µs ( 428.458µs - 4.828ms)
+o.List.__getitem__   : 70.944ms  ≈ 2000 x 35.472µs  ( 32.833µs  - 155.042µs)
+o.List.__setitem__   : 5.325s    ≈ 2000 x 2.663ms   ( 2.150ms   - 8.998ms)
+o.Dict.__getitem__   : 207.547ms ≈ 2000 x 103.773µs ( 96.000µs  - 217.708µs)
+o.Dict.__setitem__   : 5.658s    ≈ 2000 x 2.829ms   ( 2.387ms   - 22.878ms)
+o.TMeta.__new__      : 2.869s    ≈ 2001 x 1.434ms   ( 1.227ms   - 6.956ms)
+o.Object.__setattr__ : 11.337s   ≈ 4004 x 2.831ms   ( 919.666µs - 11.802ms)
+
+o.T.__new__          : 985.140 → 547.403 µs  = 1.80x faster
+o.List.__getitem__   : 35.698 → 35.472 µs    = 1.01x faster
+o.List.__setitem__   : 5.243 → 2.663 ms      = 1.97x faster
+o.Dict.__getitem__   : 102.213 → 103.773 µs  = 1.02x slower
+o.Dict.__setitem__   : 5.531 → 2.829 ms      = 1.96x faster
+o.TMeta.__new__      : 1.739 → 1.434 ms      = 1.21x faster
+o.Object.__setattr__ : 5.378 → 2.831 ms      = 1.90x faster
+
+----------------------------------------------------------------------
+Attributes are written as one file
+
+o.T.__new__          : 4.701s    ≈ 8038 x 584.802µs ( 462.500µs - 3.151ms)
+o.List.__getitem__   : 69.665ms  ≈ 2000 x 34.832µs  ( 32.499µs  - 125.292µs)
+o.List.__setitem__   : 5.343s    ≈ 2000 x 2.672ms   ( 2.177ms   - 35.522ms)
+o.Dict.__getitem__   : 199.749ms ≈ 2000 x 99.875µs  ( 95.708µs  - 239.833µs)
+o.Dict.__setitem__   : 5.517s    ≈ 2000 x 2.758ms   ( 2.378ms   - 11.207ms)
+o.TMeta.__new__      : 2.860s    ≈ 2001 x 1.429ms   ( 1.224ms   - 17.903ms)
+o.Object.__setattr__ : 11.151s   ≈ 4004 x 2.785ms   ( 855.917µs - 9.986ms)
+Compared to previous run:
+
+o.T.__new__          : 547.403 → 584.802 µs  = 1.07x slower
+o.List.__getitem__   : 35.472 → 34.832 µs    = 1.02x faster
+o.List.__setitem__   : 2.663 → 2.672 ms      = 1.00x slower
+o.Dict.__getitem__   : 103.773 → 99.875 µs   = 1.04x faster
+o.Dict.__setitem__   : 2.829 → 2.758 ms      = 1.03x faster
+o.TMeta.__new__      : 1.434 → 1.429 ms      = 1.00x faster
+o.Object.__setattr__ : 2.831 → 2.785 ms      = 1.02x faster
+
+Новая упаковка attrs почти не изменила профиль, но дала маленькое улучшение на Dict.__getitem__, Dict.__setitem__ и Object.__setattr__; общий write-path остался примерно на уровне ~2.7–2.8 ms, read-path — здоровый.
+
+----------------------------------------------------------------------
+GC refcount -> to one bin file
+
+We optimized the write hot path while preserving Simultaneity and the folder-based disk substrate.
+
+Changes:
+1. Consolidated instance attributes from many small files into one packed binary representation.
+2. Replaced per-entity text refcount files with a centralized binary refcount table.
+3. Updated tests to validate behavior through public APIs rather than old physical file layout assumptions.
+
+Result:
+- write-path improved materially
+- Object.__setattr__ dropped to ~2.45 ms
+- List.__setitem__ dropped to ~2.34 ms
+- Dict.__setitem__ dropped to ~2.46 ms
+- read-path stayed roughly flat
+- type/birth path stayed roughly flat
+- all tests are green
+
+o.T.__new__          : 4.796s    ≈ 8038 x 596.688µs ( 475.124µs - 34.564ms)
+o.List.__getitem__   : 70.771ms  ≈ 2000 x 35.386µs  ( 32.458µs  - 130.875µs)
+o.List.__setitem__   : 4.677s    ≈ 2000 x 2.339ms   ( 1.923ms   - 36.438ms)
+o.Dict.__getitem__   : 201.593ms ≈ 2000 x 100.797µs ( 95.459µs  - 213.042µs)
+o.Dict.__setitem__   : 4.923s    ≈ 2000 x 2.461ms   ( 2.139ms   - 47.257ms)
+o.TMeta.__new__      : 2.891s    ≈ 2001 x 1.445ms   ( 1.233ms   - 18.506ms)
+o.Object.__setattr__ : 9.825s    ≈ 4004 x 2.454ms   ( 732.917µs - 6.964ms)
+
+----------------------------------------------------------------------
+Real win. Append only attributes.
+
+o.T.__new__          : 4.119s    ≈ 8038 x 512.431µs ( 428.501µs - 4.359ms)
+o.List.__getitem__   : 71.197ms  ≈ 2000 x 35.598µs  ( 32.750µs  - 116.083µs)
+o.List.__setitem__   : 4.334s    ≈ 2000 x 2.167ms   ( 1.824ms   - 5.425ms)
+o.Dict.__getitem__   : 203.004ms ≈ 2000 x 101.502µs ( 95.665µs  - 1.343ms)
+o.Dict.__setitem__   : 4.568s    ≈ 2000 x 2.284ms   ( 1.939ms   - 4.329ms)
+o.TMeta.__new__      : 2.911s    ≈ 2001 x 1.455ms   ( 1.228ms   - 29.310ms)
+o.Object.__setattr__ : 8.673s    ≈ 4004 x 2.166ms   ( 713.042µs - 50.011ms)
+
+Append-optimized instance index improved the birth and mutation paths again: T.__new__ became 1.16x faster, Object.__setattr__ 1.13x faster, and list/dict writes about 1.08x faster, while read paths stayed flat.
+
+----------------------------------------------------------------------
+Registry to bin
+
+Схлопывание Registry из леса симлинков в единый бинарный индекс дало заметное системное ускорение почти по всем путям: birth-path стал быстрее на ~33%, Object.__setattr__ на ~46%, list/dict write-path на ~37–41%, а даже read-path ускорился примерно на ~30–33%. Это означает, что Registry действительно был крупным источником filesystem-трения не только при рождении сущностей, но и вообще на путях резолва и мутаций.
+
+o.T.__new__          : 3.106s    ≈ 8038 x 386.423µs ( 314.625µs - 4.538ms)
+o.List.__getitem__   : 54.759ms  ≈ 2000 x 27.379µs  ( 24.792µs  - 150.958µs)
+o.List.__setitem__   : 3.076s    ≈ 2000 x 1.538ms   ( 1.309ms   - 2.173ms)
+o.Dict.__getitem__   : 152.881ms ≈ 2000 x 76.440µs  ( 72.708µs  - 168.792µs)
+o.Dict.__setitem__   : 3.332s    ≈ 2000 x 1.666ms   ( 1.391ms   - 7.743ms)
+o.TMeta.__new__      : 2.383s    ≈ 2001 x 1.191ms   ( 939.292µs - 27.499ms)
+o.Object.__setattr__ : 5.933s    ≈ 4004 x 1.482ms   ( 532.208µs - 5.041ms)
+
+Compared to previous run:
+
+o.T.__new__          : 512.431 → 386.423 µs  = 1.33x faster
+o.List.__getitem__   : 35.598 → 27.379 µs    = 1.30x faster
+o.List.__setitem__   : 2.167 → 1.538 ms      = 1.41x faster
+o.Dict.__getitem__   : 101.502 → 76.440 µs   = 1.33x faster
+o.Dict.__setitem__   : 2.284 → 1.666 ms      = 1.37x faster
+o.TMeta.__new__      : 1.455 → 1.191 ms      = 1.22x faster
+o.Object.__setattr__ : 2.166 → 1.482 ms      = 1.46x faster
+
+
+----------------------------------------------------------------------
+Added operator and builtin method support
+
+Поддержка builtin methods и Python operators сильно утяжелила доступ и делегацию: чтение list/dict стало примерно в 5 раз медленнее, запись — в 1.4–1.5 раза, а birth/meta-path ухудшились умеренно.
+
+o.T.__new__          : 4.256s    ≈ 8038 x 529.486µs ( 459.292µs - 2.883ms)
+o.List.__getitem__   : 268.721ms ≈ 2000 x 134.361µs ( 125.376µs - 310.292µs)
+o.List.__setitem__   : 4.261s    ≈ 2000 x 2.131ms   ( 1.866ms   - 8.096ms)
+o.Dict.__getitem__   : 778.877ms ≈ 2000 x 389.439µs ( 244.708µs - 826.293µs)
+o.Dict.__setitem__   : 4.954s    ≈ 2000 x 2.477ms   ( 2.135ms   - 3.935ms)
+o.TMeta.__new__      : 2.975s    ≈ 2001 x 1.487ms   ( 1.221ms   - 29.839ms)
+o.Object.__setattr__ : 8.024s    ≈ 4004 x 2.004ms   ( 845.292µs - 9.097ms)
+
+Compared to previous run:
+
+o.T.__new__          : 512.431 → 529.486 µs  = 1.03x slower
+o.List.__getitem__   : 27.379 → 134.361 µs   = 4.91x slower
+o.List.__setitem__   : 1.538 → 2.131 ms      = 1.39x slower
+o.Dict.__getitem__   : 76.440 → 389.439 µs   = 5.09x slower
+o.Dict.__setitem__   : 1.666 → 2.477 ms      = 1.49x slower
+o.TMeta.__new__      : 1.191 → 1.487 ms      = 1.25x slower
+o.Object.__setattr__ : 1.482 → 2.004 ms      = 1.35x slower
+
+----------------------------------------------------------------------
+Moved back to id-based attrs/items
+
+o.T.__new__          : 2.868s    ≈ 8038 x 356.794µs ( 298.333µs - 2.349ms)
+o.List.__getitem__   : 69.026ms  ≈ 2000 x 34.513µs  ( 31.999µs  - 175.334µs)
+o.List.__setitem__   : 3.265s    ≈ 2000 x 1.632ms   ( 1.405ms   - 7.342ms)
+o.Dict.__getitem__   : 195.961ms ≈ 2000 x 97.980µs  ( 93.251µs  - 267.625µs)
+o.Dict.__setitem__   : 3.492s    ≈ 2000 x 1.746ms   ( 1.529ms   - 2.954ms)
+o.TMeta.__new__      : 3.040s    ≈ 2001 x 1.519ms   ( 1.226ms   - 52.660ms)
+o.Object.__setattr__ : 6.645s    ≈ 4004 x 1.660ms   ( 539.833µs - 7.964ms)
+
+Compared to before supporting builtins/operators:
+
+o.T.__new__          : 386.423 → 356.794 µs  = 1.08x faster
+o.List.__getitem__   : 27.379 → 34.513 µs    = 1.26x slower
+o.List.__setitem__   : 1.538 → 1.632 ms      = 1.06x slower
+o.Dict.__getitem__   : 76.440 → 97.980 µs    = 1.28x slower
+o.Dict.__setitem__   : 1.666 → 1.746 ms      = 1.05x slower
+o.TMeta.__new__      : 1.191 → 1.519 ms      = 1.28x slower
+o.Object.__setattr__ : 1.482 → 1.660 ms      = 1.12x slower
+
+Итого: после всех откатов и выпрямлений система стала намного лучше, чем сразу после добавления builtins/operators, но всё ещё немного медленнее, чем базовая точка до их поддержки; главный остаточный налог — на dict lookup, metaclass path и в меньшей степени на list/object mutation.

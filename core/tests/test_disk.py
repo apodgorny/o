@@ -336,14 +336,15 @@ class TestDisk(o.Test):
 		instance_path  = os.path.join(root, 'user', '__instances__', '_0')
 
 		try:
+			os.makedirs(instance_path, exist_ok=True)
 			instance = o.disk.Instance(instance_path, list[int])
 
 			assert instance.annotation == o.Annotation(list[int])
 			assert instance.attributes is not None
+			assert instance.attributes.path == os.path.join(instance_path, '__attributes__')
 			assert instance.list is not o.undefined
 			assert hasattr(instance, 'dict') == False
 			assert os.path.isdir(instance_path)
-			assert os.path.isdir(os.path.join(instance_path, '__attributes__'))
 			assert os.path.isfile(os.path.join(instance_path, '__list__'))
 			assert os.path.exists(os.path.join(instance_path, '__dict__')) == False
 		finally:
@@ -358,14 +359,15 @@ class TestDisk(o.Test):
 		instance_path  = os.path.join(root, 'user', '__instances__', '_1')
 
 		try:
+			os.makedirs(instance_path, exist_ok=True)
 			instance = o.disk.Instance(instance_path, dict[str, int])
 
 			assert instance.annotation == o.Annotation(dict[str, int])
 			assert instance.attributes is not None
+			assert instance.attributes.path == os.path.join(instance_path, '__attributes__')
 			assert hasattr(instance, 'list') == False
 			assert instance.dict is not o.undefined
 			assert os.path.isdir(instance_path)
-			assert os.path.isdir(os.path.join(instance_path, '__attributes__'))
 			assert os.path.isfile(os.path.join(instance_path, '__dict__'))
 			assert os.path.exists(os.path.join(instance_path, '__list__')) == False
 		finally:
@@ -380,15 +382,16 @@ class TestDisk(o.Test):
 		instance_path  = os.path.join(root, 'user', '__instances__', '_2')
 
 		try:
+			os.makedirs(instance_path, exist_ok=True)
 			instance = o.disk.Instance(instance_path, int)
 
 			assert instance.annotation == o.Annotation(int)
 			assert instance.attributes is not None
+			assert instance.attributes.path == os.path.join(instance_path, '__attributes__')
 			assert hasattr(instance, 'list') == False
 			assert hasattr(instance, 'dict') == False
 			assert instance.atomic is not o.undefined
 			assert os.path.isdir(instance_path)
-			assert os.path.isdir(os.path.join(instance_path, '__attributes__'))
 			assert os.path.exists(os.path.join(instance_path, '__list__')) == False
 			assert os.path.exists(os.path.join(instance_path, '__dict__')) == False
 		finally:
@@ -477,20 +480,14 @@ class TestDisk(o.Test):
 			reopened = o.disk.Attributes(instance_path)
 
 			assert reopened.items == {
-				'age' : None,
-				'name': None,
+				'age' : 33,
+				'name': 77,
 			}
 			assert reopened.has('age') == True
 			assert reopened.has('name') == True
 			assert reopened.get('age') == 33
 			assert reopened.get('name') == 77
-			assert reopened.items == {
-				'age' : 33,
-				'name': 77,
-			}
-			assert os.path.isdir(os.path.join(instance_path, '__attributes__'))
-			assert os.path.isfile(os.path.join(instance_path, '__attributes__', 'age'))
-			assert os.path.isfile(os.path.join(instance_path, '__attributes__', 'name'))
+			assert os.path.isfile(os.path.join(instance_path, '__attributes__'))
 		finally:
 			shutil.rmtree(root)
 

@@ -1,3 +1,7 @@
+import os
+import shutil
+import tempfile
+
 import o
 
 
@@ -46,19 +50,31 @@ class TestDict(o.Test):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _patch_runtime(cls):
+		temp_root      = os.path.join(o.core_path, '__tmp__')
 		registry_state = cls._patch_registry()
 
+		os.makedirs(temp_root, exist_ok=True)
+
+		root = tempfile.mkdtemp(prefix='o_dict_', dir=temp_root)
+
 		state = {
+			'root'          : root,
+			'temp_root'     : temp_root,
 			'registry'      : registry_state,
+			'data_dir'      : o.DATA_DIR,
 			'entities'      : dict(o.__entities__),
 			'cast_map'      : dict(o.__cast_map__),
 		}
+
+		o.DATA_DIR = os.path.join('__tmp__', os.path.basename(root))
 
 		return state
 
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _restore_runtime(cls, state):
+		o.DATA_DIR = state['data_dir']
+
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
@@ -66,6 +82,9 @@ class TestDict(o.Test):
 		o.__cast_map__.update(state['cast_map'])
 
 		cls._restore_registry(state['registry'])
+
+		if os.path.isdir(state['temp_root']):
+			shutil.rmtree(state['temp_root'])
 
 	# ----------------------------------------------------------------------
 	@classmethod

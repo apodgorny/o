@@ -84,8 +84,8 @@ class TestInstance(o.Test):
 		cls._restore_registry(state['registry'])
 		shutil.rmtree(state['root'])
 
-		if os.path.isdir(state['temp_root']) and not os.listdir(state['temp_root']):
-			os.rmdir(state['temp_root'])
+		if os.path.isdir(state['temp_root']):
+			shutil.rmtree(state['temp_root'])
 
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -240,7 +240,6 @@ class TestInstance(o.Test):
 			assert 'bar' in t2.__dict__
 			assert t2.__disk_instance__.attributes.has('bar')
 			assert isinstance(bar_id, int)
-			assert os.path.isfile(os.path.join(t2.__disk_instance__.attributes.path, 'bar'))
 		finally:
 			cls._restore_runtime(state)
 
@@ -258,11 +257,73 @@ class TestInstance(o.Test):
 			t1     = GetattrReadsPersistedChildViaEntitiesRegistry(foo='hello')
 			foo_id = t1.__disk_instance__.attributes.get('foo')
 
-			assert 'foo' not in t1.__dict__
+			del t1.__dict__['foo']
 			assert t1.__disk_instance__.attributes.has('foo') == True
 			assert isinstance(foo_id, int)
 			assert o.get(foo_id).__value__ == 'hello'
 			assert t1.foo == 'hello'
+			assert isinstance(t1.foo, str)
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_delattr_removes_materialized_attr_from_disk_and_memory(cls):
+		state = cls._patch_runtime()
+
+		try:
+			DelattrRemovesMaterializedAttr = o.T.extend(
+				'DelattrRemovesMaterializedAttr',
+				foo=str,
+			)
+
+			t1 = DelattrRemovesMaterializedAttr(foo='hello')
+
+			assert t1.foo == 'hello'
+			assert 'foo' in t1.__dict__
+			assert t1.__disk_instance__.attributes.has('foo') == True
+
+			del t1.foo
+
+			assert 'foo' not in t1.__dict__
+			assert t1.__disk_instance__.attributes.has('foo') == False
+
+			try:
+				t1.foo
+				assert False
+			except AttributeError:
+				pass
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_delattr_removes_attr_after_cache_slot_drop(cls):
+		state = cls._patch_runtime()
+
+		try:
+			DelattrRemovesAttrAfterCacheSlotDrop = o.T.extend(
+				'DelattrRemovesAttrAfterCacheSlotDrop',
+				foo=str,
+			)
+
+			t1 = DelattrRemovesAttrAfterCacheSlotDrop(foo='hello')
+
+			del t1.__dict__['foo']
+
+			assert 'foo' not in t1.__dict__
+			assert t1.__disk_instance__.attributes.has('foo') == True
+
+			del t1.foo
+
+			assert 'foo' not in t1.__dict__
+			assert t1.__disk_instance__.attributes.has('foo') == False
+
+			try:
+				t1.foo
+				assert False
+			except AttributeError:
+				pass
 		finally:
 			cls._restore_runtime(state)
 
@@ -278,7 +339,7 @@ class TestInstance(o.Test):
 			child  = Child(name='alex')
 			parent = Parent(child=child)
 
-			assert 'child' not in parent.__dict__
+			assert 'child' in parent.__dict__
 			assert parent.__disk_instance__.attributes.has('child') == True
 			assert parent.__disk_instance__.attributes.get('child') == child.id
 			assert parent.child is child
@@ -417,7 +478,7 @@ class TestInstance(o.Test):
 			child  = Child(name='alex')
 			parent = Parent(child=child)
 
-			assert 'child' not in parent.__dict__
+			assert 'child' in parent.__dict__
 			assert parent.__disk_instance__.attributes.has('child') == True
 			assert parent.__disk_instance__.attributes.get('child') == child.id
 			assert parent.child is child
@@ -436,6 +497,37 @@ class TestInstance(o.Test):
 			Child = Base.extend('Child')
 
 			obj = Child()
+
+			assert obj.foo == 7
+			assert 'foo' not in obj.__dict__
+			assert obj.__disk_instance__.attributes.has('foo') == False
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_instance_override_deletes_back_to_inherited_default(cls):
+		state = cls._patch_runtime()
+
+		try:
+			InstanceOverrideDeletesBackToInheritedDefault = o.T.extend(
+				'InstanceOverrideDeletesBackToInheritedDefault',
+				foo=o.F(int, default=7)
+			)
+
+			obj = InstanceOverrideDeletesBackToInheritedDefault()
+
+			assert obj.foo == 7
+			assert 'foo' not in obj.__dict__
+			assert obj.__disk_instance__.attributes.has('foo') == False
+
+			obj.foo = 9
+
+			assert obj.foo == 9
+			assert 'foo' in obj.__dict__
+			assert obj.__disk_instance__.attributes.has('foo') == True
+
+			del obj.foo
 
 			assert obj.foo == 7
 			assert 'foo' not in obj.__dict__

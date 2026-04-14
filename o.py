@@ -1,7 +1,4 @@
-import sys, os, re
-
-from weakref       import WeakValueDictionary as weakdict
-from collections   import defaultdict
+import os, re
 
 from whitelabel.wl import WL
 
@@ -9,9 +6,13 @@ from whitelabel.wl import WL
 def initialize(o):
 	os.makedirs(os.path.join(o.core_path, o.DATA_DIR), exist_ok=True)
 	o.F
+
 	for module in o:
 		if not module.name.startswith('_'):
 			module.load()
+
+	o.ensure_value()
+	o.services.GC.sweep()
 
 def get(o, id_or_proto):
 	entity = o.undefined
@@ -109,6 +110,24 @@ def register_entity(o, entity):
 
 		o.__entities__[entity.id] = entity
 
+def ensure_value(o):
+	value       = o.__dict__.get('V', o.undefined)
+	value_path  = o.undefined
+	value_proto = f'{o.T.V.__proto__}._0'
+
+	if value is not o.undefined:
+		value_path = o.id_to_path(value.id)
+
+	if value_path is o.undefined:
+		if o.exists(value_proto):
+			value = o.get(value_proto)
+		else:
+			value = o.T.V()
+
+		o.__dict__['V'] = value
+
+	return value
+
 
 o = WL.define(
 	'o',
@@ -140,4 +159,5 @@ o = WL.define(
 	path_to_id       = path_to_id,
 
 	register_entity  = register_entity,
+	ensure_value     = ensure_value,
 )

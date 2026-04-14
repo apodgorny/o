@@ -1,33 +1,37 @@
-# `core/disk` lookup
+# `core/disk` and storage services
 
 ## Folder structure
 
 ```text
-<class_path>/
-	__fields__/
-		<field_name>/
-			<property_name>
+<data_root>/
+	__registry__
+	__refcounts__
+	T/
+		__fields__/
+			<field_name>/
+				<property_name>
 
-	__subclasses__/
-		<ClassName>/
+		__subclasses__/
+			<ClassName>/
 
-	__instances__/
-		__index__
-		_<n>/
-			__attributes__/
-				<field_name>
-			__list__      # list instance only
-			__dict__      # dict instance only
-			__value__     # atomic instance only
+		__instances__/
+			__index__
+			_<n>/
+				__attributes__
+				__list__      # list instance only
+				__dict__      # dict instance only
+				__value__     # atomic instance only
 ```
+
+`__registry__` and `__refcounts__` are binary service tables.
+Entity rooms remain folder-based.
 
 ## `entity.py`
 
 | Signature | Returns / does |
 | --- | --- |
-| `class Entity(o.Module)` | Base disk entity with stable `id` from path and registry binding. |
-| `Entity.__init__(self, path=None)` | `None` ; sets `id`, `path`, registers entity path. |
-| `Entity.__del__(self)` | `None` ; removes entity id from registry if still present. |
+| `class Entity(o.Module)` | Base disk entity with stable `id` from `path` and registry binding. |
+| `Entity.__init__(self, path_or_proto=None)` | Sets `path`, computes `id`, and registers `id -> path`. |
 | `Entity.load(cls, id)` | `o.disk.Instance | o.disk.Class | o.undefined` ; resolves disk entity by registry id. |
 
 ## `class.py`
@@ -35,99 +39,116 @@
 | Signature | Returns / does |
 | --- | --- |
 | `class Class(o.disk.Entity)` | Disk class room with field, subclass, and instance managers. |
-| `Class.__init__(self, path)` | `None` ; creates class folder, attaches managers, and exposes `annotation` / `o_module`. |
-| `Class.annotation` | `annotation | o.undefined` ; class annotation persisted as string form and read back through `o.Annotation`. |
+| `Class.__init__(self, path)` | Creates class folder, attaches managers, and exposes `annotation` / `o_module`. |
+| `Class.annotation` | `annotation | o.undefined` ; class annotation persisted as text and read back through `o.Annotation`. |
 | `Class.o_module` | `str | o.undefined` ; lawful source-backed world address persisted in `__o_module__`. |
 
 ## `instance.py`
 
 | Signature | Returns / does |
 | --- | --- |
-| `class Instance(o.disk.Entity)` | Disk instance room with optional list, dict, atomic, and attributes managers. |
-| `Instance.__init__(self, path, annotation=o.undefined)` | `None` ; creates room and materializes managers from annotation or existing files. |
+| `class Instance(o.disk.Entity)` | Disk instance room with object attrs and optional list, dict, or atomic manager. |
+| `Instance.__init__(self, path, annotation=o.undefined)` | Creates room, materializes `attributes`, and reopens shape from annotation or existing files. |
+| `Instance.delete(self)` | Removes the instance room from disk. Higher-level release work belongs to `o.services.GC`. |
 
 ## `fields.py`
 
 | Signature | Returns / does |
 | --- | --- |
-| `class Fields(o.Module)` | Manager for `__fields__` directory under a class room. |
-| `Fields.__init__(self, class_path)` | `None` ; loads existing field managers from disk. |
-| `Fields._get_field_path(self, field_name)` | `str` ; returns folder path for one field. |
-| `Fields.set(self, field_name)` | `o.disk.Field` ; creates or returns field manager by name. |
-| `Fields.get(self, field_name)` | `o.disk.Field | None` ; returns cached field manager if present. |
-| `Fields.has(self, field_name)` | `bool` ; checks whether field manager exists. |
+| `class Fields(o.Module)` | Manager for `__fields__` under a class room. |
+| `Fields.set(self, field_name)` | Creates or returns field manager by name. |
+| `Fields.get(self, field_name)` | Returns cached field manager if present. |
+| `Fields.has(self, field_name)` | Checks whether field manager exists. |
 
 ## `field.py`
 
 | Signature | Returns / does |
 | --- | --- |
 | `class Field(o.Module)` | Manager for one field folder and its string properties. |
-| `Field.__init__(self, fields_path, name)` | `None` ; creates field folder and stores its path. |
-| `Field._get_prop_file_path(self, prop_name)` | `str` ; returns property file path inside field folder. |
-| `Field.set(self, prop_name, value=None)` | `None` ; writes field property text, empty if `None`. |
-| `Field.get(self, prop_name)` | `str | None` ; reads field property text if file exists. |
-| `Field.remove(self, prop_name)` | `None` ; deletes field property file if present. |
-| `Field.has(self, prop_name)` | `bool` ; checks property file existence. |
+| `Field.set(self, prop_name, value=None)` | Writes one field property. |
+| `Field.get(self, prop_name)` | Reads one field property if present. |
+| `Field.remove(self, prop_name)` | Deletes one field property if present. |
+| `Field.has(self, prop_name)` | Checks property presence. |
 
 ## `subclasses.py`
 
 | Signature | Returns / does |
 | --- | --- |
-| `class Subclasses(o.Module)` | Manager for `__subclasses__` directory under a class room. |
-| `Subclasses.__init__(self, parent_path)` | `None` ; loads existing capitalized subclass names. |
-| `Subclasses.set(self, name)` | `o.disk.Class` ; creates or returns subclass disk room. |
-| `Subclasses.get(self, name)` | `o.disk.Class | None` ; returns cached subclass room if loaded. |
-| `Subclasses.has(self, name)` | `bool` ; checks whether subclass name is present. |
+| `class Subclasses(o.Module)` | Manager for `__subclasses__` under a class room. |
+| `Subclasses.set(self, name)` | Creates or returns subclass disk room. |
+| `Subclasses.get(self, name)` | Returns cached subclass room if loaded. |
+| `Subclasses.has(self, name)` | Checks whether subclass name is present. |
 
 ## `instances.py`
 
 | Signature | Returns / does |
 | --- | --- |
-| `class Instances(o.Module)` | Manager for `__instances__` sequence and room birth order. |
-| `Instances.__init__(self, parent_path)` | `None` ; loads count and live order from `__index__`. |
-| `Instances._get_index_path(self)` | `str` ; returns `__index__` file path. |
-| `Instances._get_instance_path(self, version)` | `str` ; returns room path like `_<n>`. |
-| `Instances.set(self, count, order)` | `None` ; writes count and live order back to disk. |
-| `Instances.create(self, annotation)` | `o.disk.Instance` ; creates next instance room with explicit visible annotation. |
-| `Instances.remove(self, version)` | `None` ; removes version from live order without deleting room. |
-| `Instances.get(self, name)` | `o.disk.Instance | None` ; reopens room by underscored name if it exists. |
+| `class Instances(o.Module)` | Manager for class instance rooms and live order. |
+| `Instances.set(self, count, order)` | Rewrites `__index__` with next birth number and live order. |
+| `Instances.create(self, annotation)` | Creates next instance room by append-only birth path. |
+| `Instances.remove(self, version)` | Removes one version from live order without deleting the room itself. |
+| `Instances.get(self, version)` | Reopens room by underscored version token if it exists. |
 
 ## `attributes.py`
 
 | Signature | Returns / does |
 | --- | --- |
-| `class Attributes(o.Module)` | Manager for `__attributes__` name -> child id files. |
-| `Attributes.__init__(self, instance_path)` | `None` ; creates directory and indexes existing attribute files. |
-| `Attributes.set(self, name, id)` | `None` ; writes one child id under attribute name. |
-| `Attributes.get(self, name)` | `int | None` ; reads cached or on-disk child id by name. |
-| `Attributes.has(self, name)` | `bool` ; checks whether attribute entry exists. |
+| `class Attributes(o.Module)` | Manager for packed `__attributes__` name -> child id state. |
+| `Attributes.set(self, name, id)` | Persists one attr edge, updates GC, returns old id or `o.undefined`. |
+| `Attributes.get(self, name)` | Returns child id by name. |
+| `Attributes.delete(self, name)` | Removes one attr edge, updates GC, returns removed id. |
+| `Attributes.has(self, name)` | Checks whether attr entry exists. |
 
 ## `list.py`
 
 | Signature | Returns / does |
 | --- | --- |
 | `class List(o.Module)` | Manager for `__list__` ordered child ids. |
-| `List.__init__(self, instance_path)` | `None` ; creates list file if needed and loads ordered ids into `__items__`. |
-| `List.items` | `list[int]` ; whole ordered id state. Setter rewrites full file. |
-| `List.get(self, index)` | `int | None` ; returns child id at index if in range. |
-| `List.set(self, index, id)` | `None` ; updates one index in cached items and rewrites file. |
+| `List.items` | `list[int]` ; whole ordered id state. Setter rewrites full file and updates GC by delta. |
+| `List.get(self, index)` | Returns child id at index if in range. |
+| `List.set(self, index, id)` | Replaces one child id, updates GC, returns old id. |
+| `List.delete(self, index)` | Removes one child id, updates GC, returns removed id. |
 
 ## `dict.py`
 
 | Signature | Returns / does |
 | --- | --- |
 | `class Dict(o.Module)` | Manager for `__dict__` key-id -> value-id mapping. |
-| `Dict.__init__(self, instance_path)` | `None` ; creates dict file if needed and loads id pairs into `__items__`. |
-| `Dict.items` | `dict[int, int]` ; whole mapping state. Setter rewrites full file. |
-| `Dict.get(self, key)` | `int | o.undefined` ; returns value id by resolved key token. |
-| `Dict.get_key_id(self, key)` | `int | o.undefined` ; resolves persisted key id from incoming key token. |
-| `Dict.set(self, key, id)` | `None` ; updates one cached pair and rewrites file. |
+| `Dict.items` | `dict[int, int]` ; whole mapping state. Setter rewrites full file and updates key/value GC by delta. |
+| `Dict.get(self, key)` | Returns value id by resolved key token. |
+| `Dict.get_key_id(self, key)` | Resolves persisted key id from incoming key token. |
+| `Dict.set(self, key, value_id)` | Upserts one pair, updates key/value GC, returns old value id or `o.undefined`. |
+| `Dict.delete(self, key)` | Removes one pair, updates key/value GC, returns removed value id. |
 
 ## `atomic.py`
 
 | Signature | Returns / does |
 | --- | --- |
 | `class Atomic(o.Module)` | Manager for atomic `__value__` raw bytes. |
-| `Atomic.__init__(self, instance_path)` | `None` ; stores value file path and lazy cache. |
-| `Atomic.set(self, value)` | `None` ; writes raw bytes and refreshes cache. |
-| `Atomic.get(self)` | `bytes | o.undefined` ; returns cached or on-disk raw bytes. |
+| `Atomic.set(self, value)` | Writes raw bytes and refreshes cache. |
+| `Atomic.get(self)` | Returns cached or on-disk raw bytes. |
+
+## `services/registry.py`
+
+| Signature | Returns / does |
+| --- | --- |
+| `class Registry(o.Service)` | Binary `id -> path` index for entity lookup. |
+| `Registry.initialize(self)` | Creates or opens fixed-size `__registry__` table. |
+| `Registry.add(self, id, dir_path)` | Persists one `id -> path` binding. |
+| `Registry.remove(self, id)` | Clears one binding. |
+| `Registry.get(self, id)` | Resolves directory path by `id` without allocating on read miss. |
+
+## `services/g_c.py`
+
+| Signature | Returns / does |
+| --- | --- |
+| `class GC(o.Service)` | Binary persistent refcount table and release service. |
+| `GC.initialize(self)` | Creates or opens fixed-size `__refcounts__` table. |
+| `GC.get(self, id)` | Returns persistent refcount. |
+| `GC.set(self, id, count)` | Writes persistent refcount. |
+| `GC.update(self, old_id, new_id)` | Replaces one ownership edge. |
+| `GC.inc(self, id)` | Increments persistent refcount. |
+| `GC.dec(self, id)` | Decrements persistent refcount and may trigger release. |
+| `GC.get_children(self, id)` | Reads direct child ids from one entity room. |
+| `GC.release(self, id)` | Releases one zero-ref non-root instance and cascades to direct children. |
+| `GC.sweep(self)` | Releases zero-ref non-root instance rooms on startup. |

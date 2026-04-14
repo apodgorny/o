@@ -322,3 +322,28 @@ The current picture is:
 - atomic entities persist their own raw value bytes
 - root embodiment is recursive
 - reconstruction must preserve the same interface shape
+
+---
+
+## 22. Persistence and liveness
+
+Current persistence law:
+
+- `o.T.V` is the root value class
+- `o.V` is the singleton root value instance
+- top-level persistence is reachability from `o.V`
+
+Current lifecycle law:
+
+- direct ownership edges live in `__attributes__`, `__list__`, and `__dict__`
+- GC persists refcount in one binary table
+- `GC.dec(id)` may release an instance room and cascade through direct children
+- startup sweep removes zero-ref non-root instance rooms
+
+Rejected law:
+
+- wrapper dies -> entity dies
+
+Current law:
+
+- disk ownership changes -> refcount changes -> release may happen

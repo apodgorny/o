@@ -17,11 +17,12 @@ class Instances(o.Module):
 	# Constructor
 	# ----------------------------------------------------------------------
 	def __init__(self, parent_path):
-		self.parent_path = parent_path
-		self.path        = os.path.join(parent_path, self.DIR)
-		self.count       = 0
-		self.order       = []
-		index_path       = self._get_index_path()
+		self.parent_path  = parent_path
+		self.parent_proto = o.path_to_proto(parent_path)
+		self.path         = os.path.join(parent_path, self.DIR)
+		self.count        = 0
+		self.order        = []
+		index_path        = self._get_index_path()
 
 		os.makedirs(self.path, exist_ok=True)
 
@@ -57,7 +58,7 @@ class Instances(o.Module):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Set sequence state
+	# Set full sequence state (O(N) rewrite)
 	# ----------------------------------------------------------------------
 	def set(self, count, order):
 		self.count = count
@@ -73,29 +74,34 @@ class Instances(o.Module):
 		with open(index_path, 'wb') as file:
 			file.write(content)
 
-	# Create next instance room
+	# Create next instance room (O(1) append-only)
 	# ----------------------------------------------------------------------
 	def create(self, annotation):
 		version = self.count
 		path    = self._get_instance_path(version)
+		proto   = f'{self.parent_proto}._{version}'
+		id      = o.proto_to_id(proto)
 
-		os.makedirs(path, exist_ok=True)
+		os.mkdir(path)
 
+		# Targeted O(1) birth:
+		# 1. Update count at offset 0
+		# 2. Append new version to EOF
+		# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 		self.count += 1
 		self.order.append(version)
-		self.set(self.count, self.order)
 
-		return o.disk.Instance(path, annotation)
+		with open(self._get_index_path(), 'r+b') as file:
+			file.write(self.WORD.pack(self.count))
+			file.seek(0, os.SEEK_END)
+			file.write(self.WORD.pack(version))
 
-	# Remove instance from live order
+		return o.disk.Instance(path, annotation, id=id)
+
+	# Remove instance from live order (O(N) full rewrite)
 	# ----------------------------------------------------------------------
 	def remove(self, version):
-		new_order = []
-
-		for item in self.order:
-			if item != version:
-				new_order.append(item)
-
+		new_order = [item for item in self.order if item != version]
 		self.set(self.count, new_order)
 
 	# Get instance room by underscored version name

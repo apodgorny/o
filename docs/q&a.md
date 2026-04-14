@@ -70,7 +70,7 @@ I read the full `docs` set in `/Users/alexander/dev/o/docs` and extracted the ar
   - `__subclasses__/`
   - `__instances__/__index__`
 - Instance side:
-  - `__attributes__/` for named refs
+- `__attributes__` for packed named refs
   - `__list__` for ordered refs
   - `__dict__` for keyed refs
   - `__value__` for atomic payload

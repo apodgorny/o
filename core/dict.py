@@ -9,11 +9,11 @@ class Dict(o.T):
 	def __init__(self, value):
 		items = {}
 
-		for key, value in value.items():
-			key_instance   = o.T(key)
-			value_instance = o.T(value)
+		for key, item in value.items():
+			key_child   = o.T(key)
+			value_child = o.T(item)
 
-			items[key_instance.id] = value_instance.id
+			items[key_child.id] = value_child.id
 
 		self.__disk_instance__.dict.items = items
 
@@ -22,8 +22,8 @@ class Dict(o.T):
 	def __getitem__(self, key):
 		o.Timer.start('o.Dict.__getitem__')
 
-		value_id     = self.__disk_instance__.dict.get(key)
-		value        = o.undefined
+		value_id = self.__disk_instance__.dict.get(key)
+		value    = o.undefined
 
 		if value_id is not o.undefined:
 			value = o.get(value_id)
@@ -43,31 +43,23 @@ class Dict(o.T):
 	def __setitem__(self, key, value):
 		o.Timer.start('o.Dict.__setitem__')
 
-		value_instance = o.T(value)
+		child = o.T(value)
 
-		self.__disk_instance__.dict.set(key, value_instance.id)
+		self.__disk_instance__.dict.set(key, child.id)
 
 		o.Timer.stop('o.Dict.__setitem__')
 
 	# Delete dict item
 	# ----------------------------------------------------------------------
 	def __delitem__(self, key):
-		key_id = self.__disk_instance__.dict.get_key_id(key)
-		items  = self.__disk_instance__.dict.items
-
-		if key_id is o.undefined:
-			raise KeyError(key)
-
-		del items[key_id]
-
-		self.__disk_instance__.dict.items = items
+		self.__disk_instance__.dict.delete(key)
 
 	# Check dict key
 	# ----------------------------------------------------------------------
 	def __contains__(self, key):
-		key_id = self.__disk_instance__.dict.get_key_id(key)
+		stored_key = self.__disk_instance__.dict.get_key_id(key)
 
-		return key_id is not o.undefined
+		return stored_key is not o.undefined
 
 	# Get dict length
 	# ----------------------------------------------------------------------
@@ -85,8 +77,11 @@ class Dict(o.T):
 			key   = o.get(key_id)
 			value = o.get(value_id)
 
-			if isinstance(key,   o.Atom) : key   = key.__value__
-			if isinstance(value, o.Atom) : value = value.__value__
+			if isinstance(key, o.Atom):
+				key = key.__value__
+
+			if isinstance(value, o.Atom):
+				value = value.__value__
 
 			yield key, value
 

@@ -2,243 +2,183 @@
 
 ## Overview
 
-In `o`, types and instances do not have the same ontological status.
+In `o`, types and instances do not live by the same law.
 
-They stand somewhere between Python classes and SQL tables:
+- types are world forms
+- instances are persistent value entities
 
-- like Python classes, they define structure and behavior
-- like SQL tables, they define persistent form and must be managed explicitly
+But the important split is no longer:
 
-This leads to an intentional asymmetry:
+- explicit type deletion
+- implicit instance deletion through `__del__`
 
-- types are deleted explicitly
-- instances are deleted implicitly through GC via `__del__`
+The current split is:
 
-That asymmetry is correct.
+- type lifetime is explicit and schema-like
+- instance lifetime is determined by disk ownership
 
 ---
 
-## 1. Types are persistent schema-form objects
+## 1. Types are persistent forms
 
 A type in `o` is not just a temporary Python class.
 
-It is a global named form in the system, such as:
+It is a named form such as:
 
-- `o.User`
-- `o.List`
-- `o.Dict`
-- `o.Invoice`
+- `o.T.User`
+- `o.T.Invoice`
+- `o.T.V`
 
 A type defines:
 
-- how values are interpreted
-- how objects are stored on disk
-- how bytes are read back into meaning
-- how nested values are validated and cast
-- how persistent entities are represented in the world of `o`
+- structure
+- validation
+- embodiment law
+- reconstruction law
 
-So a type is not merely something that can instantiate objects.
-
-It is closer to:
-
-- a schema
-- a structural contract
-- a persistent world-form
-
-Because of that, a type should not disappear merely because no current instances exist.
-
-So the existence of a type is not dependent on current instance count.
+So a type is not governed by current instance count.
+It remains a stable form of the world until explicitly removed.
 
 ---
 
 ## 2. Types are global
 
-In this architecture, types are accessed via `o`.
+Types live in the ontology namespace.
 
-That means they remain strongly referenced by the registry / namespace and do not vanish automatically.
+That means:
 
-This is intentional.
+- they are globally addressable
+- they are not meant to vanish just because no current instance happens to be loaded
+- redefining an existing named type is not ordinary rebinding
 
-If a type is globally named, it is part of the ontology of the system.
-
-So redefining an existing global type is an error.
-
-This is not ordinary Python rebinding.
-It is attempted redefinition of an existing world-form.
-
-Type identity is explicit, global, and stable.
+This is the schema side of the system.
 
 ---
 
-## 3. Type deletion is explicit
+## 3. Instances are persistent entities, not temporary wrappers
 
-Because types are global structural forms, deleting a type is a schema-level operation.
+An instance in `o` exists on disk.
 
-It must be explicit.
-
-This is like dropping a table in SQL:
-
-- a table does not disappear because no rows remain
-- it is removed explicitly when the schema itself should no longer exist
+The Python object is only the current manifestation of that disk entity.
 
 So:
 
-- type lifetime is not driven by Python reference counting
-- type lifetime is not driven by instance count
-- type lifetime is driven by explicit deletion
+- the room on disk is the durable thing
+- the wrapper in RAM is only the current manifestation
+- the wrapper may disappear and later be reconstructed
+
+This means RAM lifetime must not decide truth about persistence.
 
 ---
 
-## 4. Instances are different
+## 4. Instance lifetime is owned by disk edges
 
-An instance in `o` is not the same kind of thing as a type.
+Current instance deletion law:
 
-The instance itself exists on disk.
-The Python wrapper object is only a temporary in-memory manifestation of that disk object.
+- object attrs hold child refs
+- list state holds ordered child refs
+- dict state holds key/value refs
+- `o.V` holds root-level persistent refs
 
-So when you write:
+These edges are counted by persistent refcount.
 
-```python
-x = o.User(...)
-```
-
-the Python object `x` is not the durable object in the deepest sense.
-
-It is a live wrapper / handle / manifestation for a persistent disk-backed entity.
-
-This means:
-
-- the persistent record is the durable object
-- the Python wrapper is temporary
-- the wrapper may disappear while the disk object remains
-- another wrapper may later be instantiated for the same disk object
-
-So instance lifetime in memory is naturally ephemeral.
+So an instance stays alive while it is owned on disk.
+When its last owning edge disappears, refcount reaches zero and GC releases it.
 
 ---
 
-## 5. Instance deletion is implicit via GC and `__del__`
+## 5. `o.V` is the persistence root
 
-Because Python wrappers are ephemeral, implicit cleanup is appropriate for them.
+Top-level persistence is no longer implicit.
 
-In this system, instance cleanup is implemented through `__del__`.
+It is rooted through `o.V`.
 
-When the wrapper becomes unreachable:
+`o.V` is:
 
-- Python GC / refcounting can destroy the wrapper
-- `__del__` is triggered
-- cleanup logic can run automatically
+- a regular source-backed `o.T` subclass
+- a singleton value instance
+- the root owner of persistent top-level state
 
-This is correct because the wrapper is a runtime manifestation, not the eternal schema-form.
+Meaning:
 
-So unlike types:
+- attached to `o.V` -> survives reload
+- detached from `o.V` and from all other owners -> may be released
 
-- instances may disappear automatically
-- wrapper death is part of normal runtime behavior
-- that cleanup is implicit
+This makes persistence legible:
 
-This gives the system a useful asymmetry:
-
-- type deletion is explicit
-- instance cleanup is implicit
+- persistence is reachability from `o.V`
 
 ---
 
-## 6. Why this asymmetry is correct
+## 6. Wrapper lifetime is not lifecycle truth
 
-The asymmetry matches the ontology.
+Python wrapper death is not the deletion trigger.
+
+`__del__` is not the lifecycle oracle.
+
+Why:
+
+- disk may contain meaningful ownership unknown to current RAM
+- strong refs in `o.__entities__` are runtime cache mechanics, not ontology
+- process end is not a reliable semantic event
+
+So the current model is intentionally stricter:
+
+- memory is manifestation
+- disk is truth
+
+---
+
+## 7. Startup sweep completes the model
+
+Because persistence truth lives on disk, startup performs orphan cleanup.
+
+On initialization:
+
+- `o.ensure_value()` brings up the singleton root `o.V`
+- `o.services.GC.sweep()` releases zero-ref non-root instance rooms
+
+So objects that were never rooted, or were left behind after previous process life, do not silently survive reload.
+
+---
+
+## 8. Asymmetry that remains correct
+
+The asymmetry is still real, but it is now cleaner:
 
 ### Types
 
 Types are:
 
-- global
+- named
 - structural
 - schema-like
-- persistent in meaning
-- part of the world-definition
+- explicit
 
-So they should be explicitly removed.
+So type lifetime is explicit.
 
 ### Instances
 
 Instances are:
 
-- disk-backed entities with temporary Python wrappers
-- runtime manifestations
-- ephemeral in memory
-- naturally compatible with GC cleanup
+- disk-backed values
+- owned through direct edges
+- released by refcount and cascade
 
-So they may be implicitly cleaned up.
-
-This is not inconsistency.
-It is a correct reflection of the fact that these are two different layers of existence.
-
----
-
-## 7. Relation to Python classes
-
-Ordinary Python classes behave differently:
-
-- they are ordinary runtime objects
-- they live while references exist
-- they can be rebound by name
-- they are not normally treated as schema objects
-
-`o` types are stricter than ordinary Python classes.
-
-They are registered globally and treated as stable forms.
-
-So while they use Python class machinery, their semantic role is larger than that of ordinary classes.
-
----
-
-## 8. Relation to SQL tables
-
-Ordinary SQL tables also differ:
-
-- they are explicitly created
-- explicitly dropped
-- define persistent structure
-- do not vanish when empty
-
-`o` types share this aspect.
-
-But unlike SQL tables, they also participate in Python runtime behavior:
-
-- casting
-- validation
-- instance wrapping
-- method dispatch
-- container/object behavior
-
-So they are not merely tables either.
-
-They really do sit between:
-
-- Python classes
-- SQL tables
-
-And their lifetime rules reflect exactly that.
+So instance lifetime is structural, not manual in everyday use.
 
 ---
 
 ## 9. Final principle
 
-The guiding principle is:
+The guiding law now is:
 
-- a type is a persistent named structural form of the world
-- an instance wrapper is a temporary in-memory manifestation of a disk object
+- types define world form
+- instances live while the world still owns them
 
 Therefore:
 
-- removing a type changes the world-schema and must be explicit
-- removing an instance wrapper is ordinary runtime cleanup and may be implicit
+- removing a type is explicit schema work
+- removing an instance is an ownership event on disk
 
-That is why in `o`:
-
-- types are deleted explicitly
-- instances are cleaned up implicitly via GC and `__del__`
-
-This is not an implementation accident.
-It is the correct ontological model for the system.
+This is the current ontological model of `o`.

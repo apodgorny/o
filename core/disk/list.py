@@ -1,3 +1,4 @@
+from collections import Counter
 import os
 import struct
 
@@ -57,8 +58,21 @@ class List(o.Module):
 	# ----------------------------------------------------------------------
 	@items.setter
 	def items(self, items):
-		self.__items__ = items
+		old_counts = Counter(self.__items__)
+		new_counts = Counter(items)
+
+		self.__items__ = list(items)
 		self.__write__()
+
+		for id in set(old_counts) | set(new_counts):
+			delta = new_counts[id] - old_counts[id]
+
+			if delta > 0:
+				for _ in range(delta):
+					o.services.GC.inc(id)
+			elif delta < 0:
+				for _ in range(-delta):
+					o.services.GC.dec(id)
 
 	# Get list item
 	# ----------------------------------------------------------------------
@@ -73,5 +87,22 @@ class List(o.Module):
 	# Set list item
 	# ----------------------------------------------------------------------
 	def set(self, index, id):
+		old_id = self.__items__[index]
+
 		self.__items__[index] = id
 		self.__write__()
+
+		o.services.GC.update(old_id, id)
+
+		return old_id
+
+	# Delete list item
+	# ----------------------------------------------------------------------
+	def delete(self, index):
+		id = self.__items__[index]
+
+		del self.__items__[index]
+		self.__write__()
+		o.services.GC.dec(id)
+
+		return id

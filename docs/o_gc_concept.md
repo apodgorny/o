@@ -2,57 +2,128 @@
 
 ## Core principle
 
-GC in `o` is not a standalone tracing system.
-It piggybacks on trusted Python object lifecycle mechanics, specifically `__del__`.
+GC in `o` is disk-driven, not Python-driven.
+
+The source of truth is:
+
+- persistent ownership edges on disk
+- persistent refcount in the GC table
+- reachability from the root value `o.V`
+
+Python wrapper lifetime is not the source of truth.
 
 ---
 
-## Concept
+## Current law
 
-1. GC in `o` is local, not global.
-   No graph traversal.
-   No mark-sweep.
+1. GC counts only direct owning edges.
 
-2. When a Python wrapper object loses its last reference, Python calls `__del__`.
+Those edges are created and removed only at disk mutation boundaries:
 
-3. Inside `__del__`, the persistent record is explicitly released through the proper service path.
+- `Attributes.set()` / `delete()`
+- `List.items`, `set()`, `delete()`
+- `Dict.items`, `set()`, `delete()`
 
-4. Release must:
-   - mark the record non-active
-   - zero out its stored bytes
-   - return the id to the corresponding free heap
+2. Refcount is persisted in one binary table.
 
-5. The lifecycle of the Python object and the persistent disk record are synchronized.
+- file: `__refcounts__`
+- owner: `o.services.GC`
+- shape: fixed-size hash table by entity `id`
 
-6. No background process is required.
+3. `GC.update(old_id, new_id)` is the canonical edge-replacement act.
 
-7. No separate reachability scan is required.
+Meaning:
 
-8. Determinism is preserved:
-   destruction happens when the wrapper dies.
+- removed edge -> `dec(old_id)`
+- added edge -> `inc(new_id)`
+- unchanged edge -> no-op
 
-9. Cascading deletion belongs to container logic, not to GC itself.
+4. `GC.dec(id)` may release an entity.
 
-10. System invariant:
-    if there is no live Python wrapper, the disk record must not remain active.
+When count drops to `0`:
+
+- the instance room is released
+- registry entry is removed
+- loaded wrapper is evicted from `o.__entities__`
+- direct children are decremented
+
+5. Release is cascading, but only through direct children.
+
+There is no mark-sweep scan.
+There is no subtree recount on ordinary writes.
+
+The law is:
+
+- ordinary mutation updates only changed direct edges
+- release cascades only through direct children
+
+6. Cycles are outside the current GC contract.
+
+Pure refcount does not collect cycles.
+That is an accepted boundary of the current system.
 
 ---
 
-## Design philosophy
+## Root law
 
-The goal is maximum reuse of trusted mechanisms:
+Persistence across reload is defined by `o.V`.
 
-- Python reference counting
-- deterministic finalizers through `__del__`
-- explicit service-side deletion
+- `o.V` is the singleton root value
+- attaching something to `o.V` gives it persistent ownership
+- detaching the last owning path lets refcount GC release it
 
-Instead of building a second garbage collector, `o` delegates object liveness to Python itself.
+So the clean reading is:
 
-This keeps the storage model minimal, predictable, and aligned with runtime semantics.
+- reachable from `o.V` -> survives reload
+- not reachable from `o.V` -> may be swept as orphan
+
+---
+
+## Startup sweep
+
+Python process shutdown is not relied on for truth.
+
+Therefore startup performs orphan cleanup:
+
+- every non-root instance with `refcount == 0` is released
+
+This makes the system robust against:
+
+- ordinary process end
+- wrapper lifetime accidents
+- previous crashes
+
+---
+
+## What `__del__` is not
+
+`__del__` is not the deletion mechanism.
+
+It is not used as the liveness oracle, because:
+
+- RAM may not know all meaningful disk edges
+- wrapper lifetime is not persistent truth
+- process end is not a trustworthy commit point
+
+So the current model is not:
+
+- wrapper dies -> entity dies
+
+It is:
+
+- disk edge disappears -> refcount changes
+- refcount reaches zero -> entity is released
 
 ---
 
 ## Summary
 
-GC in `o` is not a collector.
-It is a lifecycle synchronization contract.
+GC in `o` is:
+
+- direct-edge refcount
+- persisted on disk
+- rooted by `o.V`
+- cascaded through direct children
+- repaired by startup orphan sweep
+
+This preserves simultaneity and keeps disk as the single source of lifecycle truth.

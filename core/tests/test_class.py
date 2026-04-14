@@ -110,11 +110,11 @@ class TestClass(o.Test):
 		cls._restore_registry(state['registry'])
 		shutil.rmtree(state['root'])
 
-		if os.path.isdir(state['source_root']) and not os.listdir(state['source_root']):
-			os.rmdir(state['source_root'])
+		if os.path.isdir(state['source_root']):
+			shutil.rmtree(state['source_root'])
 
-		if os.path.isdir(state['temp_root']) and not os.listdir(state['temp_root']):
-			os.rmdir(state['temp_root'])
+		if os.path.isdir(state['temp_root']):
+			shutil.rmtree(state['temp_root'])
 
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -500,6 +500,89 @@ class TestClass(o.Test):
 			RuntimeDefinedClassHasNoOModule = o.T.extend('RuntimeDefinedClassHasNoOModule')
 
 			assert RuntimeDefinedClassHasNoOModule.__disk_class__.o_module is o.undefined
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_source_backed_instance_restores_form_and_values_after_reload(cls):
+		state = cls._patch_runtime()
+
+		try:
+			class_name = 'SourceBackedRestoresFormAndValuesAfterReload'
+			file_name  = o.String.camel_to_snake(class_name) + '.py'
+			path       = os.path.join(state['source_root'], file_name)
+			module_name = f'o.TestsRuntime.{class_name}'
+
+			SourceBackedRestoresFormAndValuesAfterReload = cls._source_class(
+				state,
+				class_name,
+				(
+					'import o\n\n'
+					f'class {class_name}(o.T):\n'
+					'\tname: str\n'
+				)
+			)
+
+			x       = SourceBackedRestoresFormAndValuesAfterReload(name='alex')
+			x.items = [1, 2]
+			x.meta  = {'lang': 'uk'}
+
+			class_id = SourceBackedRestoresFormAndValuesAfterReload.id
+			id       = x.id
+
+			for entity_id in [class_id, id]:
+				if entity_id in o.__entities__:
+					del o.__entities__[entity_id]
+
+			if path in o._file_cache:
+				del o._file_cache[path]
+
+			if path in o._class_cache:
+				del o._class_cache[path]
+
+			if module_name in sys.modules:
+				del sys.modules[module_name]
+
+			reopened = o.get(id)
+
+			assert reopened.__class__.__proto__ == f'o.T.{class_name}'
+			assert reopened.__class__.__disk_class__.o_module == reopened.__class__.__o_module__
+			assert reopened.name == 'alex'
+			assert list(reopened.items) == [1, 2]
+			assert dict(reopened.meta.items()) == {'lang': 'uk'}
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_runtime_defined_instance_restores_form_and_values_after_reload(cls):
+		state = cls._patch_runtime()
+
+		try:
+			RuntimeDefinedRestoresFormAndValuesAfterReload = o.T.extend(
+				'RuntimeDefinedRestoresFormAndValuesAfterReload',
+				name=str,
+			)
+
+			x       = RuntimeDefinedRestoresFormAndValuesAfterReload(name='alex')
+			x.items = [1, 2]
+			x.meta  = {'lang': 'uk'}
+
+			class_id = RuntimeDefinedRestoresFormAndValuesAfterReload.id
+			id       = x.id
+
+			for entity_id in [class_id, id]:
+				if entity_id in o.__entities__:
+					del o.__entities__[entity_id]
+
+			reopened = o.get(id)
+
+			assert reopened.__class__.__proto__ == 'o.T.RuntimeDefinedRestoresFormAndValuesAfterReload'
+			assert reopened.__class__.__disk_class__.o_module is o.undefined
+			assert reopened.name == 'alex'
+			assert list(reopened.items) == [1, 2]
+			assert dict(reopened.meta.items()) == {'lang': 'uk'}
 		finally:
 			cls._restore_runtime(state)
 

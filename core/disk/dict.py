@@ -19,7 +19,7 @@ class Dict(o.Module):
 		self.instance_path = instance_path
 		self.path          = os.path.join(instance_path, self.FILE)
 		self.__items__     = {}   # key id -> value id
-		self.__keys__      = {}   # key atomi_value or non_atomic_id -> key id
+		self.__keys__      = {}   # key atomic_value or non_atomic_id -> key id
 
 		if not os.path.exists(self.path):
 			self.__write__()
@@ -44,12 +44,12 @@ class Dict(o.Module):
 		keys = {}
 
 		for key_id in self.__items__:
-			key = key_id
+			visible_key = o.get(key_id)
 
-			if o.is_atomic(key_id):
-				key = o.get(key_id)
+			if visible_key is o.undefined:
+				visible_key = key_id
 
-			keys[self.__key__(key)] = key_id
+			keys[self.__key__(visible_key)] = key_id
 
 		self.__keys__ = keys
 
@@ -105,9 +105,23 @@ class Dict(o.Module):
 	# ----------------------------------------------------------------------
 	@items.setter
 	def items(self, items):
-		self.__items__ = items
+		old_items = dict(self.__items__)
+
+		self.__items__ = dict(items)
 		self.__bind_keys__()
 		self.__write__()
+
+		for key_id in set(old_items) - set(self.__items__):
+			o.services.GC.dec(key_id)
+
+		for key_id in set(self.__items__) - set(old_items):
+			o.services.GC.inc(key_id)
+
+		for key_id in set(old_items) | set(self.__items__):
+			old_value_id = old_items.get(key_id, o.undefined)
+			new_value_id = self.__items__.get(key_id, o.undefined)
+
+			o.services.GC.update(old_value_id, new_value_id)
 
 	# Get dict item
 	# ----------------------------------------------------------------------
@@ -131,15 +145,42 @@ class Dict(o.Module):
 
 	# Set dict item
 	# ----------------------------------------------------------------------
-	def set(self, key, id):
-		key_id = self.get_key_id(key)
+	def set(self, key, value_id):
+		key_id       = self.get_key_id(key)
+		old_value_id = o.undefined
 
 		if key_id is o.undefined:
 			if not isinstance(key, o.T):
 				key = o.T(key)
 
 			key_id = key.id
+			o.services.GC.inc(key_id)
+		else:
+			old_value_id = self.__items__[key_id]
 
-		self.__items__[key_id] = id
+		self.__items__[key_id] = value_id
 		self.__keys__[self.__key__(key)] = key_id
 		self.__write__()
+		o.services.GC.update(old_value_id, value_id)
+
+		return old_value_id
+
+	# Delete dict item
+	# ----------------------------------------------------------------------
+	def delete(self, key):
+		token  = self.__key__(key)
+		key_id = self.__keys__.get(token, o.undefined)
+
+		if key_id is o.undefined:
+			raise KeyError(key)
+
+		value_id = self.__items__[key_id]
+
+		del self.__items__[key_id]
+		del self.__keys__[token]
+
+		self.__write__()
+		o.services.GC.dec(key_id)
+		o.services.GC.dec(value_id)
+
+		return value_id

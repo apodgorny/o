@@ -1,220 +1,138 @@
 # `o` as Folder-Based Storage Concept
 
-## Core Ontology
+## Core ontology
 
-There are two structures:
+There are still two structures:
 
-- **`IS-A`** — ontology / form / inheritance
-- **`HAS-A`** — retention / liveness / ownership
+- `IS-A` — ontology / form / inheritance
+- `HAS-A` — retention / ownership / liveness
 
-Things are garbage-collected if nobody **`HAS-A`** them.
+But the current liveness law is stricter now:
 
-Folder structure belongs to **`IS-A`**.
-
-If multiple things `HAS-A` the same thing, this is like beautiful **hard-links**.
-
-So:
-
-- **`IS-A`** is a tree of form
-- **`HAS-A`** is a graph of retention
-
-## Entity and File Distinction
-
-An `o.Object` is a **folder**.
-
-Items within are **instances**, therefore they are also **folders**.
-
-Files are just **files**.
+- `IS-A` lives in folder geometry
+- `HAS-A` lives in persisted refs and refcount
+- top-level persistence is rooted through `o.V`
 
 So:
 
-- entity = folder
-- attachment = file
+- form is a tree
+- ownership is a graph
+- lifecycle is decided by disk edges, not wrapper lifetime
+
+## Entity and file distinction
+
+An entity is still a folder-backed thing.
+Files are storage for its local state.
+
+So:
+
+- entity = room
+- file = local state or service table
 
 A child entity is not a file.
 A file is not an `o` entity.
 
-## Addressing
+## Storage shape
 
-The whole `HAS-A` structure is represented by elements of the `IS-A` tree.
+Current instance-side state is:
 
-This is the idea behind notation like:
+- `__value__` for atomic raw bytes
+- `__list__` for ordered child refs
+- `__dict__` for keyed key/value refs
+- `__attributes__` for packed named child refs
 
-- `foo[12]`
+Current service-side state is:
 
-Instances live as elements of the ontology tree.
+- `__registry__` for binary `id -> path`
+- `__refcounts__` for binary persistent refcount
 
-## Storage Shape
+## Instance files and `__index__`
 
-Actual data can be stored as files within the entity folder.
+A workable current shape is:
 
-- class metadata lives under reserved class-side folders
-- instance data lives inside the instance folder itself
-- attachment files may be dropped in directly if desired
-
-Current instance-side files are:
-
-- `__value__` for atomic value state
-- `__list__` for ordered refs
-- `__dict__` for keyed refs
-- `__attributes__/` for named attribute refs
-
-## Names and Indices
-
-For container entries:
-
-- **name** is the key for named entries
-- **index** is the key for ordered entries
-
-But Linux folders themselves do not provide meaningful reorderable list order.
-So folder order must not be relied on for list behavior.
-
-## Instance Files and `__index__`
-
-A workable shape is:
-
-- `__list__` — stores ordered instance refs
-- `__dict__` — stores keyed instance refs
-- `__value__` — stores atomic instance ref
-- `__attributes__/` — stores named attribute refs
-- `__instances__/__index__` — stores class instance count and live order
+- `__list__` — stores ordered child ids
+- `__dict__` — stores keyed key/value ids
+- `__value__` — stores atomic raw bytes
+- `__attributes__` — stores named child ids
+- `__instances__/__index__` — stores next birth number and current live order
 
 Meaning:
 
-- instance-side files store per-instance shape and refs
-- `__instances__/__index__` stores the class-side instance catalog
+- instance-side files store per-instance shape and ownership edges
+- `__instances__/__index__` stores class-side instance sequence state
 
-## List Behavior
+## List behavior
 
-List-like instance behavior can exist **only if** ordering is stored explicitly, not derived from filesystem order.
+List order is explicit.
+It must not depend on folder order.
 
-So list behavior comes from `__list__`, not from the order Linux returns directory entries.
+So list behavior comes from `__list__`, not from how the filesystem happens to return names.
 
-## Class vs Instance Distinction
+## Class vs instance distinction
 
-Subclass and instance are both folders / entities, but they are distinguished spatially.
+Subclass and instance are both entities, but they are distinguished spatially.
 
-A class folder should have a reserved subfolder:
+The class room owns:
 
-- `__subclasses__/`
-- `__instances__/`
 - `__fields__/`
-
-Then:
-
-- capitalized child folders inside `__subclasses__/` are **subclasses**
-- entries inside `__instances__/` are **instances**
-- `__subclasses__/` is the subclass catalog manager folder
-- `__fields__/` is the field manager folder
-
-This means instances do not live in the same room as subclasses.
-
-Instances are also a list-like structure.
-So they should not be treated as ordered purely by folder names.
-
-A workable form is:
-
 - `__subclasses__/`
-	- `<SubclassName>/`
-	- `<SubclassName>/`
 - `__instances__/`
-	- `__index__`
-	- `_<stable instance version>/`
-	- `_<stable instance version>/`
+
+Instances live only under `__instances__/` as underscored versions:
+
+- `_0`
+- `_1`
+- `_2`
 
 So:
 
-- subclass classes live as real child class folders inside `__subclasses__/`
-- instance folders use stable underscored version ids
-- list order of instances is held separately in `__index__`
-- instance id is not the same thing as list position
+- subclass classes live under `__subclasses__/`
+- instance rooms live under `__instances__/`
+- instance birth id is stable
+- live order is held separately in `__index__`
 
-This preserves list behavior without making reorder depend on renaming instance folders.
+## Read / write model
 
-## Read / Write Model
+The current desired law remains:
 
-The dominant operations are expected to be mostly:
+- read should stay read
+- write should stay one explicit act
 
-- **read dir**
-- **write dir**
+That is why:
 
-This means the folder model is practical if the directory itself acts as the write unit.
+- registry read miss does not allocate
+- GC read miss does not allocate
+- mutation boundaries are explicit in disk managers
 
-The desired simplification is:
+This keeps simultaneity legible.
 
-- **read / write only**
+## Liveness model
 
-That is:
+The current liveness formula is:
 
-- minimize extra folder machinery
-- avoid relying on extra directory behavior
-- keep the system centered around direct read/write
+- direct edge created -> refcount increments
+- direct edge removed -> refcount decrements
+- refcount reaches zero -> release may cascade through direct children
+- `o.V` is the root owner of top-level persistent state
+- startup sweep removes zero-ref non-root instance rooms
 
-## Performance Direction
+So the beautiful hard-link intuition is still right, but now it is implemented explicitly through:
 
-The service becomes much simpler in this model.
+- direct refs on disk
+- one binary refcount table
+- one root value
 
-The folder structure naturally provides namespace and placement.
+## Performance direction
 
-The current model works if classes use:
+Recent performance wins confirmed the architectural direction:
 
-- `__fields__/`
-- `__subclasses__/`
-- `__instances__/__index__`
+- packed `__attributes__`
+- binary `__refcounts__`
+- binary `__registry__`
 
-## Inheritance
+The important point is not only speed.
+It is that the faster path also matches the invariant better:
 
-Inheritance will often amount to subtree copying, especially because generated properties created on object creation will often require it.
-
-But the rule is:
-
-- **copy only when required**
-- and this applies to both **shape** and **data**
-
-Not:
-
-- always copy shape
-- optionally copy data
-
-But:
-
-- copy shape only when required
-- copy data only when required
-
-It will be required often, but not always.
-
-## Exactness Invariant
-
-Disk must be an **exact replica** of what is materialized in memory.
-
-Therefore:
-
-- if something is materialized in memory, it must exist on disk correspondingly
-- if something is not materialized, it does not need to be copied
-
-This applies both to shape and data.
-
-## Protected Invariant
-
-**Simultaneity in order** is protected.
-
-It must not be traded away for speed.
-
-So acceleration is allowed only inside that invariant, not by weakening it.
-
-## Summary Formula
-
-- `IS-A` = tree of form
-- `HAS-A` = graph of retention
-- entity = folder
-- attachment = file
-- `__fields__` = field schema folders
-- `__subclasses__` = subclass catalog
-- `__instances__/__index__` = class instance order / indexing
-- `__list__` = ordered instance refs
-- `__dict__` = keyed instance refs
-- `__value__` = atomic instance ref
-- `__attributes__` = named instance refs
-- copy only when required
-- exact replica of materialized memory on disk
-- simultaneity in order is protected
+- fewer little files
+- fewer hidden writes
+- clearer ownership boundaries

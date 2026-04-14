@@ -78,13 +78,15 @@ Reason:
 
 Final answer:
 
-- `__attributes__/<name>` stores the entity id as binary `Q`
-- more generally, refs are `Q`
+- named object refs live in `__attributes__`
+- ref values are entity ids in binary `Q`
+- current implementation packs all named refs into one binary `__attributes__` file
 
 Reason:
 
 - all reference-bearing locations use the same numeric ref law
 - avoids mixed text/binary ref semantics
+- keeps attrs compatible with append/update optimization without changing the ref law
 
 ### Instance form vs class form
 
@@ -170,4 +172,3 @@ The remaining open implementation questions do not belong to disk geometry anymo
 Disk dev stage is cleared.
 
 What remains is not a disk substrate question, but an `o.T` layer question.
-

@@ -40,88 +40,109 @@ class T(o.Module, metaclass=o.TMeta):
 	def __setattr__(self, name, value):
 		o.Timer.start('o.Object.__setattr__')
 
-		cls = self.__class__
-		value_instance = o.T(value)
-		value_visible  = value_instance
+		child = o.T(value)
+		value = child
 
 		if name.startswith('_'):
 			raise AttributeError(f'Invalid name `{name}`: attribute can not start with "_"')
-		
-		# if not cls.__disk_class__.fields.has(name):
-		# 	raise TypeError(f'Unexpected field name `{name}` for `{cls.__proto__}`')
 
-		if isinstance(value_instance, o.Atom):
-			value_visible = value_instance.__value__
+		if isinstance(child, o.Atom):
+			value = child.__value__
 
-		self.__disk_instance__.attributes.set(name, value_instance.id)
-		# object.__setattr__(self, name, value_visible)
+		self.__disk_instance__.attributes.set(name, child.id)
+		object.__setattr__(self, name, value)
 
 		o.Timer.stop('o.Object.__setattr__')
 
-	# Get object attribute
+	# Get builtin-facing attribute
 	# ----------------------------------------------------------------------
-	def __getattribute__(self, name):
-		o.Timer.start('o.Object.__getattribute__')
+	def _get_builtin_attr(self, name):
+		attr          = o.undefined
+		builtin_value = o.undefined
+
+		try:
+			builtin_value = self._get_operator_value()
+		except TypeError:
+			builtin_value = o.undefined
+
+		if builtin_value is not o.undefined and hasattr(builtin_value, name):
+			attr = getattr(builtin_value, name)
+
+			if callable(attr):
+				method = attr
+
+				def builtin_method(*args, **kwargs):
+					result = method(*args, **kwargs)
+					self.__sync_from_builtin__(builtin_value)
+
+					return result
+
+				attr = builtin_method
+
+		return attr
+
+	# Get object attribute on cache miss
+	# ----------------------------------------------------------------------
+	def __getattr__(self, name):
+		o.Timer.start('o.Object.__getattr__')
 
 		value = o.undefined
 
 		try:
 			if name.startswith('_'):
-				value = object.__getattribute__(self, name)
+				raise AttributeError(name)
+
+			disk_instance = object.__getattribute__(self, '__disk_instance__')
+
+			if disk_instance.attributes.has(name):
+				child = o.get(disk_instance.attributes.get(name))
+				value = child
+
+				if isinstance(child, o.Atom):
+					value = child.__value__
+
+				object.__setattr__(self, name, value)
 			else:
-				disk_instance = object.__getattribute__(self, '__disk_instance__')
+				value = self._get_builtin_attr(name)
 
-				if disk_instance.attributes.has(name):
-					id    = disk_instance.attributes.get(name)
-					value = o.get(id)
-
-					if isinstance(value, o.Atom):
-						value = value.__value__
-
-					object.__setattr__(self, name, value)
-				else:
-					value = object.__getattribute__(self, name)
+				if value is o.undefined:
+					raise AttributeError(name)
 		finally:
-			o.Timer.stop('o.Object.__getattribute__')
+			o.Timer.stop('o.Object.__getattr__')
 
 		return value
 
-	# Delete runtime instance
+	# Delete object attribute
 	# ----------------------------------------------------------------------
-	def __del__(self):
-		if hasattr(self, 'id'):
-			entity = o.__entities__.get(self.id)
+	def __delattr__(self, name):
+		if name.startswith('_'):
+			raise AttributeError(name)
 
-			if entity is self:
-				del o.__entities__[self.id]
+		self.__disk_instance__.attributes.delete(name)
 
-		if hasattr(self, '__disk_instance__'):
-			self.__disk_instance__.delete()
+		if name in self.__dict__:
+			object.__delattr__(self, name)
 
-	# # Get object attribute
-	# # ----------------------------------------------------------------------
-	# def __getattr__(self, name):
-	# 	o.Timer.start('o.Object.__getattr__')
+	# Sync entity state back from builtin-visible value
+	# ----------------------------------------------------------------------
+	def __sync_from_builtin__(self, value):
+		if isinstance(self, o.Atom):
+			object.__setattr__(self, '__value__', value)
+			self.__disk_instance__.atomic.set(self.__cast_in__(value))
+		elif isinstance(self, o.List):
+			ids = [o.T(item).id for item in value]
 
-	# 	cls   = self.__class__
-	# 	value = o.undefined
+			self.__disk_instance__.list.items = ids
+		elif isinstance(self, o.Dict):
+			items = {}
 
-	# 	# if cls.__disk_class__.fields.has(name):
-	# 	if self.__disk_instance__.attributes.has(name):
-	# 		id    = self.__disk_instance__.attributes.get(name)
-	# 		value = o.get(id)
+			for key, item in value.items():
+				key_child   = o.T(key)
+				value_child = o.T(item)
 
-	# 		if isinstance(value, o.Atom):
-	# 			value = value.__value__
+				items[key_child.id] = value_child.id
 
-	# 		# object.__setattr__(self, name, value)
-
-	# 	if value is o.undefined:
-	# 		o.Timer.stop('o.Object.__getattr__')
-	# 		raise AttributeError(name)
-
-	# 	o.Timer.stop('o.Object.__getattr__')
-	# 	return value
+			self.__disk_instance__.dict.items = items
 
 	# Setup born subclass instance
 	# ----------------------------------------------------------------------
@@ -157,3 +178,6 @@ class T(o.Module, metaclass=o.TMeta):
 		object.__setattr__(self, '__proto__', f'{cls.__proto__}.{version}')
 
 		return self
+
+
+o.TOperators.bind(T)
