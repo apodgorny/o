@@ -6,10 +6,11 @@ class Null(o.Atom):
 
 	# Cast atomic bytes out
 	# ----------------------------------------------------------------------
-	def __cast_out__(self, value):
+	def __cast_out__(self):
 		return None
 
 	# Cast atomic value into bytes
 	# ----------------------------------------------------------------------
 	def __cast_in__(self, value):
-		return b''
+		object.__setattr__(self, '__value__', value)
+		self.__disk_instance__.atomic.set(b'')

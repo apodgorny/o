@@ -7,9 +7,7 @@ class List(o.T):
 	# Initialize list
 	# ----------------------------------------------------------------------
 	def __init__(self, value):
-		ids = [o.T(item).id for item in value]
-
-		self.__disk_instance__.list.items = ids
+		self.__cast_in__(value)
 
 	# Get list item
 	# ----------------------------------------------------------------------
@@ -52,6 +50,22 @@ class List(o.T):
 	def __iter__(self):
 		for index in range(len(self)):
 			yield self[index]
+
+	# Cast to list
+	# ----------------------------------------------------------------------
+	def __cast_out__(self):
+		return list(self)
+
+	# Cast visible list into entity
+	# ----------------------------------------------------------------------
+	def __cast_in__(self, value):
+		ids = [o.T(item).id for item in value]
+
+		self.__disk_instance__.list.items = ids
+
+	# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
 
 	# Append list item
 	# ----------------------------------------------------------------------

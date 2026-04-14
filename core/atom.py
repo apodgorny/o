@@ -16,8 +16,7 @@ class Atom(o.T):
 				f'`{self.__class__.__proto__}` expects `{origin}`, got `{type(value)}`'
 			)
 
-		object.__setattr__(self, '__value__', value)
-		self.__disk_instance__.atomic.set(self.__cast_in__(value))
+		self.__cast_in__(value)
 
 	# Materialize atomic instance from disk
 	# ----------------------------------------------------------------------
@@ -27,18 +26,19 @@ class Atom(o.T):
 		value = self.__disk_instance__.atomic.get()
 
 		if value is not o.undefined:
-			value = self.__cast_out__(value)
+			object.__setattr__(self, '__value__', value)
+			value = self.__cast_out__()
 
 		object.__setattr__(self, '__value__', value)
 
 		return self
 
-	# Cast atomic value out
-	# ----------------------------------------------------------------------
-	def __cast_out__(self):
-		raise NotImplementedError
+	# # Cast atomic value out
+	# # ----------------------------------------------------------------------
+	# def __cast_out__(self):
+	# 	raise NotImplementedError
 
-	# Cast atomic value into bytes
-	# ----------------------------------------------------------------------
-	def __cast_in__(self, value):
-		raise NotImplementedError
+	# # Cast atomic value into bytes
+	# # ----------------------------------------------------------------------
+	# def __cast_in__(self, value):
+	# 	raise NotImplementedError

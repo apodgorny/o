@@ -7,15 +7,7 @@ class Dict(o.T):
 	# Initialize dict
 	# ----------------------------------------------------------------------
 	def __init__(self, value):
-		items = {}
-
-		for key, item in value.items():
-			key_child   = o.T(key)
-			value_child = o.T(item)
-
-			items[key_child.id] = value_child.id
-
-		self.__disk_instance__.dict.items = items
+		self.__cast_in__(value)
 
 	# Get dict item
 	# ----------------------------------------------------------------------
@@ -65,6 +57,24 @@ class Dict(o.T):
 	# ----------------------------------------------------------------------
 	def __len__(self):
 		return len(self.__disk_instance__.dict.items)
+
+	# Cast to dict
+	# ----------------------------------------------------------------------
+	def __cast_out__(self):
+		return dict(self.items())
+
+	# Cast visible dict into entity
+	# ----------------------------------------------------------------------
+	def __cast_in__(self, value):
+		items = {}
+
+		for key, item in value.items():
+			key_child   = o.T(key)
+			value_child = o.T(item)
+
+			items[key_child.id] = value_child.id
+
+		self.__disk_instance__.dict.items = items
 
 	# ======================================================================
 	# PUBLIC METHODS

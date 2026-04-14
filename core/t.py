@@ -54,15 +54,12 @@ class T(o.Module, metaclass=o.TMeta):
 
 		o.Timer.stop('o.Object.__setattr__')
 
-	# Get builtin-facing attribute
+	## Get builtin-facing attribute
 	# ----------------------------------------------------------------------
 	def _get_builtin_attr(self, name):
-		attr          = o.undefined
-		builtin_value = o.undefined
-
 		try:
-			builtin_value = self._get_operator_value()
-		except TypeError:
+			builtin_value = self.__cast_out__()
+		except (TypeError, NotImplementedError):
 			builtin_value = o.undefined
 
 		if builtin_value is not o.undefined and hasattr(builtin_value, name):
@@ -70,14 +67,15 @@ class T(o.Module, metaclass=o.TMeta):
 
 			if callable(attr):
 				method = attr
-
 				def builtin_method(*args, **kwargs):
 					result = method(*args, **kwargs)
-					self.__sync_from_builtin__(builtin_value)
+					self.__cast_in__(builtin_value)
 
 					return result
 
 				attr = builtin_method
+		else:
+			attr = o.undefined
 
 		return attr
 
@@ -123,27 +121,6 @@ class T(o.Module, metaclass=o.TMeta):
 		if name in self.__dict__:
 			object.__delattr__(self, name)
 
-	# Sync entity state back from builtin-visible value
-	# ----------------------------------------------------------------------
-	def __sync_from_builtin__(self, value):
-		if isinstance(self, o.Atom):
-			object.__setattr__(self, '__value__', value)
-			self.__disk_instance__.atomic.set(self.__cast_in__(value))
-		elif isinstance(self, o.List):
-			ids = [o.T(item).id for item in value]
-
-			self.__disk_instance__.list.items = ids
-		elif isinstance(self, o.Dict):
-			items = {}
-
-			for key, item in value.items():
-				key_child   = o.T(key)
-				value_child = o.T(item)
-
-				items[key_child.id] = value_child.id
-
-			self.__disk_instance__.dict.items = items
-
 	# Setup born subclass instance
 	# ----------------------------------------------------------------------
 	def __sync__(self, kwargs):
@@ -178,6 +155,16 @@ class T(o.Module, metaclass=o.TMeta):
 		object.__setattr__(self, '__proto__', f'{cls.__proto__}.{version}')
 
 		return self
+
+	# Cast Python-visible value into entity
+	# ----------------------------------------------------------------------
+	def __cast_in__(self, value):
+		raise TypeError(f'`{self.__class__.__proto__}` must implement `__cast_in__()`')
+
+	# Cast out into Python-visible value
+	# ----------------------------------------------------------------------
+	def __cast_out__(self):
+		raise TypeError(f'`{self.__class__.__proto__}` must implement `__cast_out__()`')
 
 
 o.TOperators.bind(T)
