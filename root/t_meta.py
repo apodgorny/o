@@ -223,6 +223,11 @@ class TMeta(type(o.Module)):
 	# PUBLIC CLASS METHODS
 	# ======================================================================
 
+	# Export strict JSON schema
+	# ----------------------------------------------------------------------
+	def to_json_schema(cls):
+		return o.JsonSchema(cls)
+
 	# Extend
 	# ----------------------------------------------------------------------
 	def extend(cls, __class_name__, __annotation__=None, **fields):
