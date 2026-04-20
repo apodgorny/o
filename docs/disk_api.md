@@ -32,23 +32,23 @@ Entity rooms remain folder-based.
 | --- | --- |
 | `class Entity(o.Module)` | Base disk entity with stable `id` from `path` and registry binding. |
 | `Entity.__init__(self, path_or_proto=None)` | Sets `path`, computes `id`, and registers `id -> path`. |
-| `Entity.load(cls, id)` | `o.disk.Instance | o.disk.Class | o.undefined` ; resolves disk entity by registry id. |
+| `Entity.load(cls, id)` | `o.disk.Instance | o.disk.Class | o.Undefined` ; resolves disk entity by registry id. |
 
 ## `class.py`
 
 | Signature | Returns / does |
 | --- | --- |
 | `class Class(o.disk.Entity)` | Disk class room with field, subclass, and instance managers. |
-| `Class.__init__(self, path)` | Creates class folder, attaches managers, and exposes `annotation` / `o_module`. |
-| `Class.annotation` | `annotation | o.undefined` ; class annotation persisted as text and read back through `o.Annotation`. |
-| `Class.o_module` | `str | o.undefined` ; lawful source-backed world address persisted in `__o_module__`. |
+| `Class.__init__(self, path)` | Creates class folder, attaches managers, and exposes `annotation` / `route`. |
+| `Class.annotation` | `annotation | o.Undefined` ; class annotation persisted as text and read back through `o.Annotation`. |
+| `Class.route` | `str | o.Undefined` ; lawful source-backed world address persisted in `__route__`. |
 
 ## `instance.py`
 
 | Signature | Returns / does |
 | --- | --- |
 | `class Instance(o.disk.Entity)` | Disk instance room with object attrs and optional list, dict, or atomic manager. |
-| `Instance.__init__(self, path, annotation=o.undefined)` | Creates room, materializes `attributes`, and reopens shape from annotation or existing files. |
+| `Instance.__init__(self, path, annotation=o.Undefined)` | Creates room, materializes `attributes`, and reopens shape from annotation or existing files. |
 | `Instance.delete(self)` | Removes the instance room from disk. Higher-level release work belongs to `o.services.GC`. |
 
 ## `fields.py`
@@ -94,7 +94,7 @@ Entity rooms remain folder-based.
 | Signature | Returns / does |
 | --- | --- |
 | `class Attributes(o.Module)` | Manager for packed `__attributes__` name -> child id state. |
-| `Attributes.set(self, name, id)` | Persists one attr edge, updates GC, returns old id or `o.undefined`. |
+| `Attributes.set(self, name, id)` | Persists one attr edge, updates GC, returns old id or `o.Undefined`. |
 | `Attributes.get(self, name)` | Returns child id by name. |
 | `Attributes.delete(self, name)` | Removes one attr edge, updates GC, returns removed id. |
 | `Attributes.has(self, name)` | Checks whether attr entry exists. |
@@ -117,7 +117,7 @@ Entity rooms remain folder-based.
 | `Dict.items` | `dict[int, int]` ; whole mapping state. Setter rewrites full file and updates key/value GC by delta. |
 | `Dict.get(self, key)` | Returns value id by resolved key token. |
 | `Dict.get_key_id(self, key)` | Resolves persisted key id from incoming key token. |
-| `Dict.set(self, key, value_id)` | Upserts one pair, updates key/value GC, returns old value id or `o.undefined`. |
+| `Dict.set(self, key, value_id)` | Upserts one pair, updates key/value GC, returns old value id or `o.Undefined`. |
 | `Dict.delete(self, key)` | Removes one pair, updates key/value GC, returns removed value id. |
 
 ## `atomic.py`

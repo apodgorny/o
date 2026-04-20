@@ -238,3 +238,83 @@ o.TMeta.__new__      : 1.191 → 1.519 ms      = 1.28x slower
 o.Object.__setattr__ : 1.482 → 1.660 ms      = 1.12x slower
 
 Итого: после всех откатов и выпрямлений система стала намного лучше, чем сразу после добавления builtins/operators, но всё ещё немного медленнее, чем базовая точка до их поддержки; главный остаточный налог — на dict lookup, metaclass path и в меньшей степени на list/object mutation.
+
+----------------------------------------------------------------------
+REFACTORED WL TO USE CLASSES
+
+o.T.__new__          : 3.340s    ≈ 8038 x 415.485µs ( 347.958µs - 2.682ms)
+o.List.__getitem__   : 55.182ms  ≈ 2000 x 27.591µs  ( 25.375µs  - 171.875µs)
+o.List.__setitem__   : 4.355s    ≈ 2000 x 2.178ms   ( 1.837ms   - 8.605ms)
+o.Dict.__getitem__   : 167.559ms ≈ 2000 x 83.779µs  ( 73.542µs  - 1.945ms)
+o.Dict.__setitem__   : 4.521s    ≈ 2000 x 2.261ms   ( 1.932ms   - 7.112ms)
+o.TMeta.__new__      : 3.544s    ≈ 2001 x 1.771ms   ( 1.220ms   - 15.908ms)
+o.Object.__setattr__ : 8.769s    ≈ 4004 x 2.190ms   ( 634.542µs - 10.456ms)
+
+Compared to previous run:
+
+o.T.__new__          : 366.605 → 415.485 µs  = 1.13x slower
+o.List.__getitem__   : 34.673 → 27.591 µs    = 1.26x faster
+o.List.__setitem__   : 1.653 → 2.178 ms      = 1.32x slower
+o.Dict.__getitem__   : 99.544 → 83.779 µs    = 1.19x faster
+o.Dict.__setitem__   : 1.828 → 2.261 ms      = 1.24x slower
+o.TMeta.__new__      : 1.656 → 1.771 ms      = 1.07x slower
+o.Object.__setattr__ : 1.707 → 2.190 ms      = 1.28x slower
+
+
+Refactoring WL to use classes made read-path better (List.__getitem__ 1.26x faster, Dict.__getitem__ 1.19x faster), but made mutation/birth path worse (Object.__setattr__ 1.28x slower, list/dict writes 1.24–1.32x slower, T.__new__ 1.13x slower).
+
+----------------------------------------------------------------------
+File cache with hash freshness in WL
+
+o.T.__new__          : 1.152s   ≈ 8038 x 143.328µs ( 111.667µs - 1.237ms)
+o.List.__getitem__   : 6.745ms  ≈ 2000 x 3.372µs   ( 2.958µs   - 42.459µs)
+o.List.__setitem__   : 1.349s   ≈ 2000 x 674.522µs ( 541.749µs - 2.816ms)
+o.Dict.__getitem__   : 19.406ms ≈ 2000 x 9.703µs   ( 7.500µs   - 44.875µs)
+o.Dict.__setitem__   : 1.328s   ≈ 2000 x 663.769µs ( 542.250µs - 1.729ms)
+o.TMeta.__new__      : 1.738s   ≈ 2001 x 868.619µs ( 648.000µs - 17.756ms)
+o.Object.__setattr__ : 2.675s   ≈ 4004 x 668.042µs ( 362.667µs - 3.806ms)
+
+Compared to previous run:
+
+o.T.__new__          : 415.485 → 143.328 µs  = 2.90x faster
+o.List.__getitem__   : 27.591 → 3.372 µs     = 8.18x faster
+o.List.__setitem__   : 2.178 → 674.522 µs    = 3.23x faster
+o.Dict.__getitem__   : 83.779 → 9.703 µs     = 8.63x faster
+o.Dict.__setitem__   : 2.261 → 663.769 µs    = 3.41x faster
+o.TMeta.__new__      : 1.771 → 868.619 µs    = 2.04x faster
+o.Object.__setattr__ : 2.190 → 668.042 µs    = 3.28x faster
+
+Huge win.
+Caching is now owned by `File` objects rather than by WL registries: a carrier keeps `data`, compares freshness through `hash`, and reloads only when the source token changes. With the top-level carrier cache wired correctly, hot names such as `o.T`, `o.disk` and `o.services` finally reuse the same `File` objects, so the `File` cache and hash freshness law can actually work. The result is a systemic win across read, write and birth paths.
+
+----------------------------------------------------------------------
+Reusing structural wrappers
+
+o.T.__new__          : 881.976ms ≈ 8038 x 109.759µs ( 86.250µs  - 791.625µs)
+o.List.__getitem__   : 2.723ms   ≈ 2000 x 1.362µs   ( 1.250µs   - 19.375µs)
+o.List.__setitem__   : 1.260s    ≈ 2000 x 630.248µs ( 539.500µs - 1.671ms)
+o.Dict.__getitem__   : 5.527ms   ≈ 2000 x 2.764µs   ( 2.499µs   - 18.417µs)
+o.Dict.__setitem__   : 1.235s    ≈ 2000 x 617.384µs ( 504.499µs - 1.548ms)
+o.TMeta.__new__      : 1.330s    ≈ 2001 x 664.796µs ( 504.458µs - 2.185ms)
+o.Object.__setattr__ : 2.164s    ≈ 4004 x 540.617µs ( 282.459µs - 2.623ms)
+
+Compared to last run:
+
+o.T.__new__          : 136.986 → 109.759 µs  = 1.25x faster
+o.List.__getitem__   : 1.610   → 1.362 µs    = 1.18x faster
+o.List.__setitem__   : 674.408 → 630.248 µs  = 1.07x faster
+o.Dict.__getitem__   : 3.311   → 2.764 µs    = 1.20x faster
+o.Dict.__setitem__   : 630.527 → 617.384 µs  = 1.02x faster
+o.TMeta.__new__      : 870.187 → 664.796 µs  = 1.31x faster
+o.Object.__setattr__ : 615.423 → 540.617 µs  = 1.14x faster
+
+Compared to pre-folder baseline:
+
+o.List.__getitem__   : 43.956 → 1.362 µs    = 32.27x faster
+o.List.__setitem__   : 46.153 → 630.248 µs  = 13.66x slower
+o.Dict.__getitem__   : 43.405 → 2.764 µs    = 15.70x faster
+o.Dict.__setitem__   : 46.329 → 617.384 µs  = 13.33x slower
+o.TMeta.__new__      : 374.431 → 664.796 µs = 1.78x slower
+o.Object.__setattr__ : 46.877 → 540.617 µs  = 11.53x slower
+
+Reusing structural wrappers removed another shared tax from the system. Lookup became ~18–20% faster again, `o.T.__new__` improved by 25%, `o.TMeta.__new__` by 31%, and `o.Object.__setattr__` by 14%. This confirms that repeated wrapper and scaffolding reconstruction was a real hot-path cost across resolution, birth, and mutation.

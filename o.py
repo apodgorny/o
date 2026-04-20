@@ -1,163 +1,170 @@
 import os, re
 
-from whitelabel.wl import WL
+from wl import WL
 
 
-def initialize(o):
-	os.makedirs(os.path.join(o.core_path, o.DATA_DIR), exist_ok=True)
-	o.F
+class O(WL, plugins=['Test']):
 
-	for module in o:
-		if not module.name.startswith('_'):
-			module.load()
+	DATA_DIR = '_'
 
-	o.ensure_value()
-	o.services.GC.sweep()
+	__entities__     = {}  # id          =>  entity strong reference
+	__disk_classes__ = {}  # id          =>  o.disk.Class
+	__cast_map__     = {}  # Annotation  =>  o.T subclass
 
-def get(o, id_or_proto):
-	entity = o.undefined
-	proto  = o.undefined
+	# Initialize library
+	# ----------------------------------------------------------------------
+	def initialize(o):
+		os.makedirs(os.path.join(o.__path__, o.DATA_DIR), exist_ok=True)
 
-	if isinstance(id_or_proto, int):
-		entity = o.__entities__.get(id_or_proto, o.undefined)
-		if entity is o.undefined:
-			proto = o.id_to_proto(id_or_proto)
+		for item in o:
+			if not item.is_directory:
+				item.load()
 
-	elif isinstance(id_or_proto, str):
-		proto = id_or_proto
+		o.ensure_value()
+		o.services.GC.sweep()
 
-	if proto is not o.undefined:
-		entity = eval(proto)
+	# Get entity by id or proto
+	# ----------------------------------------------------------------------
+	def get(o, id_or_proto):
+		entity = o.Undefined
+		proto  = o.Undefined
 
-	return entity
+		if isinstance(id_or_proto, int):
+			entity = o.__entities__.get(id_or_proto, o.Undefined)
+			if entity is o.Undefined:
+				proto = o.id_to_proto(id_or_proto)
 
-def is_instance_version(o, s):
-	return re.fullmatch(r'_[0-9]+', s) is not None
+		elif isinstance(id_or_proto, str):
+			proto = id_or_proto
 
-def is_class_name(o, s):
-	return re.fullmatch(r'[A-Z][A-Za-z0-9_]*', s) is not None
+		if proto is not o.Undefined:
+			entity = eval(proto)
 
-def is_atomic(o, id):
-	proto     = o.id_to_proto(id)
-	is_atomic = False
+		return entity
 
-	if proto is not o.undefined:
-		is_atomic = proto.startswith('o.T.Atom')
+	# Check instance version token
+	# ----------------------------------------------------------------------
+	def is_instance_version(o, s):
+		return re.fullmatch(r'_[0-9]+', s) is not None
 
-	return is_atomic
+	# Check class name token
+	# ----------------------------------------------------------------------
+	def is_class_name(o, s):
+		return re.fullmatch(r'[A-Z][A-Za-z0-9_]*', s) is not None
 
-def id_to_path(o, id):
-	return o.services.Registry.get(id)
+	# Check whether entity is atomic
+	# ----------------------------------------------------------------------
+	def is_atomic(o, id):
+		proto     = o.id_to_proto(id)
+		is_atomic = False
 
-def id_to_proto(o, id):
-	path  = o.services.Registry.get(id)
-	proto = o.undefined
+		if proto is not o.Undefined:
+			is_atomic = proto.startswith('o.T.Atom')
 
-	if path is not o.undefined:
-		proto = o.path_to_proto(path)
+		return is_atomic
 
-	return proto
+	# Resolve path by id
+	# ----------------------------------------------------------------------
+	def id_to_path(o, id):
+		return o.services.Registry.get(id)
 
-def proto_to_id(o, proto):
-	return o.String.hash(proto, 15)
+	# Resolve proto by id
+	# ----------------------------------------------------------------------
+	def id_to_proto(o, id):
+		path  = o.services.Registry.get(id)
+		proto = o.Undefined
 
-def exists(o, proto_or_id):
-	if isinstance(proto_or_id, int):
-		path = o.id_to_path(proto_or_id)
-	else:
-		path = o.proto_to_path(proto_or_id)
+		if path is not o.Undefined:
+			proto = o.path_to_proto(path)
 
-	return os.path.exists(path)
+		return proto
 
-def proto_to_path(o, proto='o.T'):
-	proto = proto.removeprefix('o.T')
-	items = proto.split('.') if proto else []
-	path  = os.path.join(o.core_path, o.DATA_DIR, 'T')
+	# Hash proto into id
+	# ----------------------------------------------------------------------
+	def proto_to_id(o, proto):
+		return o.String.hash(proto, 15)
 
-	for item in items:
-		if   o.is_instance_version (item) : path += '/__instances__/'  + item
-		elif o.is_class_name    (item) : path += '/__subclasses__/' + item
-
-	return path
-
-def path_to_proto(o, path):
-	root  = os.path.join(o.core_path, o.DATA_DIR)
-	path  = os.path.relpath(path, os.path.join(root, 'T'))
-	items = [] if path == '.' else path.split('/')
-	proto = 'o.T'
-
-	if items:
-		proto += '.' + '.'.join([
-		item for item in items if not item.startswith('__')
-		])
-
-	return proto
-
-def path_to_id(o, path):
-	proto = o.path_to_proto(path)
-	return o.proto_to_id(proto)
-
-def register_entity(o, entity):
-	if entity.id not in o.__entities__:
-		if isinstance(entity, type):
-			if '__annotation__' in entity.__dict__:
-				annotation = entity.__annotation__.annotation
-				if annotation not in o.__cast_map__:
-					o.__cast_map__[annotation] = entity
-				else:
-					other_proto = o.__cast_map__[annotation].__proto__
-					raise TypeError(f'Annotation `{annotation}` is already defined in `{other_proto}`')
-
-		o.__entities__[entity.id] = entity
-
-def ensure_value(o):
-	value       = o.__dict__.get('V', o.undefined)
-	value_path  = o.undefined
-	value_proto = f'{o.T.V.__proto__}._0'
-
-	if value is not o.undefined:
-		value_path = o.id_to_path(value.id)
-
-	if value_path is o.undefined:
-		if o.exists(value_proto):
-			value = o.get(value_proto)
+	# Check whether proto or id exists on disk
+	# ----------------------------------------------------------------------
+	def exists(o, proto_or_id):
+		if isinstance(proto_or_id, int):
+			path = o.id_to_path(proto_or_id)
 		else:
-			value = o.T.V()
+			path = o.proto_to_path(proto_or_id)
 
-		o.__dict__['V'] = value
+		return os.path.exists(path)
 
-	return value
+	# Resolve proto into disk path
+	# ----------------------------------------------------------------------
+	def proto_to_path(o, proto='o.T'):
+		proto = proto.removeprefix('o.T')
+		items = proto.split('.') if proto else []
+		path  = os.path.join(o.__path__, o.DATA_DIR, 'T')
 
+		for item in items:
+			if   o.is_instance_version (item) : path += '/__instances__/'  + item
+			elif o.is_class_name    (item) : path += '/__subclasses__/' + item
 
-o = WL.define(
-	'o',
-	__file__,
+		return path
 
-	DATA_DIR = '_',
+	# Resolve disk path into proto
+	# ----------------------------------------------------------------------
+	def path_to_proto(o, path):
+		root  = os.path.join(o.__path__, o.DATA_DIR)
+		path  = os.path.relpath(path, os.path.join(root, 'T'))
+		items = [] if path == '.' else path.split('/')
+		proto = 'o.T'
 
-	# SOT – holds strong refernces
-	# - - - - - - - - - - - - - - - - - -
-	__entities__ = {},  # id => entity strong reference
+		if items:
+			proto += '.' + '.'.join([
+			item for item in items if not item.startswith('__')
+			])
 
-	# SOT – rules of casting from python
-	# - - - - - - - - - - - - - - - - - -
-	__cast_map__ = {},  # Annotation => o.T subclass
+		return proto
 
-	on_initialize    = initialize,
+	# Resolve disk path into id
+	# ----------------------------------------------------------------------
+	def path_to_id(o, path):
+		proto = o.path_to_proto(path)
+		return o.proto_to_id(proto)
 
-	get              = get,
-	is_instance_version = is_instance_version,
-	is_class_name    = is_class_name,
-	is_atomic        = is_atomic,
+	# Register loaded entity
+	# ----------------------------------------------------------------------
+	def register_entity(o, entity):
+		if entity.id not in o.__entities__:
+			if isinstance(entity, type):
+				if '__annotation__' in entity.__dict__:
+					annotation = entity.__annotation__.annotation
+					if annotation not in o.__cast_map__:
+						o.__cast_map__[annotation] = entity
+					else:
+						other_proto = o.__cast_map__[annotation].__proto__
+						raise TypeError(f'Annotation `{annotation}` is already defined in `{other_proto}`')
 
-	id_to_path       = id_to_path,
-	id_to_proto      = id_to_proto,
-	proto_to_id      = proto_to_id,
-	exists           = exists,
-	proto_to_path    = proto_to_path,
-	path_to_proto    = path_to_proto,
-	path_to_id       = path_to_id,
+			o.__entities__[entity.id] = entity
 
-	register_entity  = register_entity,
-	ensure_value     = ensure_value,
-)
+	# Ensure root value instance exists
+	# ----------------------------------------------------------------------
+	def ensure_value(o):
+		value       = o.__dict__.get('V', o.Undefined)
+		value_path  = o.Undefined
+
+		if value is o.Undefined:
+			o.V
+
+		value_proto = f'{o.T.V.__proto__}._0'
+
+		if value is not o.Undefined:
+			value_path = o.id_to_path(value.id)
+
+		if value_path is o.Undefined:
+			if o.exists(value_proto):
+				value = o.get(value_proto)
+			else:
+				value = o.T.V()
+
+			o.__dict__['V'] = value
+
+		return value
+
+o.initialize()

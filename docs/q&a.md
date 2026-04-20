@@ -48,14 +48,14 @@ I’m through the main ontology/storage specs. The remaining pass is mostly abou
 I read the full `docs` set in `/Users/alexander/dev/o/docs` and extracted the architectural invariants. The authoritative center appears to be [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md), [o_disk_api_qa_resolution_2026_03_27.md](/Users/alexander/dev/o/docs/o_disk_api_qa_resolution_2026_03_27.md), [disk_api.md](/Users/alexander/dev/o/docs/disk_api.md), and [o_folder_storage_concept.md](/Users/alexander/dev/o/docs/o_folder_storage_concept.md). I also cross-checked the rest for reaffirmations and conflicts.
 
 **Core Invariants**
-- Canonical identity is `__proto__`, not `__o_module__`. `__o_module__` is code-location/runtime-resolution only. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md) and [o_module_and_proto.md](/Users/alexander/dev/o/docs/o_module_and_proto.md).
+- Canonical identity is `__proto__`, not `__route__`. `__route__` is code-location/runtime-resolution only. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md) and [route_and_proto.md](/Users/alexander/dev/o/docs/o_module_and_proto.md).
 - Folder geometry is the source of truth. The active substrate is folder-based storage; old `Store` is obsolete. See [o_disk_api_qa_resolution_2026_03_27.md](/Users/alexander/dev/o/docs/o_disk_api_qa_resolution_2026_03_27.md).
 - `Class` and `Instance` are distinct disk entities. Instances live under `__instances__/` and use stable underscored names like `_<digits>`. See [disk_api.md](/Users/alexander/dev/o/docs/disk_api.md).
 - All `o.T` entities have object attributes, even atomics, lists, and dicts. Object-field semantics are independent from container/atomic semantics. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md).
 - `o.T` is the universal root embodiment entrypoint. Base `o.T` accepts one positional arg or kwargs, recursively embodies data, and passes existing `o.T` instances through unchanged. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md) and [o_t_interface_usecases.md](/Users/alexander/dev/o/docs/o_t_interface_usecases.md).
 - Subclasses of `o.T` may have both one annotated contained value and object fields at the same time. Example shape: `o.List([1, 2], title='numbers')`. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md).
 - Constructor split is intentional: `__new__` chooses construction law, `__setup__` does common born-instance setup, `__init__` handles class-specific contained-value semantics. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md).
-- Field law: kwargs map only to declared fields, unknown kwargs error, missing required fields error, field names cannot start with `_`, lowercase means field, capitalized means class/subclass. Requiredness is driven by defaults with `o.undefined` meaning required. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md).
+- Field law: kwargs map only to declared fields, unknown kwargs error, missing required fields error, field names cannot start with `_`, lowercase means field, capitalized means class/subclass. Requiredness is driven by defaults with `o.Undefined` meaning required. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md).
 - Live slot law: memory holds Python-visible values or wrappers, while disk stores child ids in `__attributes__`. Memory and disk are updated together. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md).
 - `Atomic` is meant to be truly atomic: object fields store child ids, but atomic entities should store their own raw bytes in `__value__`. Concrete atomics own their own codecs. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md).
 - List semantics and object-field semantics are independent. `x[0]` is list behavior, `x.title` is object behavior. Canonical identity must not depend on list position. See [o_t_current_invariants.md](/Users/alexander/dev/o/docs/o_t_current_invariants.md) and [o_folder_structure_inspiration_3.md](/Users/alexander/dev/o/docs/o_folder_structure_inspiration_3.md).
@@ -507,13 +507,13 @@ global
 ### Assistant
 Понял: `annotation` eval-ится в глобальном namespace.
 
-Следующий вопрос: если `default` не задан, ты хочешь сохранять это на диске явно как особое значение `o.undefined`, или отсутствие файла `default` и будет означать `o.undefined`?
+Следующий вопрос: если `default` не задан, ты хочешь сохранять это на диске явно как особое значение `o.Undefined`, или отсутствие файла `default` и будет означать `o.Undefined`?
 
 ### User
-o.undefined is never saved on disk
+o.Undefined is never saved on disk
 
 ### Assistant
-Хорошо. Тогда отсутствие prop-файла `default` будет означать `o.undefined`, и это хорошо держит диск чистым.
+Хорошо. Тогда отсутствие prop-файла `default` будет означать `o.Undefined`, и это хорошо держит диск чистым.
 
 Следующий вопрос: если `description` не задан, его тоже не сохраняем вовсе, или `description` обязателен и всегда должен иметь файл?
 
@@ -526,7 +526,7 @@ Also, annotation and type (holds id pointing to class that has __annotation__ of
 
 Текущий закон получается такой:
 - `description` всегда обязателен и всегда имеет свой файл
-- `default` без файла означает `o.undefined`
+- `default` без файла означает `o.Undefined`
 - `annotation` read-only
 - `type` read-only, хранит id класса, чья `__annotation__` является origin для annotation поля
 
@@ -630,7 +630,7 @@ we can keep MyClass._.age as syntactic sugar that resolves to MyClass._age
 
 1. вообще ничего, то есть `age` отсутствует в `__dict__`
 2. `None`
-3. какой-то специальный sentinel, но не `o.undefined` на диске
+3. какой-то специальный sentinel, но не `o.Undefined` на диске
 
 ### User
 Are you excited to see it all through, my friend? :)
@@ -644,7 +644,7 @@ Are you excited to see it all through, my friend? :)
 
 1. атрибут вообще не создаётся
 2. `None`
-3. `o.undefined`
+3. `o.Undefined`
 4. что-то другое
 
 ### User

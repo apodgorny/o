@@ -9,7 +9,7 @@ It captures the current implemented storage line.
 
 - `Class` and `Instance` are distinct disk entities.
 - `__proto__` is canonical identity.
-- `__o_module__` is lawful source origin if one exists.
+- `__route__` is lawful source origin if one exists.
 - folder geometry remains the source of truth for class / instance placement.
 - `Registry` is a binary `id -> path` table, not a symlink forest.
 - `GC` is a binary refcount table, not per-entity text files.

@@ -9,8 +9,8 @@ It intentionally excludes older conflicting lines unless they were explicitly re
 
 - `__proto__` is the canonical string identity of an entity.
 - Example: `o.T.MyClass.MySubclass._12`.
-- `__o_module__` is the location of source on disk / code location.
-- `__o_module__` is **not** canonical identity.
+- `__route__` is the location of source on disk / code location.
+- `__route__` is **not** canonical identity.
 
 ---
 
@@ -110,7 +110,7 @@ It:
 
 Field requiredness follows the default law:
 
-- `default is o.undefined` → required / not optional / not nullable
+- `default is o.Undefined` → required / not optional / not nullable
 - `default is None` → optional / nullable
 - `default is other value` → optional / not nullable
 
@@ -285,12 +285,12 @@ Named class birth now has two lawful paths only:
 
 - source-backed class
   - declared in a file-backed `o.Module`
-  - persists `__o_module__` on class room
+  - persists `__route__` on class room
   - re-enters through source resolution
 
 - runtime-defined class
   - declared through `extend()`
-  - does not persist `__o_module__`
+  - does not persist `__route__`
   - re-enters structurally from disk lineage
 
 Direct runtime class declaration without lawful module origin is not the current line.

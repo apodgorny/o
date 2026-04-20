@@ -145,7 +145,7 @@ This is part of the current interface feel:
 
 Current promise:
 
-- source-backed classes reopen through `__o_module__`
+- source-backed classes reopen through `__route__`
 - runtime-defined classes reopen structurally from disk lineage
 - reopened instance preserves object attrs
 - reopened instance preserves list / dict / atomic value form

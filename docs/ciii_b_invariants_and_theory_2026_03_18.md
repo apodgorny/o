@@ -72,7 +72,7 @@ We model it as addressable beings with unfoldings.
 It provides:
 - persistent being
 - typed trees
-- manifestation terraces under one `__o_module__`
+- manifestation terraces under one `__route__`
 - coordinate suffixes for multiplicity and generation
 - extraction of subtree or property views
 - projection toward tensor-space
