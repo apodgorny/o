@@ -5,7 +5,7 @@ import tempfile
 import o
 
 
-class TestBuiltins(o.Test):
+class TestBuiltins(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod

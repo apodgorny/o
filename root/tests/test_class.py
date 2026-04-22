@@ -6,7 +6,7 @@ import tempfile
 import o
 
 
-class TestClass(o.Test):
+class TestClass(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -145,7 +145,6 @@ class TestClass(o.Test):
 			)
 
 			assert OrdinaryClassNamespace._hidden == 7
-			assert 'ping' in OrdinaryClassNamespace.__dict__
 			assert callable(OrdinaryClassNamespace.ping)
 			assert hasattr(OrdinaryClassNamespace, '_')
 			assert 'name' not in OrdinaryClassNamespace.__dict__
@@ -612,7 +611,7 @@ class TestClass(o.Test):
 				)
 			)
 
-			assert LoadedChild.__bases__[0] is RuntimeParentSourceChild
+			assert RuntimeParentSourceChild in LoadedChild.__mro__[1:]
 			assert RuntimeParentSourceChild.__disk_class__.route is o.Undefined
 			assert LoadedChild.__disk_class__.route == LoadedChild.__route__
 		finally:
@@ -637,6 +636,118 @@ class TestClass(o.Test):
 
 			assert reopened.id == inner_id
 			assert reopened.__proto__ == 'o.T.NestedSubclassProtoChainMaterialization.Inner'
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_parent_is_none(cls):
+		state = cls._patch_runtime()
+
+		try:
+			assert o.T.__parent__ is None
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_runtime_child_parent_is_public_base(cls):
+		state = cls._patch_runtime()
+
+		try:
+			RuntimeChildParentIsPublicBase = o.T.extend('RuntimeChildParentIsPublicBase')
+			Inner = RuntimeChildParentIsPublicBase.extend('Inner')
+
+			assert RuntimeChildParentIsPublicBase.__parent__ is o.T
+			assert Inner.__parent__ is RuntimeChildParentIsPublicBase
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_raw_source_child_parent_is_public_base(cls):
+		state = cls._patch_runtime()
+
+		try:
+			RawSourceChildParentIsPublicBase = cls._source_class(
+				state,
+				'RawSourceChildParentIsPublicBase',
+				(
+					'import o\n\n'
+					'class RawSourceChildParentIsPublicBase(o.T):\n'
+					'\tpass\n'
+				)
+			)
+			RawSourceGrandchildParentIsPublicBase = cls._source_class(
+				state,
+				'RawSourceGrandchildParentIsPublicBase',
+				(
+					'import o\n\n'
+					'class RawSourceGrandchildParentIsPublicBase(o.T.RawSourceChildParentIsPublicBase):\n'
+					'\tpass\n'
+				)
+			)
+			parent_module_key = os.path.realpath(
+				os.path.join(state['source_root'], 'raw_source_child_parent_is_public_base.py')
+			)
+			module_key = os.path.realpath(
+				os.path.join(state['source_root'], 'raw_source_grandchild_parent_is_public_base.py')
+			)
+			raw_parent = getattr(sys.modules[parent_module_key], 'RawSourceChildParentIsPublicBase')
+			raw_child = getattr(sys.modules[module_key], 'RawSourceGrandchildParentIsPublicBase')
+
+			assert raw_parent.__parent__ is o.T
+			assert raw_child.__parent__ is RawSourceChildParentIsPublicBase
+			assert RawSourceChildParentIsPublicBase in RawSourceGrandchildParentIsPublicBase.__mro__[1:]
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_public_source_parent_is_public_base(cls):
+		state = cls._patch_runtime()
+
+		try:
+			PublicSourceParentIsPublicBase = cls._source_class(
+				state,
+				'PublicSourceParentIsPublicBase',
+				(
+					'import o\n\n'
+					'class PublicSourceParentIsPublicBase(o.T):\n'
+					'\tpass\n'
+				)
+			)
+
+			assert PublicSourceParentIsPublicBase.__parent__ is o.T
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_public_source_child_parent_is_public_parent(cls):
+		state = cls._patch_runtime()
+
+		try:
+			PublicSourceChildParentIsPublicParent = cls._source_class(
+				state,
+				'PublicSourceChildParentIsPublicParent',
+				(
+					'import o\n\n'
+					'class PublicSourceChildParentIsPublicParent(o.T):\n'
+					'\tpass\n'
+				)
+			)
+			PublicSourceGrandchildParentIsPublicParent = cls._source_class(
+				state,
+				'PublicSourceGrandchildParentIsPublicParent',
+				(
+					'import o\n\n'
+					'class PublicSourceGrandchildParentIsPublicParent(o.T.PublicSourceChildParentIsPublicParent):\n'
+					'\tpass\n'
+				)
+			)
+
+			assert PublicSourceGrandchildParentIsPublicParent.__parent__ is PublicSourceChildParentIsPublicParent
 		finally:
 			cls._restore_runtime(state)
 

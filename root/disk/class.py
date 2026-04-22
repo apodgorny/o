@@ -35,12 +35,65 @@ import os
 
 import o
 
+
 class Class(o.disk.Entity):
 
-	# ======================================================================
-	# FRAMEWORK METHODS
-	# ======================================================================
+	# Reconcile public class room from hidden source class
+	# ----------------------------------------------------------------------
+	@classmethod
+	def reconcile(cls, source_cls):
+		name             = source_cls.__name__
+		base_cls         = source_cls.__parent__
+		proto            = f'{base_cls.__proto__}.{name}'
+		field_names      = set()
+		disk_field       = None
+		disk_class       = cls.get(proto)
+		source_fields    = getattr(source_cls, '__source_fields__', {})
+		disk_class.route = source_cls.__route__
 
+		# Collect current source field names
+		# - - - - - - - - - - - - - - - - - - - -
+		for field_name in source_fields:
+			field_names.add(field_name)
+
+		# Remove stale source-backed fields
+		# - - - - - - - - - - - - - - - - - - - -
+		for field_name, disk_field in list(disk_class.fields.items()):
+			if disk_field.has('__is_source__') and field_name not in field_names:
+				for prop_name, _ in list(disk_field.properties):
+					disk_field.remove(prop_name)
+
+				disk_field.remove('__is_source__')
+
+				if os.path.exists(disk_field.path):
+					os.rmdir(disk_field.path)
+
+				del disk_class.fields.__items__[field_name]
+
+		# Upsert current source-backed fields
+		# - - - - - - - - - - - - - - - - - - - -
+		for field_name, props in source_fields.items():
+			disk_field = disk_class.fields.set(field_name)
+
+			for prop_name, prop_value in props.items():
+				if prop_name == 'default':
+					if prop_value is not o.Undefined:
+						disk_field.set(prop_name, prop_value)
+				else:
+					disk_field.set(prop_name, prop_value)
+
+			if (
+				'default' not in props
+				or props.get('default', o.Undefined) is o.Undefined
+			) and disk_field.has('default'):
+				disk_field.remove('default')
+
+			open(os.path.join(disk_field.path, '__is_source__'), 'wb').close()
+
+		return disk_class
+
+	# Get cached or create class
+	# ----------------------------------------------------------------------
 	@classmethod
 	def get(cls, proto):
 		id         = o.proto_to_id(proto)
@@ -52,6 +105,10 @@ class Class(o.disk.Entity):
 
 		return disk_class
 
+	# ======================================================================
+	# FRAMEWORK METHODS
+	# ======================================================================
+
 	# Constructor
 	# ----------------------------------------------------------------------
 	def __init__(self, path, id=o.Undefined):
@@ -61,8 +118,8 @@ class Class(o.disk.Entity):
 
 		self._annotation     = o.Undefined
 		self.annotation_path = os.path.join(self.path, '__annotation__')
-		self._route       = o.Undefined
-		self.route_path   = os.path.join(self.path, '__route__')
+		self._route          = o.Undefined
+		self.route_path      = os.path.join(self.path, '__route__')
 		self.fields          = o.disk.Fields(self.path)
 		self.subclasses      = o.disk.Subclasses(self.path)
 		self.instances       = o.disk.Instances(self.path)

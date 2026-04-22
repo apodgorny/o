@@ -4,7 +4,7 @@ from tqdm import tqdm
 import o
 
 
-class TestPerformance(o.Test):
+class TestPerformance(o.Tester):
 
 	# Trigger list getitem
 	# ----------------------------------------------------------------------

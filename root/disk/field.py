@@ -144,4 +144,5 @@ class Field(o.Module):
 	@property
 	def properties(self):
 		for prop_name in os.listdir(self.path):
-			yield prop_name, self.get(prop_name)
+			if prop_name != '__is_source__':
+				yield prop_name, self.get(prop_name)

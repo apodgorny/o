@@ -6,7 +6,7 @@ import tempfile
 import o
 
 
-class TestDisk(o.Test):
+class TestDisk(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod

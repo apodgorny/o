@@ -5,7 +5,7 @@ import tempfile
 import o
 
 
-class TestJsonSchema(o.Test):
+class TestJsonSchema(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod

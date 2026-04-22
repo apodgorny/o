@@ -5,7 +5,7 @@ import tempfile
 import o
 
 
-class TestAtomic(o.Tester):
+class TestLlm(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -13,10 +13,10 @@ class TestAtomic(o.Tester):
 		services = o.services
 		registry = type('RegistryState', (), {})()
 		state    = {
-			'services'     : services,
-			'had_registry' : 'Registry' in services.__dict__,
-			'registry'     : services.__dict__.get('Registry'),
-			'paths'        : {},
+			'services'      : services,
+			'had_registry'  : 'Registry' in services.__dict__,
+			'registry'      : services.__dict__.get('Registry'),
+			'paths'         : {},
 		}
 
 		def add(id, path):
@@ -51,21 +51,21 @@ class TestAtomic(o.Tester):
 	@classmethod
 	def _patch_runtime(cls):
 		temp_root      = os.path.join(o.__path__, '__tmp__')
+		root           = None
 		registry_state = cls._patch_registry()
 
 		os.makedirs(temp_root, exist_ok=True)
-
-		root = tempfile.mkdtemp(prefix='o_atomic_', dir=temp_root)
+		root = tempfile.mkdtemp(prefix='o_llm_', dir=temp_root)
 
 		state = {
-			'root'      : root,
-			'temp_root' : temp_root,
-			'registry'  : registry_state,
-			'data_dir'  : o.DATA_DIR,
-			'entities'  : dict(o.__entities__),
-			'disk_classes' : dict(o.__disk_classes__),
-			'cast_map'  : dict(o.__cast_map__),
-			'value'     : o.__dict__.get('V', o.Undefined),
+			'root'          : root,
+			'temp_root'     : temp_root,
+			'registry'      : registry_state,
+			'data_dir'      : o.DATA_DIR,
+			'entities'      : dict(o.__entities__),
+			'disk_classes'  : dict(o.__disk_classes__),
+			'cast_map'      : dict(o.__cast_map__),
+			'llm'           : o.llm,
 		}
 
 		o.DATA_DIR = os.path.join('__tmp__', os.path.basename(root))
@@ -76,6 +76,7 @@ class TestAtomic(o.Tester):
 	@classmethod
 	def _restore_runtime(cls, state):
 		o.DATA_DIR = state['data_dir']
+		o.llm      = state['llm']
 
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
@@ -86,72 +87,70 @@ class TestAtomic(o.Tester):
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
-		if state['value'] is o.Undefined:
-			if 'V' in o.__dict__:
-				del o.__dict__['V']
-		else:
-			o.__dict__['V'] = state['value']
-
 		cls._restore_registry(state['registry'])
-
-		if os.path.exists(state['root']):
-			shutil.rmtree(state['root'])
+		shutil.rmtree(state['root'])
 
 		if os.path.isdir(state['temp_root']):
 			shutil.rmtree(state['temp_root'])
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_atomic_roundtrip(cls):
+	def test_generate_from_o_class_json_schema(cls):
 		state = cls._patch_runtime()
 
 		try:
-			values = [
-				(o.Int, 7),
-				(o.Str, 'alex'),
-				(o.Bool, True),
-				(o.Float, 1.5),
-				(o.Null, None),
-			]
+			User  = o.T.extend(
+				'LlmUser',
+				name = str,
+				age  = o.F(int, default=None),
+			)
+			model = o.models.Ollama('gemma3:4b')
+			data  = None
 
-			for Type, value in values:
-				x = Type(value)
+			o.llm = model
+			data  = o.generate(
+				'Return a user with name Ada and age 37.',
+				User.to_json_schema(),
+				temperature = 0.0,
+				verbose = False,
+			)
 
-				assert x.__value__ == value
+			assert data == { 'name' : 'Ada', 'age' : 37 }
+			assert o.llm is model
 		finally:
 			cls._restore_runtime(state)
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_atomic_type_validation(cls):
+	def test_generated_dict_can_embody_into_o_instance(cls):
 		state = cls._patch_runtime()
 
 		try:
-			raised_int  = False
-			raised_str  = False
-			raised_bool = False
+			User  = o.T.extend(
+				'LlmEmbodiedUser',
+				name = str,
+				age  = o.F(int, default=None),
+			)
+			model = o.models.Ollama('gemma3:4b')
+			data  = None
+			user  = None
 
-			try:
-				o.Int('7')
-			except TypeError:
-				raised_int = True
+			o.llm = model
+			data  = o.generate(
+				'Return a user with name Grace and age 29.',
+				User.to_json_schema(),
+				temperature = 0.0,
+				verbose = False,
+			)
+			user = User(**data)
 
-			try:
-				o.Str(7)
-			except TypeError:
-				raised_str = True
-
-			try:
-				o.Bool('True')
-			except TypeError:
-				raised_bool = True
-
-			assert raised_int == True
-			assert raised_str == True
-			assert raised_bool == True
+			assert data == { 'name' : 'Grace', 'age' : 29 }
+			assert isinstance(user, User)
+			assert user.name == 'Grace'
+			assert user.age == 29
 		finally:
 			cls._restore_runtime(state)
 
 
 if __name__ == '__main__':
-	TestAtomic.run()
+	TestLlm.run()

@@ -1,9 +1,9 @@
 import os, re
 
-from wl import WL
+from llm import LLM
 
 
-class O(WL, plugins=['Test']):
+class O(LLM, plugins=['Py']):
 
 	DATA_DIR = '_'
 
@@ -103,9 +103,14 @@ class O(WL, plugins=['Test']):
 
 		for item in items:
 			if   o.is_instance_version (item) : path += '/__instances__/'  + item
-			elif o.is_class_name    (item) : path += '/__subclasses__/' + item
+			elif o.is_class_name       (item) : path += '/__subclasses__/' + item
 
 		return path
+
+	# Resolve route by proto
+	# ----------------------------------------------------------------------
+	def proto_to_route(o, proto):
+		return o.disk.Class.get(proto).route
 
 	# Resolve disk path into proto
 	# ----------------------------------------------------------------------

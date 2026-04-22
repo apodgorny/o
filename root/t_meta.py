@@ -13,8 +13,74 @@ class TMeta(type(o.Module)):
 	# Create new type
 	# ----------------------------------------------------------------------
 	def __new__(mcls, name, bases, namespace, **kwargs):
+		has_own_module = mcls.has_own_module(namespace)
+
+		if has_own_module:
+			cls = mcls.__new_source__(name, bases, namespace, **kwargs)
+		else:
+			cls = mcls.__new_non_source__(name, bases, namespace, **kwargs)
+
+		return cls
+
+	# New for source-backed classes
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __new_source__(mcls, name, bases, namespace, **kwargs):
+		o.Timer.start('o.TMeta.__new_source__')
+		fields        = None
+		source_fields = {}
+		cls           = None
+		is_root_t     = False
+
+		if not name[0].isupper():
+			raise NameError(f'Class name must start with uppercase letter: `{name}`')
+
+		# Support annotation definition only for o.T base
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
+		if len(bases) > 1:
+			if bases[0] is o.T:
+				orig_bases = namespace.get('__orig_bases__', bases)
+				annotation = orig_bases[1]
+				bases      = (mcls.__embody__(annotation),)
+			else:
+				raise TypeError('Only o.T can accept annotation as second base class')
+
+		fields, namespace = mcls.__define__(namespace)
+		is_root_t         = name == 'T' and len(bases) == 1 and bases[0] is o.Module
+
+		if '__fields__' in fields.__dict__:
+			source_fields = dict(fields.__fields__)
+
+		cls = super().__new__(mcls, name, bases, namespace)
+
+		if is_root_t:
+			cls.__module__     = 'o'
+			cls.__proto__      = 'o.T'
+			cls.__disk_class__ = o.disk.Class.get('o.T')
+			cls.id             = cls.__disk_class__.id
+			cls.__disk_class__.route = cls.__route__
+
+			mcls.__bind_annotation__(cls)
+			fields.bind(cls)
+
+			o.register_entity(cls)
+		else:
+			cls.__source_fields__ = source_fields
+
+		o.Timer.stop('o.TMeta.__new_source__')
+		return cls
+
+	# New for classes that have no source file
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __new_non_source__(mcls, name, bases, namespace, **kwargs):
 		o.Timer.start('o.TMeta.__new__')
-		is_runtime_defined = namespace.get('__is_runtime_defined__', False)
+		# Prevent class definitions in runtime
+		# - - - - - - - - - - - - - - - - - - - - - - - - - 
+		if not namespace.get('__is_runtime_defined__', False):
+			raise TypeError(
+				'Class definitions can only be loaded from o.Module. Use o.T.extend() instead.'
+			)
 
 		if not name[0].isupper():
 			raise NameError(f'Class name must start with uppercase letter: `{name}`')
@@ -29,46 +95,20 @@ class TMeta(type(o.Module)):
 			else:
 				raise TypeError('Only o.T can accept annotation as second base class')
 
-		# Create disk class
+		# Process fields
 		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		base_proto = getattr(bases[0], '__proto__', 'o')
-		proto      = f'{base_proto}.{name}'
-		disk_class = o.disk.Class.get(proto)
-		disk_route = disk_class.route
-		is_loading = type(o.Module).is_loading(namespace)
+		fields, namespace = mcls.__define__(namespace)
 
-		# Class does not have __route__ on disk
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		if disk_route is o.Undefined or is_loading:
-			fields, namespace = mcls.__define__(namespace)
+		cls = super().__new__(mcls, name, bases, namespace)
 
-			cls = super().__new__(mcls, name, bases, namespace)
-			cls.__module__     = 'o'
-			cls.__proto__      = proto
-			cls.__disk_class__ = disk_class
-			cls.id             = disk_class.id
+		proto              = f'{cls.__parent__.__proto__}.{name}'
+		cls.__module__     = 'o'
+		cls.__proto__      = proto
+		cls.__disk_class__ = o.disk.Class.get(proto)
+		cls.id             = cls.__disk_class__.id
 
-			# route is o.Undefined -> do we have a persisted source-backed reopen path?
-			# __has_own_module__ -> is this current class birth coming from a source module?
-
-			# Prevent class definitions in runtime
-			# - - - - - - - - - - - - - - - - - - - - - - - - - 
-			if not is_runtime_defined:
-				if cls.__has_own_module__:
-					disk_class.route = cls.__route__
-					cls.__is_runtime_defined__ = False
-				else:
-					raise TypeError(
-						f'Class definitions can only be loaded from o.Module. Use o.T.extend() instead.'
-					)
-				
-			mcls.__bind_annotation__(cls)
-			fields.bind(cls)
-
-		# Class has __route__ on disk
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		else:
-			cls = eval(disk_route)
+		mcls.__bind_annotation__(cls)
+		fields.bind(cls)
 
 		o.register_entity(cls)
 
@@ -100,6 +140,60 @@ class TMeta(type(o.Module)):
 			result = type.__subclasses__(cls)
 
 		return result
+
+	# Create public shadow class from source class
+	# ----------------------------------------------------------------------
+	def __shadow__(cls):
+		disk_class = o.disk.Class.reconcile(cls)
+		shadow_cls = o.__entities__.get(disk_class.id, None)
+		namespace  = {
+			'__is_runtime_defined__' : True,
+			'__has_own_module__'    : True,
+			'__route__'             : cls.__route__,
+		}
+
+		if shadow_cls is None:
+			if '_' in cls.__dict__:
+				namespace['_'] = o.Fields()
+
+			# Annotation must be own property
+			# - - - - - - - - - - - - - - - - - - - - - - - - -
+			if '__annotation__' in cls.__dict__:
+				namespace['__annotation__'] = cls.__dict__['__annotation__']
+
+			shadow_cls = cls.__class__.__new__(
+				cls.__class__,
+				cls.__name__,
+				(cls,),
+				namespace
+			)
+
+		shadow_cls.__has_own_module__ = True
+		shadow_cls.__route__ = cls.__route__
+
+		o.__entities__[shadow_cls.id] = shadow_cls
+
+		if '__annotation__' in shadow_cls.__dict__:
+			o.__cast_map__[shadow_cls.__annotation__.annotation] = shadow_cls
+
+		for annotation, cast_cls in list(o.__cast_map__.items()):
+			if cast_cls is cls:
+				o.__cast_map__[annotation] = shadow_cls
+
+		return shadow_cls
+
+	# Resolve nearest public parent
+	# ----------------------------------------------------------------------
+	@property
+	def __parent__(cls):
+		parent = None
+
+		for base_cls in cls.__mro__[1:]:
+			if '__proto__' in base_cls.__dict__:
+				parent = base_cls
+				break
+
+		return parent
 
 	# Bind class annotation
 	# ----------------------------------------------------------------------
@@ -200,6 +294,7 @@ class TMeta(type(o.Module)):
 	# ----------------------------------------------------------------------
 	def __getattr__(cls, name):
 		entity = None
+		route  = o.Undefined
 
 		base_proto =  getattr(cls, '__proto__', 'o.T')
 		proto      = f'{base_proto}.{name}'
@@ -208,9 +303,19 @@ class TMeta(type(o.Module)):
 
 		if entity is None and o.exists(proto):
 			if o.is_class_name(name):
-				entity = cls.__class__.__new__(
-					cls.__class__, name, (cls,), {'__is_runtime_defined__': True}
-				)
+				route = o.proto_to_route(proto)
+
+				if route is not o.Undefined:
+					entity = eval(route)
+
+					# Route eval may return cached class object
+					# ----------------------------------------------------------------------
+					if isinstance(entity, type):
+						o.register_entity(entity)
+				else:
+					entity = cls.__class__.__new__(
+						cls.__class__, name, (cls,), {'__is_runtime_defined__': True}
+					)
 			elif o.is_instance_version(name):
 				entity = cls.__materialize__(name)
 

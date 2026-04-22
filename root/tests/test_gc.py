@@ -7,7 +7,7 @@ import tempfile
 import o
 
 
-class TestGc(o.Test):
+class TestGc(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod

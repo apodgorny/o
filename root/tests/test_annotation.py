@@ -3,7 +3,7 @@ import math
 import o
 
 
-class TestAnnotation(o.Test):
+class TestAnnotation(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
