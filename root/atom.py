@@ -2,6 +2,7 @@ import o
 
 
 class Atom(o.T):
+	__is_atom__ = True
 
 	# Initialize atomic value
 	# ----------------------------------------------------------------------

@@ -17,7 +17,7 @@ class List(o.T):
 		child = o.get(self.__disk_instance__.list.get(index))
 		value = child
 
-		if isinstance(child, o.Atom):
+		if child.__class__.__is_atom__:
 			value = child.__value__
 
 		o.Timer.stop('o.List.__getitem__')

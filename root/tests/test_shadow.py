@@ -326,7 +326,7 @@ class TestShadow(o.Tester):
 
 			ShadowKeepsSourceMarkerAndRuntimeFieldProps._.age.label = 'Years'
 
-			assert disk_field.has('__is_source__') == True
+			assert disk_field.is_source() == True
 			assert disk_field.get('label') == 'Years'
 
 			del o.__entities__[entity_id]
@@ -334,7 +334,7 @@ class TestShadow(o.Tester):
 			reopened = o.T.ShadowKeepsSourceMarkerAndRuntimeFieldProps
 
 			assert reopened._.age.label == 'Years'
-			assert reopened.__disk_class__.fields.get('age').has('__is_source__') == True
+			assert reopened.__disk_class__.fields.get('age').is_source() == True
 		finally:
 			cls._restore_runtime(state)
 

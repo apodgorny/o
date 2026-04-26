@@ -71,6 +71,16 @@ class Fields(o.Module):
 
 		setattr(cls, '_', self)
 
+	# Bind fields to hidden source class
+	# ----------------------------------------------------------------------
+	def bind_source(self, cls):
+		fields = {}
+
+		if '__fields__' in self.__dict__:
+			fields = dict(self.__fields__)
+
+		cls.__disk_class__ = o.disk.Class.reconcile(cls, fields)
+
 	# Create or load own field layer
 	# ----------------------------------------------------------------------
 	def add(self, name, type_id, default=o.Undefined, props=None):

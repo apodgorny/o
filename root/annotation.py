@@ -36,6 +36,13 @@ class Annotation(o.Module):
 		annotation = normalize(annotation)
 		origin     = t.get_origin(annotation) or annotation
 
+		self.is_function = self.is_function = annotation in (
+			types.FunctionType,
+			types.BuiltinFunctionType,
+			types.MethodType,
+			types.BuiltinMethodType,
+		)
+
 		self.annotation      = annotation
 		self.origin          = origin
 		self.args            = t.get_args(annotation)
@@ -49,7 +56,10 @@ class Annotation(o.Module):
 		self.is_set          = origin is set
 		self.is_tuple        = origin is tuple
 		self.is_bool         = origin is bool
+		self.is_container    = origin in (list, dict, set, tuple)
 		self.is_atomic       = origin not in (list, dict, set, tuple)
+		self.is_class        = isinstance(annotation, type) and not self.is_atomic and not self.is_container
+		self.is_data         = self.is_atomic or self.is_container
 		self.is_simple       = not self.args and not self.is_union
 		self.key, self.value = self._get_key_value()
 		self.is_homogenous   = self._get_is_homogenous()

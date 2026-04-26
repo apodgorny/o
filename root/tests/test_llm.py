@@ -95,7 +95,7 @@ class TestLlm(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_generate_from_o_class_json_schema(cls):
+	def test_generated_dict_can_embody_into_o_instance(cls):
 		state = cls._patch_runtime()
 
 		try:
@@ -106,6 +106,7 @@ class TestLlm(o.Tester):
 			)
 			model = o.models.Ollama('gemma3:4b')
 			data  = None
+			user  = None
 
 			o.llm = model
 			data  = o.generate(
@@ -114,43 +115,12 @@ class TestLlm(o.Tester):
 				temperature = 0.0,
 				verbose = False,
 			)
+			user = User(**data)
 
 			assert data == { 'name' : 'Ada', 'age' : 37 }
 			assert o.llm is model
-		finally:
-			cls._restore_runtime(state)
-
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_generated_dict_can_embody_into_o_instance(cls):
-		state = cls._patch_runtime()
-
-		try:
-			User  = o.T.extend(
-				'LlmEmbodiedUser',
-				name = str,
-				age  = o.F(int, default=None),
-			)
-			model = o.models.Ollama('gemma3:4b')
-			data  = None
-			user  = None
-
-			o.llm = model
-			data  = o.generate(
-				'Return a user with name Grace and age 29.',
-				User.to_json_schema(),
-				temperature = 0.0,
-				verbose = False,
-			)
-			user = User(**data)
-
-			assert data == { 'name' : 'Grace', 'age' : 29 }
 			assert isinstance(user, User)
-			assert user.name == 'Grace'
-			assert user.age == 29
+			assert user.name == 'Ada'
+			assert user.age == 37
 		finally:
 			cls._restore_runtime(state)
-
-
-if __name__ == '__main__':
-	TestLlm.run()

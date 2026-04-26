@@ -1,4 +1,5 @@
 import os
+import shutil
 import struct
 
 import o
@@ -6,6 +7,7 @@ import o
 
 class Field(o.Module):
 
+	SOURCE_MARKER   = '__is_source__'
 	TAG_STR        = 1
 	TAG_INT        = 2
 	TAG_BOOL       = 3
@@ -102,6 +104,38 @@ class Field(o.Module):
 	# PUBLIC METHODS
 	# ======================================================================
 
+	# Write field properties
+	# ----------------------------------------------------------------------
+	def write(self, props):
+		for prop_name, prop_value in props.items():
+			if prop_name == 'default':
+				if prop_value is not o.Undefined:
+					self.set(prop_name, prop_value)
+			else:
+				self.set(prop_name, prop_value)
+
+		if (
+			'default' not in props
+			or props.get('default', o.Undefined) is o.Undefined
+		) and self.has('default'):
+			self.remove('default')
+
+	# Remove field properties and room
+	# ----------------------------------------------------------------------
+	def clear(self):
+		if os.path.exists(self.path):
+			shutil.rmtree(self.path)
+
+	# Mark field as source-backed
+	# ----------------------------------------------------------------------
+	def mark_source(self):
+		open(os.path.join(self.path, self.SOURCE_MARKER), 'wb').close()
+
+	# Check whether field is source-backed
+	# ----------------------------------------------------------------------
+	def is_source(self):
+		return self.has(self.SOURCE_MARKER)
+
 	# Set field property
 	# ----------------------------------------------------------------------
 	def set(self, prop_name, value=o.Undefined):
@@ -144,5 +178,5 @@ class Field(o.Module):
 	@property
 	def properties(self):
 		for prop_name in os.listdir(self.path):
-			if prop_name != '__is_source__':
+			if prop_name != self.SOURCE_MARKER:
 				yield prop_name, self.get(prop_name)

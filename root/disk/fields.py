@@ -82,3 +82,18 @@ class Fields(o.Module):
 
 		self.__items__ = {}
 		os.makedirs(self.path)
+
+	# Reconcile source-backed field managers
+	# ----------------------------------------------------------------------
+	def reconcile_source(self, source_fields):
+		field_names = set(source_fields)
+
+		for field_name, field in list(self.items()):
+			if field.is_source() and field_name not in field_names:
+				field.clear()
+				del self.__items__[field_name]
+
+		for field_name, props in source_fields.items():
+			field = self.set(field_name)
+			field.write(props)
+			field.mark_source()

@@ -4,6 +4,7 @@ import o
 
 
 class T(o.Module, metaclass=o.TMeta):
+	__is_atom__ = False
 
 	# Create new instance
 	# ----------------------------------------------------------------------
@@ -46,7 +47,7 @@ class T(o.Module, metaclass=o.TMeta):
 		if name.startswith('_'):
 			raise AttributeError(f'Invalid name `{name}`: attribute can not start with "_"')
 
-		if isinstance(child, o.Atom):
+		if child.__class__.__is_atom__:
 			value = child.__value__
 
 		self.__disk_instance__.attributes.set(name, child.id)
@@ -96,7 +97,7 @@ class T(o.Module, metaclass=o.TMeta):
 				child = o.get(disk_instance.attributes.get(name))
 				value = child
 
-				if isinstance(child, o.Atom):
+				if child.__class__.__is_atom__:
 					value = child.__value__
 
 				object.__setattr__(self, name, value)

@@ -78,6 +78,15 @@ Operational consequence:
 
 ---
 
+## Layer separation law
+
+- Disk entities must not modify runtime wrappers, Python classes, or public objects.
+- Disk entities may read disk state, write disk state, and return disk-layer objects or values.
+- Wrapper mutation belongs to wrapper/materialization layer such as `TMeta`, `Fields`, or plugin code.
+- This keeps disk representation and runtime object assembly as separate layers.
+
+---
+
 ## Marker law
 
 - Storage markers such as `__is_source__` are storage metadata.

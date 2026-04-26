@@ -345,6 +345,19 @@ This is preferred because:
 - reconciliation belongs to the class room more naturally than to ad hoc plugin code
 - the plugin can stay focused on interception and public-shadow assembly
 
+Important layer boundary:
+
+- disk entities must not modify runtime wrappers, source classes, shadow classes, or public objects
+- `disk.Class.reconcile(...)` may reconcile disk rooms and return the reconciled `disk.Class`
+- it must not attach attributes such as `__disk_class__`, `__proto__`, `id`, `_`, or `__annotation__` to Python classes
+- wrapper/class mutation belongs above the disk layer, for example in `TMeta`, `Fields`, or plugin code
+
+Meaning:
+
+- disk layer owns representation
+- materialization layer owns wrappers
+- reconciliation crosses data from source into disk, not behavior from disk into Python objects
+
 The reconciliation method should do the following:
 
 1. inspect `source_cls.__mro__`

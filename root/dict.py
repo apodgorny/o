@@ -20,7 +20,7 @@ class Dict(o.T):
 		if value_id is not o.Undefined:
 			value = o.get(value_id)
 
-			if isinstance(value, o.Atom):
+			if value.__class__.__is_atom__:
 				value = value.__value__
 
 		if value is o.Undefined:
@@ -87,10 +87,10 @@ class Dict(o.T):
 			key   = o.get(key_id)
 			value = o.get(value_id)
 
-			if isinstance(key, o.Atom):
+			if key.__class__.__is_atom__:
 				key = key.__value__
 
-			if isinstance(value, o.Atom):
+			if value.__class__.__is_atom__:
 				value = value.__value__
 
 			yield key, value

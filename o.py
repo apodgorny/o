@@ -1,9 +1,9 @@
 import os, re
 
-from llm import LLM
+from wl import WL
 
 
-class O(LLM, plugins=['Py']):
+class O(WL, plugins=['Py']):
 
 	DATA_DIR = '_'
 
@@ -50,7 +50,7 @@ class O(LLM, plugins=['Py']):
 	# Check class name token
 	# ----------------------------------------------------------------------
 	def is_class_name(o, s):
-		return re.fullmatch(r'[A-Z][A-Za-z0-9_]*', s) is not None
+		return re.fullmatch(r'([A-Z][A-Za-z0-9_]*|__temp_[0-9a-f]+)', s) is not None
 
 	# Check whether entity is atomic
 	# ----------------------------------------------------------------------
