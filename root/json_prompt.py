@@ -201,7 +201,7 @@ class JsonPrompt(o.Module):
 				line += ','
 
 			if comment:
-				padding = ' ' * (max_line_len - len(line) + 2)
+				padding = ' ' * (max_line_len - len(line) + 1)
 				line += f'{padding}{comment}'
 
 			lines.append(line)
@@ -324,13 +324,31 @@ class JsonPrompt(o.Module):
 	def _align_comments(cls, lines):
 		aligned        = []
 		comment_column = 0
+		prefixes       = []
+		has_key_line   = False
+		has_plain_tree = False
 
 		for line in lines:
 			if '#' in line:
 				prefix = line.split('#', 1)[0].rstrip()
+				prefixes.append(prefix)
 
-				if len(prefix) > comment_column:
-					comment_column = len(prefix)
+				if '\'key\'' in prefix:
+					has_key_line = True
+
+				if prefix.endswith('{'):
+					has_plain_tree = True
+
+				if len(prefixes) > 1 and line.index('#') > comment_column:
+					comment_column = line.index('#')
+
+		if prefixes:
+			prefix_column = max(len(prefix) for prefix in prefixes)
+
+			if has_plain_tree and not has_key_line:
+				comment_column = prefix_column + 1
+			elif prefix_column + 2 > comment_column:
+				comment_column = prefix_column + 2
 
 		for line in lines:
 			aligned_line = line
@@ -338,7 +356,7 @@ class JsonPrompt(o.Module):
 			if '#' in line:
 				prefix, comment = line.split('#', 1)
 				prefix          = prefix.rstrip()
-				padding         = ' ' * (comment_column - len(prefix) + 2)
+				padding         = ' ' * (comment_column - len(prefix))
 				aligned_line    = f'{prefix}{padding}#{comment}'
 
 			aligned.append(aligned_line)

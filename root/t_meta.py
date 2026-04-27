@@ -221,8 +221,8 @@ class TMeta(type(o.Module)):
 				else:
 					for arg in annotation.args:
 						arg_cls        = mcls.__embody__(arg)
-						visible_arg    = arg_cls
 						arg_annotation = getattr(arg_cls, '__annotation__', o.Undefined)
+						visible_arg    = arg_cls
 
 						if arg_annotation is not o.Undefined and arg_annotation.is_simple:
 							visible_arg = arg_annotation.annotation
