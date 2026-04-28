@@ -75,24 +75,23 @@ The current split is:
 
 - `TMeta.__call__` decides whether `__init__` should run
 - `T.__new__` chooses embodiment path and creates the live instance
-- `T.__sync__` performs common born-instance setup
+- `T.__write__` performs common born-instance setup
 - subclass `__init__` handles class-specific contained value semantics
 
 Meaning:
 - `__new__` chooses construction logic
-- `__sync__` creates the disk instance and assigns common runtime slots
+- `__write__` creates the new instance facts and assigns common runtime slots
 - `__init__` handles only class-specific contained value semantics
 
 ---
 
-## 6. `__sync__` responsibilities
+## 6. `__write__` responsibilities
 
-`__sync__` handles common born-instance setup for all subclasses.
+`__write__` handles common born-instance setup for all subclasses.
 
 It:
-- creates the disk instance room
+- creates the new instance facts
 - assigns `id`
-- assigns `__disk_instance__`
 - assigns `__version__`
 - assigns `__proto__`
 - validates missing required declared fields
@@ -316,7 +315,7 @@ The current picture is:
   - one annotated contained value
   - kwargs as object attrs
 - `__new__` chooses the construction law
-- `__sync__` performs common born-instance setup
+- `__write__` performs common born-instance setup
 - subclass `__init__` materializes its own contained value
 - object attributes persist child ids
 - atomic entities persist their own raw value bytes

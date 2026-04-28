@@ -118,7 +118,6 @@ Meaning:
 			<SubclassName>/
 
 		__instances__/
-			__index__
 			_0/
 			_1/
 			_2/

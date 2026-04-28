@@ -2,13 +2,15 @@ import os
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class T(o.Module, metaclass=o.TMeta):
 	__is_atom__ = False
 
 	# Create new instance
 	# ----------------------------------------------------------------------
-	def __new__(cls, __value__=o.Undefined, **kwargs):
+	def __new__(cls, __value__=UNDEFINED, **kwargs):
 		o.Timer.start('o.T.__new__')
 		
 		sub_cls = cls
@@ -16,7 +18,7 @@ class T(o.Module, metaclass=o.TMeta):
 		if isinstance(__value__, o.T):
 			self = __value__
 		else:
-			if __value__ is not o.Undefined:
+			if __value__ is not UNDEFINED:
 				# o.T
 				# - - - - - - - - - - - - - - - - - -
 				if cls is o.T:
@@ -29,9 +31,9 @@ class T(o.Module, metaclass=o.TMeta):
 				if not hasattr(sub_cls, '__annotation__'):
 					raise TypeError(f'`{sub_cls.__proto__}` does not accept positional value')
 
-			self = object.__new__(sub_cls)
-			self.__sync__(kwargs)
-			o.register_entity(self)
+			version = sub_cls.__write__(kwargs)
+			self    = sub_cls.__read__(f'_{version}')
+			self.__publish__(kwargs)
 
 		o.Timer.stop('o.T.__new__')
 		return self
@@ -39,31 +41,59 @@ class T(o.Module, metaclass=o.TMeta):
 	# Set object attribute
 	# ----------------------------------------------------------------------
 	def __setattr__(self, name, value):
-		o.Timer.start('o.Object.__setattr__')
-
-		child = o.T(value)
-		value = child
+		o.Timer.start('o.T.__setattr__')
+		key   = f'{self.__proto__}.{name}'
+		child = None
 
 		if name.startswith('_'):
 			raise AttributeError(f'Invalid name `{name}`: attribute can not start with "_"')
 
-		if child.__class__.__is_atom__:
-			value = child.__value__
+		with o.services.Memory.write() as memory:
+			child = value if isinstance(value, o.T) else o.T(value)
+			child_id = child.id
+			value = o.value(child_id)
+			memory.set(key, child_id)
 
-		self.__disk_instance__.attributes.set(name, child.id)
 		object.__setattr__(self, name, value)
 
-		o.Timer.stop('o.Object.__setattr__')
+		o.Timer.stop('o.T.__setattr__')
 
-	## Get builtin-facing attribute
+	# Get object attribute on cache miss
 	# ----------------------------------------------------------------------
-	def _get_builtin_attr(self, name):
+	def __getattr__(self, name):
+		o.Timer.start('o.Object.__getattr__')
+
+		value = UNDEFINED
+
+		try:
+			if name.startswith('_'):
+				raise AttributeError(name)
+
+			key = f'{self.__proto__}.{name}'
+
+			with o.services.Memory.read() as memory:
+				if memory.has(key):
+					value = o.value(memory.get(key))
+					object.__setattr__(self, name, value)
+				else:
+					value = self.__get_builtin_attr__(name)
+
+					if value is UNDEFINED:
+						raise AttributeError(name)
+		finally:
+			o.Timer.stop('o.Object.__getattr__')
+
+		return value
+	
+	# Get builtin-facing attribute
+	# ----------------------------------------------------------------------
+	def __get_builtin_attr__(self, name):
 		try:
 			builtin_value = self.__cast_out__()
 		except (TypeError, NotImplementedError):
-			builtin_value = o.Undefined
+			builtin_value = UNDEFINED
 
-		if builtin_value is not o.Undefined and hasattr(builtin_value, name):
+		if builtin_value is not UNDEFINED and hasattr(builtin_value, name):
 			attr = getattr(builtin_value, name)
 
 			if callable(attr):
@@ -76,86 +106,69 @@ class T(o.Module, metaclass=o.TMeta):
 
 				attr = builtin_method
 		else:
-			attr = o.Undefined
+			attr = UNDEFINED
 
 		return attr
-
-	# Get object attribute on cache miss
-	# ----------------------------------------------------------------------
-	def __getattr__(self, name):
-		o.Timer.start('o.Object.__getattr__')
-
-		value = o.Undefined
-
-		try:
-			if name.startswith('_'):
-				raise AttributeError(name)
-
-			disk_instance = object.__getattribute__(self, '__disk_instance__')
-
-			if disk_instance.attributes.has(name):
-				child = o.get(disk_instance.attributes.get(name))
-				value = child
-
-				if child.__class__.__is_atom__:
-					value = child.__value__
-
-				object.__setattr__(self, name, value)
-			else:
-				value = self._get_builtin_attr(name)
-
-				if value is o.Undefined:
-					raise AttributeError(name)
-		finally:
-			o.Timer.stop('o.Object.__getattr__')
-
-		return value
 
 	# Delete object attribute
 	# ----------------------------------------------------------------------
 	def __delattr__(self, name):
+		key      = f'{self.__proto__}.{name}'
+		child_id = o.services.Memory.get(key, UNDEFINED)
+
 		if name.startswith('_'):
 			raise AttributeError(name)
 
-		self.__disk_instance__.attributes.delete(name)
+		if child_id is UNDEFINED:
+			raise AttributeError(name)
+
+		o.services.Memory.unset(key)
 
 		if name in self.__dict__:
 			object.__delattr__(self, name)
 
-	# Setup born subclass instance
+	# Read instance from memory based on class and version
 	# ----------------------------------------------------------------------
-	def __sync__(self, kwargs):
-		cls           = self.__class__
-		annotation    = getattr(cls, '__annotation__', o.Undefined)
-		disk_instance = cls.__disk_class__.instances.create(annotation)
+	@classmethod
+	def __read__(cls, version):
+		self           = object.__new__(cls)
+		proto          = f'{cls.__proto__}.{version}'
+		id             = o.proto_to_id(proto)
+		version_number = int(version[1:])
+
+		object.__setattr__(self, 'id', id)
+		object.__setattr__(self, '__version__', version_number)
+		object.__setattr__(self, '__proto__', proto)
+
+		o.register_entity(self)
+
+		return self
+
+	# Write born subclass instance
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __write__(cls, kwargs):
+		o.Timer.start('o.T.__write__')
+		version     = cls.__class__.__inc_version__(cls)
+		proto       = f'{cls.__proto__}._{version}'
+		id          = o.proto_to_id(proto)
+
+		with o.services.Memory.write() as memory:
+			memory.set(proto, True)
+			memory.set(str(id), proto)
 
 		for name, field in cls._.items():
 			if name not in kwargs and not field.is_optional:
 				raise TypeError(f'Missing required field `{name}` for `{cls.__proto__}`')
 
-		version = os.path.basename(disk_instance.path)
+		o.Timer.stop('o.T.__write__')
+		return version
 
-		object.__setattr__(self, 'id', disk_instance.id)
-		object.__setattr__(self, '__disk_instance__', disk_instance)
-		object.__setattr__(self, '__version__', version)
-		object.__setattr__(self, '__proto__', f'{cls.__proto__}.{version}')
-
+	# Publish instance values
+	# ----------------------------------------------------------------------
+	def __publish__(self, kwargs):
 		for name, value in kwargs.items():
 			setattr(self, name, value)
-
-	# Load instance from disk based on class and version id
-	# ----------------------------------------------------------------------
-	@classmethod
-	def __materialize__(cls, version):
-		disk_instance = cls.__disk_class__.instances.get(version)
-		self          = object.__new__(cls)
-
-		object.__setattr__(self, 'id', disk_instance.id)
-		object.__setattr__(self, '__disk_instance__', disk_instance)
-		object.__setattr__(self, '__version__', version)
-		object.__setattr__(self, '__proto__', f'{cls.__proto__}.{version}')
-
-		return self
 
 	# Cast Python-visible value into entity
 	# ----------------------------------------------------------------------

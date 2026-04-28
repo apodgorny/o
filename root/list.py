@@ -9,19 +9,29 @@ class List(o.T):
 	def __init__(self, value):
 		self.__cast_in__(value)
 
+	# Read list instance
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __read__(cls, version):
+		self      = super().__read__(version)
+		items_key = f'{self.__proto__}.__items__'
+
+		with o.services.Memory.read() as memory:
+			items = memory.get(items_key, [])
+
+		object.__setattr__(self, '__items_key__', items_key)
+		object.__setattr__(self, '__items__', items)
+
+		return self
+
 	# Get list item
 	# ----------------------------------------------------------------------
 	def __getitem__(self, index):
 		o.Timer.start('o.List.__getitem__')
 
-		child = o.get(self.__disk_instance__.list.get(index))
-		value = child
-
-		if child.__class__.__is_atom__:
-			value = child.__value__
+		value = o.value(self.__items__[index])
 
 		o.Timer.stop('o.List.__getitem__')
-
 		return value
 
 	# Set list item
@@ -29,27 +39,30 @@ class List(o.T):
 	def __setitem__(self, index, value):
 		o.Timer.start('o.List.__setitem__')
 
-		child = o.T(value)
-
-		self.__disk_instance__.list.set(index, child.id)
+		with o.services.Memory.write() as memory:
+			child = value if isinstance(value, o.T) else o.T(value)
+			self.__items__[index] = child.id
+			memory.set(self.__items_key__, self.__items__)
 
 		o.Timer.stop('o.List.__setitem__')
 
 	# Delete list item
 	# ----------------------------------------------------------------------
 	def __delitem__(self, index):
-		self.__disk_instance__.list.delete(index)
+		with o.services.Memory.write() as memory:
+			del self.__items__[index]
+			memory.set(self.__items_key__, self.__items__)
 
 	# Get list length
 	# ----------------------------------------------------------------------
 	def __len__(self):
-		return len(self.__disk_instance__.list.items)
+		return len(self.__items__)
 
 	# Iterate list values
 	# ----------------------------------------------------------------------
 	def __iter__(self):
-		for index in range(len(self)):
-			yield self[index]
+		for item_id in self.__items__:
+			yield o.value(item_id)
 
 	# Cast to list
 	# ----------------------------------------------------------------------
@@ -59,9 +72,16 @@ class List(o.T):
 	# Cast visible list into entity
 	# ----------------------------------------------------------------------
 	def __cast_in__(self, value):
-		ids = [o.T(item).id for item in value]
+		new_ids = []
 
-		self.__disk_instance__.list.items = ids
+		with o.services.Memory.write() as memory:
+			for item in value:
+				child = item if isinstance(item, o.T) else o.T(item)
+				new_ids.append(child.id)
+
+			memory.set(self.__items_key__, new_ids)
+
+		object.__setattr__(self, '__items__', new_ids)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -70,9 +90,8 @@ class List(o.T):
 	# Append list item
 	# ----------------------------------------------------------------------
 	def append(self, value):
-		child = o.T(value)
-		ids   = list(self.__disk_instance__.list.items)
+		with o.services.Memory.write() as memory:
+			child = value if isinstance(value, o.T) else o.T(value)
+			self.__items__.append(child.id)
 
-		ids.append(child.id)
-
-		self.__disk_instance__.list.items = ids
+			memory.set(self.__items_key__, self.__items__)

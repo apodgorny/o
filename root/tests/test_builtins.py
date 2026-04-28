@@ -4,6 +4,8 @@ import tempfile
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class TestBuiltins(o.Tester):
 
@@ -27,7 +29,7 @@ class TestBuiltins(o.Tester):
 				del state['paths'][id]
 
 		def get(id):
-			return state['paths'].get(id, o.Undefined)
+			return state['paths'].get(id, UNDEFINED)
 
 		registry.add    = add
 		registry.remove = remove
@@ -63,9 +65,8 @@ class TestBuiltins(o.Tester):
 			'registry'  : registry_state,
 			'data_dir'  : o.DATA_DIR,
 			'entities'  : dict(o.__entities__),
-			'disk_classes' : dict(o.__disk_classes__),
 			'cast_map'  : dict(o.__cast_map__),
-			'value'     : o.__dict__.get('V', o.Undefined),
+			'value'     : o.__dict__.get('V', UNDEFINED),
 		}
 
 		o.DATA_DIR = os.path.join('__tmp__', os.path.basename(root))
@@ -80,13 +81,10 @@ class TestBuiltins(o.Tester):
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
-		o.__disk_classes__.clear()
-		o.__disk_classes__.update(state['disk_classes'])
-
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
-		if state['value'] is o.Undefined:
+		if state['value'] is UNDEFINED:
 			if 'V' in o.__dict__:
 				del o.__dict__['V']
 		else:

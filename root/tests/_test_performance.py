@@ -79,10 +79,10 @@ class TestPerformance(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_performance(cls):
-		n_attr   = 2_000
-		n_list   = 2_000
-		n_dict   = 2_000
-		n_define = 2_000
+		n_attr   = 5000
+		n_list   = 5000
+		n_dict   = 5000
+		n_define = 5000
 		run_id   = time.time_ns()
 		root_name = f'APerfRun{run_id}'
 		PerfRoot  = o.T.extend(root_name)

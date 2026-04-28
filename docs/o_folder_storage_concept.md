@@ -46,7 +46,7 @@ Current service-side state is:
 - `__registry__` for binary `id -> path`
 - `__refcounts__` for binary persistent refcount
 
-## Instance files and `__index__`
+## Instance files and sequence state
 
 A workable current shape is:
 
@@ -54,12 +54,12 @@ A workable current shape is:
 - `__dict__` — stores keyed key/value ids
 - `__value__` — stores atomic raw bytes
 - `__attributes__` — stores named child ids
-- `__instances__/__index__` — stores next birth number and current live order
+- `__version__` plus `__items__` — store next birth number and current live order
 
 Meaning:
 
 - instance-side files store per-instance shape and ownership edges
-- `__instances__/__index__` stores class-side instance sequence state
+- class-side sequence state lives in `__version__` and `__items__`
 
 ## List behavior
 
@@ -89,7 +89,7 @@ So:
 - subclass classes live under `__subclasses__/`
 - instance rooms live under `__instances__/`
 - instance birth id is stable
-- live order is held separately in `__index__`
+- live order is held separately in `__items__`
 
 ## Read / write model
 

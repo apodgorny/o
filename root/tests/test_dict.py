@@ -4,6 +4,8 @@ import tempfile
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class TestDict(o.Tester):
 
@@ -27,7 +29,7 @@ class TestDict(o.Tester):
 				del state['paths'][id]
 
 		def get(id):
-			return state['paths'].get(id, o.Undefined)
+			return state['paths'].get(id, UNDEFINED)
 
 		registry.add    = add
 		registry.remove = remove
@@ -63,7 +65,6 @@ class TestDict(o.Tester):
 			'registry'      : registry_state,
 			'data_dir'      : o.DATA_DIR,
 			'entities'      : dict(o.__entities__),
-			'disk_classes'  : dict(o.__disk_classes__),
 			'cast_map'      : dict(o.__cast_map__),
 		}
 
@@ -79,9 +80,6 @@ class TestDict(o.Tester):
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
-		o.__disk_classes__.clear()
-		o.__disk_classes__.update(state['disk_classes'])
-
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
@@ -96,7 +94,8 @@ class TestDict(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			DictBasicSurface = o.T.extend('DictBasicSurface', dict)
+			root_name        = os.path.basename(state['root'])
+			DictBasicSurface = o.T.extend(f'DictBasicSurface_{root_name}', dict)
 			x                = DictBasicSurface({'a': 1, 'b': 2})
 
 			assert x['a'] == 1
@@ -113,7 +112,8 @@ class TestDict(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			DictSetitemUpdateAndDelitem = o.T.extend('DictSetitemUpdateAndDelitem', dict)
+			root_name                   = os.path.basename(state['root'])
+			DictSetitemUpdateAndDelitem = o.T.extend(f'DictSetitemUpdateAndDelitem_{root_name}', dict)
 			x                           = DictSetitemUpdateAndDelitem({'a': 1})
 
 			x['a'] = 3
@@ -131,8 +131,9 @@ class TestDict(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Child                  = o.T.extend('DictChild', name=str)
-			DictNonAtomicValueSurf = o.T.extend('DictNonAtomicValueSurf', dict)
+			root_name              = os.path.basename(state['root'])
+			Child                  = o.T.extend(f'DictChild_{root_name}', name=str)
+			DictNonAtomicValueSurf = o.T.extend(f'DictNonAtomicValueSurf_{root_name}', dict)
 			x                      = DictNonAtomicValueSurf({'user': Child(name='alex')})
 			items                  = dict(x.items())
 
@@ -148,12 +149,13 @@ class TestDict(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			DictSupportsObjectAttrs = o.T.extend('DictSupportsObjectAttrs', dict)
+			root_name               = os.path.basename(state['root'])
+			DictSupportsObjectAttrs = o.T.extend(f'DictSupportsObjectAttrs_{root_name}', dict)
 			x                       = DictSupportsObjectAttrs({'a': 1})
 			x.title = 'scores'
 
 			assert x.title == 'scores'
-			assert x.__disk_instance__.attributes.has('title') == True
+			assert o.services.Memory.get(f'{x.__proto__}.title', UNDEFINED) is not UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -163,7 +165,8 @@ class TestDict(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			ReconstructsDictOnCacheMiss = o.T.extend('ReconstructsDictOnCacheMiss', dict)
+			root_name                   = os.path.basename(state['root'])
+			ReconstructsDictOnCacheMiss = o.T.extend(f'ReconstructsDictOnCacheMiss_{root_name}', dict)
 			x                           = ReconstructsDictOnCacheMiss({'a': 1, 'b': 2})
 			x.tag = 'hot'
 			id    = x.id

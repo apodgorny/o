@@ -1,5 +1,7 @@
 import o
 
+UNDEFINED = o.Undefined
+
 
 class JsonSchema(o.Module):
 
@@ -35,10 +37,10 @@ class JsonSchema(o.Module):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _get_root_schema(cls, t_cls, defs, stack):
-		annotation = getattr(t_cls, '__annotation__', o.Undefined)
+		annotation = getattr(t_cls, '__annotation__', UNDEFINED)
 		schema     = None
 
-		if annotation is o.Undefined:
+		if annotation is UNDEFINED:
 			schema = cls._get_object_schema(t_cls, defs, stack)
 		else:
 			schema = cls._get_annotation_schema(annotation, defs, stack)
@@ -49,10 +51,10 @@ class JsonSchema(o.Module):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _get_class_schema(cls, t_cls, defs, stack):
-		annotation = getattr(t_cls, '__annotation__', o.Undefined)
+		annotation = getattr(t_cls, '__annotation__', UNDEFINED)
 		schema     = None
 
-		if annotation is o.Undefined:
+		if annotation is UNDEFINED:
 			name = cls._get_def_name(t_cls)
 
 			if name in stack:
@@ -111,9 +113,9 @@ class JsonSchema(o.Module):
 				'additionalProperties' : value,
 			}
 		else:
-			json_type = cls.ATOMIC_TYPES.get(annotation.origin, o.Undefined)
+			json_type = cls.ATOMIC_TYPES.get(annotation.origin, UNDEFINED)
 
-			if json_type is o.Undefined:
+			if json_type is UNDEFINED:
 				raise TypeError(f'Unsupported JSON schema annotation: `{annotation}`')
 
 			schema = { 'type' : json_type }
@@ -176,8 +178,8 @@ class JsonSchema(o.Module):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _is_field_optional(cls, field):
-		default  = getattr(field, 'default', o.Undefined)
-		optional = cls._is_field_nullable(field) or (default is not o.Undefined)
+		default  = getattr(field, 'default', UNDEFINED)
+		optional = cls._is_field_nullable(field) or (default is not UNDEFINED)
 
 		return optional
 
@@ -186,11 +188,11 @@ class JsonSchema(o.Module):
 	@classmethod
 	def _is_field_nullable(cls, field):
 		field_cls      = field.type
-		field_type     = getattr(field_cls, '__annotation__', o.Undefined)
-		default        = getattr(field, 'default', o.Undefined)
+		field_type     = getattr(field_cls, '__annotation__', UNDEFINED)
+		default        = getattr(field, 'default', UNDEFINED)
 		field_nullable = False
 
-		if field_type is not o.Undefined:
+		if field_type is not UNDEFINED:
 			field_nullable = o.Annotation(field_type).is_optional
 
 		return field_nullable or (default is None)
@@ -206,9 +208,9 @@ class JsonSchema(o.Module):
 	@classmethod
 	def _make_nullable(cls, schema):
 		schema      = dict(schema)
-		schema_type = schema.get('type', o.Undefined)
+		schema_type = schema.get('type', UNDEFINED)
 
-		if schema_type is not o.Undefined:
+		if schema_type is not UNDEFINED:
 			if isinstance(schema_type, str):
 				if schema_type != 'null':
 					schema['type'] = [schema_type, 'null']

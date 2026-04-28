@@ -54,11 +54,10 @@ class Py(o.Plugin):
 				cls = lib.Imports.get_class(lib, class_name, path, route)
 				if not issubclass(cls, (lib.Module, lib.ModuleMeta)):
 					raise Exception(f'Class `{path}` does not extend from `Module`')
-				elif not issubclass(cls, lib.ModuleMeta) and hasattr(cls, '__shadow__') and class_name != 'T':
-					cls = cls.__shadow__()
 				elif issubclass(cls, lib.Service):
 					cls = cls()
 				return cls
+			
 			# - - - - - - - - - - - - - - - - - - - -
 			# Hash method
 			# - - - - - - - - - - - - - - - - - - - -

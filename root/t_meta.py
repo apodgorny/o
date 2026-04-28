@@ -1,7 +1,8 @@
-import os, uuid
-import operator, types
+import uuid
 
 import o
+
+UNDEFINED = o.Undefined
 
 
 class TMeta(type(o.Module)):
@@ -21,19 +22,19 @@ class TMeta(type(o.Module)):
 		is_runtime_class_def = not is_runtime_defined and not has_own_module
 
 		# Prevent class definitions in runtime
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
 		if is_runtime_class_def:
 			raise TypeError(
 				'Class definitions can only be loaded from o.Module. Use o.T.extend() instead.'
 			)
 
 		# Class naming convention
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
 		if not name[0].isupper() and not name.startswith('__temp_'):
 			raise NameError(f'Class name must start with uppercase letter: `{name}`')
-		
+
 		# Support annotation definition only for o.T base
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
 		if len(bases) > 1:
 			if bases[0] is o.T:
 				orig_bases = namespace.get('__orig_bases__', bases)
@@ -41,96 +42,73 @@ class TMeta(type(o.Module)):
 				bases      = (mcls.__embody__(annotation),)
 			else:
 				raise TypeError('Only o.T can accept annotation as second base class')
-				
+
 		# Process fields
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
 		fields, namespace = mcls.__define__(namespace)
-		cls               = super().__new__(mcls, name, bases, namespace)
+		cls = super().__new__(mcls, name, bases, namespace)
 
-		# SOURCE-BASED
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		if has_own_module:
-			if is_root_t:
-				cls.__module__     = 'o'
-				cls.__proto__      = 'o.T'
-				cls.__disk_class__ = o.disk.Class.get('o.T')
-				cls.id             = cls.__disk_class__.id
-				cls.__disk_class__.route = cls.__route__
+		# Resolve proto
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
+		proto = 'o.T' if is_root_t else f'{cls.__parent__.__proto__}.{name}'
 
-				mcls.__bind_annotation__(cls)
-				fields.bind(cls)
-				o.register_entity(cls)
-			else:
-				fields.bind_source(cls)
+		cls.__module__         = 'o'
+		cls.__has_own_module__ = has_own_module
+		cls.__proto__          = proto
+		cls.id                 = o.proto_to_id(proto)
+		cls._                  = o.Accessor(cls, ['_'])
 
-		# NOT SOURCE-BASED
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		else:
-			proto              = f'{cls.__parent__.__proto__}.{name}'
-			cls.__module__     = 'o'
-			cls.__proto__      = proto
-			cls.__disk_class__ = o.disk.Class.get(proto)
-			cls.id             = cls.__disk_class__.id
+		if not has_own_module:
+			cls.__route__ = UNDEFINED
+			cls.__mtime__ = UNDEFINED
 
-			mcls.__bind_annotation__(cls)
-			fields.bind(cls)
-			o.register_entity(cls)
+		# Write class facts
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
 
+		mcls.__bind_annotation__(cls)
+		mcls.__write__(cls, fields)
+
+		cls.__class__.__publish__(cls)
+
+		o.register_entity(cls)
 		o.Timer.stop('o.TMeta.__new__')
 		return cls
 
 	# Call type
 	# ----------------------------------------------------------------------
-	def __call__(cls, __value__=o.Undefined, **kwargs):
+	def __call__(cls, __value__=UNDEFINED, **kwargs):
 		self = cls.__new__(cls, __value__, **kwargs)
 
 		if self is not __value__:
-			if __value__ is o.Undefined:
+			if __value__ is UNDEFINED:
 				super().__call__(**kwargs)
 			else:
 				self.__init__(__value__)
 
 		return self
 
-	# Materialize and return subclasses
+	# Load and return subclasses
 	# ----------------------------------------------------------------------
 	def __subclasses__(cls):
 		result = type.__subclasses__(cls)
 
-		if hasattr(cls, '__disk_class__'):
-			for name in cls.__disk_class__.subclasses.items:
+		if hasattr(cls, '__proto__'):
+			prefix = f'{cls.__proto__}.'
+			names  = set()
+
+			for key, value in o.services.Memory.items(prefix):
+				tail = key[len(prefix):]
+				name = tail.split('.')[0]
+
+				if o.is_class_name(name):
+					names.add(name)
+
+			for name in names:
 				getattr(cls, name)
 
 			result = type.__subclasses__(cls)
 
 		return result
-
-	# Create public shadow class from source class
-	# ----------------------------------------------------------------------
-	def __shadow__(cls):
-		shadow_cls = o.__entities__.get(cls.__disk_class__.id, None)
-
-		if shadow_cls is None:
-			namespace  = {
-				'__is_runtime_defined__' : True,
-			}
-
-			# Annotation must be own property
-			# - - - - - - - - - - - - - - - - - - - - - - - - -
-			if '__annotation__' in cls.__dict__:
-				namespace['__annotation__'] = cls.__dict__['__annotation__']
-
-			shadow_cls = cls.__class__.__new__(
-				cls.__class__,
-				cls.__name__,
-				(cls,),
-				namespace
-			)
-
-		shadow_cls.__has_own_module__ = True
-		shadow_cls.__route__          = cls.__route__
-
-		return shadow_cls
 
 	# Resolve nearest public parent
 	# ----------------------------------------------------------------------
@@ -145,25 +123,12 @@ class TMeta(type(o.Module)):
 
 		return parent
 
-	# Bind class annotation
-	# ----------------------------------------------------------------------
-	@classmethod
-	def __bind_annotation__(mcls, cls):
-		annotation = cls.__dict__.get(
-			'__annotation__',
-			cls.__disk_class__.annotation
-		)
-
-		if annotation is not o.Undefined:
-			cls.__annotation__ = o.Annotation(annotation)
-			cls.__disk_class__.annotation = cls.__annotation__
-
 	# Set Python class definition from field declarations
 	# ----------------------------------------------------------------------
 	@classmethod
 	def __define__(mcls, namespace):
 		annotations = namespace.get('__annotations__', {})
-		fields      = o.Fields()
+		fields      = {}
 
 		# Collect fields from annotation
 		# - - - - - - - - - - - - - - - - - - - -
@@ -171,8 +136,12 @@ class TMeta(type(o.Module)):
 			del namespace['__annotations__']
 			for name, annotation in annotations.items():
 				type_id = mcls.__embody__(annotation).id
-				default = namespace.get(name, o.Undefined)
-				fields.add(name, type_id, default, {})
+				default = namespace.get(name, UNDEFINED)
+
+				fields[name] = {
+					'type'    : type_id,
+					'default' : default,
+				}
 
 				if name in namespace:
 					del namespace[name]
@@ -186,14 +155,25 @@ class TMeta(type(o.Module)):
 				# - - - - - - - - - - - - - - - - - - - -
 				if isinstance(field, o.F):
 					type_id = mcls.__embody__(field.type).id
-					fields.add(name, type_id, field.default, field.props)
+
+					fields[name] = {
+						'type'    : type_id,
+						'default' : field.default,
+						**field.props,
+					}
+
 					del namespace[name]
 
 				# Add fields declared as 'key = int' in extend
 				# - - - - - - - - - - - - - - - - - - - -
 				elif o.Annotation.is_annotation(field):
 					type_id = mcls.__embody__(field).id
-					fields.add(name, type_id, o.Undefined, {})
+
+					fields[name] = {
+						'type'    : type_id,
+						'default' : UNDEFINED,
+					}
+
 					del namespace[name]
 
 		return fields, namespace
@@ -221,10 +201,10 @@ class TMeta(type(o.Module)):
 				else:
 					for arg in annotation.args:
 						arg_cls        = mcls.__embody__(arg)
-						arg_annotation = getattr(arg_cls, '__annotation__', o.Undefined)
+						arg_annotation = getattr(arg_cls, '__annotation__', UNDEFINED)
 						visible_arg    = arg_cls
 
-						if arg_annotation is not o.Undefined and arg_annotation.is_simple:
+						if arg_annotation is not UNDEFINED and arg_annotation.is_simple:
 							visible_arg = arg_annotation.annotation
 
 						visible_args.append(visible_arg)
@@ -240,40 +220,120 @@ class TMeta(type(o.Module)):
 
 		return cls
 
+	# Read class from memory by name
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __read__(mcls, cls, name):
+		entity = None
+		proto  = f'{cls.__proto__}.{name}'
+		route  = o.proto_to_route(proto)
+
+		if route is not UNDEFINED:
+			entity = eval(route)
+		else:
+			entity = mcls.__new__(
+				mcls,
+				name,
+				(cls,),
+				{'__is_runtime_defined__': True},
+			)
+
+		return entity
+
+	# Write class field facts into memory
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __write__(mcls, cls, fields):
+		o.Timer.start('o.TMeta.__write__')
+
+		proto      = cls.__proto__
+		annotation = cls.__dict__.get('__annotation__', UNDEFINED)
+		cls_id     = cls.id
+
+		with o.services.Memory.write() as memory:
+			memory.set(proto, True)
+			memory.set(str(cls_id), proto)
+
+			if annotation is not UNDEFINED:
+				memory.set(f'{proto}.__annotation__', str(annotation.annotation))
+
+			if cls.__has_own_module__ and proto != 'o.T':
+				route = cls.__route__
+				memory.set(route, {
+					'id'    : cls_id,
+					'proto' : proto,
+					'mtime' : cls.__mtime__,
+				})
+				memory.set(f'{proto}.__route__', route)
+
+			for name, props in fields.items():
+				field_proto = f'{proto}._.{name}'
+				for prop_name, prop_value in props.items():
+					prop_proto = f'{field_proto}.{prop_name}'
+
+					if prop_name == 'default' and prop_value is UNDEFINED:
+						memory.unset(prop_proto)
+					else:
+						memory.set(prop_proto, prop_value)
+
+		o.Timer.stop('o.TMeta.__write__')
+
+	# Publish field view on Python class
+	# ----------------------------------------------------------------------
+	def __publish__(cls):
+		o.Timer.start('o.TMeta.__publish__')
+		annotations = {}
+
+		for name, field in cls._.items():
+			type_cls   = field.type
+			annotation = getattr(type_cls, '__annotation__', type_cls)
+			default    = getattr(field,    'default',        UNDEFINED)
+
+			annotations[name] = annotation
+
+			if default is not UNDEFINED:
+				setattr(cls, name, default)
+
+		if annotations:
+			cls.__annotations__ = annotations
+
+		o.Timer.stop('o.TMeta.__publish__')
+
+	# Bind class annotation
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __bind_annotation__(mcls, cls):
+		key        = f'{cls.__proto__}.__annotation__'
+		annotation = cls.__dict__.get('__annotation__', UNDEFINED)
+
+		if annotation is UNDEFINED:
+			annotation = o.services.Memory.get(key, UNDEFINED)
+
+		if annotation is not UNDEFINED:
+			annotation = o.Annotation(annotation)
+			cls.__annotation__ = annotation
+
 	# Proto chain lookup
 	# ----------------------------------------------------------------------
 	def __getattr__(cls, name):
-		entity = None
-		route  = o.Undefined
-
-		base_proto =  getattr(cls, '__proto__', 'o.T')
+		entity     = None
+		base_proto = getattr(cls, '__proto__', 'o.T')
 		proto      = f'{base_proto}.{name}'
 		entity_id  = o.proto_to_id(proto)
 		entity     = o.__entities__.get(entity_id, None)
 
-		if entity is None and o.exists(proto):
+		if entity is None and o.services.Memory.has(proto):
 			if o.is_class_name(name):
-				route = o.proto_to_route(proto)
-
-				if route is not o.Undefined:
-					entity = eval(route)
-
-					# Route eval may return cached class object
-					# ----------------------------------------------------------------------
-					if isinstance(entity, type):
-						o.register_entity(entity)
-				else:
-					entity = cls.__class__.__new__(
-						cls.__class__, name, (cls,), {'__is_runtime_defined__': True}
-					)
+				entity = cls.__class__.__read__(cls, name)
+				entity.__class__.__publish__(entity)
 			elif o.is_instance_version(name):
-				entity = cls.__materialize__(name)
+				entity = cls.__read__(name)
 
 		if entity is None:
 			raise AttributeError(name)
 
 		return entity
-
+	
 	# ======================================================================
 	# PUBLIC CLASS METHODS
 	# ======================================================================
@@ -302,3 +362,16 @@ class TMeta(type(o.Module)):
 		new_cls        = cls.__class__.__new__(cls.__class__, __class_name__, bases, namespace)
 
 		return new_cls
+
+	# Increment class version and return issued value
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __inc_version__(mcls, cls):
+		version_key = f'{cls.__proto__}.__version__'
+		version     = 0
+
+		with o.services.Memory.write() as memory:
+			version = memory.get(version_key, 0)
+			memory.set(version_key, version + 1)
+
+		return version

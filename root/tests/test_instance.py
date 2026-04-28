@@ -4,6 +4,8 @@ import tempfile
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class TestInstance(o.Tester):
 
@@ -27,7 +29,7 @@ class TestInstance(o.Tester):
 				del state['paths'][id]
 
 		def get(id):
-			return state['paths'].get(id, o.Undefined)
+			return state['paths'].get(id, UNDEFINED)
 
 		registry.add    = add
 		registry.remove = remove
@@ -63,7 +65,6 @@ class TestInstance(o.Tester):
 			'registry'      : registry_state,
 			'data_dir'      : o.DATA_DIR,
 			'entities'      : dict(o.__entities__),
-			'disk_classes'  : dict(o.__disk_classes__),
 			'cast_map'      : dict(o.__cast_map__),
 		}
 
@@ -79,14 +80,13 @@ class TestInstance(o.Tester):
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
-		o.__disk_classes__.clear()
-		o.__disk_classes__.update(state['disk_classes'])
-
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
 		cls._restore_registry(state['registry'])
-		shutil.rmtree(state['root'])
+
+		if os.path.isdir(state['root']):
+			shutil.rmtree(state['root'])
 
 		if os.path.isdir(state['temp_root']):
 			shutil.rmtree(state['temp_root'])
@@ -130,11 +130,11 @@ class TestInstance(o.Tester):
 			s = o.T('x')
 			n = o.T(None)
 
-			assert i.__disk_instance__.atomic.get() == b'1'
-			assert f.__disk_instance__.atomic.get() == b'1.5'
-			assert b.__disk_instance__.atomic.get() == b'1'
-			assert s.__disk_instance__.atomic.get() == b'x'
-			assert n.__disk_instance__.atomic.get() == b''
+			assert o.services.Memory.get(f'{i.__proto__}.__value__') == 1
+			assert o.services.Memory.get(f'{f.__proto__}.__value__') == 1.5
+			assert o.services.Memory.get(f'{b.__proto__}.__value__') == True
+			assert o.services.Memory.get(f'{s.__proto__}.__value__') == 'x'
+			assert o.services.Memory.get(f'{n.__proto__}.__value__') is None
 		finally:
 			cls._restore_runtime(state)
 
@@ -144,11 +144,12 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			GetResolvesLoadedClassAndInstance = o.T.extend('GetResolvesLoadedClassAndInstance', foo=str)
+			root_name                        = os.path.basename(state['root'])
+			GetResolvesLoadedClassAndInstance = o.T.extend(f'GetResolvesLoadedClassAndInstance_{root_name}', foo=str)
 
 			t1 = GetResolvesLoadedClassAndInstance(foo='hello')
 
-			assert o.get(GetResolvesLoadedClassAndInstance.__disk_class__.id) is GetResolvesLoadedClassAndInstance
+			assert o.get(GetResolvesLoadedClassAndInstance.id) is GetResolvesLoadedClassAndInstance
 			assert o.get(t1.id) is t1
 		finally:
 			cls._restore_runtime(state)
@@ -159,7 +160,8 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			GetResolvesLoadedProtoClassAndInstance = o.T.extend('GetResolvesLoadedProtoClassAndInstance', foo=str)
+			root_name                             = os.path.basename(state['root'])
+			GetResolvesLoadedProtoClassAndInstance = o.T.extend(f'GetResolvesLoadedProtoClassAndInstance_{root_name}', foo=str)
 			t1                                     = GetResolvesLoadedProtoClassAndInstance(foo='hello')
 
 			assert o.get(GetResolvesLoadedProtoClassAndInstance.__proto__) is GetResolvesLoadedProtoClassAndInstance
@@ -173,8 +175,9 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name  = os.path.basename(state['root'])
 			ObjectInit = o.T.extend(
-				'ObjectInit',
+				f'ObjectInit_{root_name}',
 				foo=str,
 				bar=o.F(int, default=7)
 			)
@@ -185,11 +188,11 @@ class TestInstance(o.Tester):
 			assert t1.foo == 'hello'
 			assert t1.bar == 7
 
-			assert t1.__disk_instance__.attributes.has('foo')
-			assert t1.__disk_instance__.attributes.has('bar') == False
+			assert o.services.Memory.get(f'{t1.__proto__}.foo', UNDEFINED) is not UNDEFINED
+			assert o.services.Memory.get(f'{t1.__proto__}.bar', UNDEFINED) is UNDEFINED
 
-			assert isinstance(t1.__disk_instance__.attributes.get('foo'), int)
-			assert t1.__disk_instance__.attributes.get('bar') is None
+			assert isinstance(o.services.Memory.get(f'{t1.__proto__}.foo'), int)
+			assert o.services.Memory.get(f'{t1.__proto__}.bar', UNDEFINED) is UNDEFINED
 
 			t2 = ObjectInit(foo='world', bar=9)
 
@@ -197,10 +200,10 @@ class TestInstance(o.Tester):
 			assert t2.foo == 'world'
 			assert isinstance(t2.bar, int)
 			assert t2.bar == 9
-			assert t2.__disk_instance__.attributes.has('foo')
-			assert t2.__disk_instance__.attributes.has('bar')
-			assert isinstance(t2.__disk_instance__.attributes.get('foo'), int)
-			assert isinstance(t2.__disk_instance__.attributes.get('bar'), int)
+			assert o.services.Memory.get(f'{t2.__proto__}.foo', UNDEFINED) is not UNDEFINED
+			assert o.services.Memory.get(f'{t2.__proto__}.bar', UNDEFINED) is not UNDEFINED
+			assert isinstance(o.services.Memory.get(f'{t2.__proto__}.foo'), int)
+			assert isinstance(o.services.Memory.get(f'{t2.__proto__}.bar'), int)
 
 			try:
 				ObjectInit()
@@ -214,7 +217,7 @@ class TestInstance(o.Tester):
 			assert t3.foo == 'x'
 			assert isinstance(t3.baz, int)
 			assert t3.baz == 1
-			assert t3.__disk_instance__.attributes.has('baz')
+			assert o.services.Memory.get(f'{t3.__proto__}.baz', UNDEFINED) is not UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -224,8 +227,9 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			ObjectDefaultIsInheritedUntilOverride = o.T.extend(
-				'ObjectDefaultIsInheritedUntilOverride',
+				f'ObjectDefaultIsInheritedUntilOverride_{root_name}',
 				foo=str,
 				bar=o.F(int, default=7)
 			)
@@ -234,15 +238,15 @@ class TestInstance(o.Tester):
 
 			assert t1.bar == 7
 			assert 'bar' not in t1.__dict__
-			assert t1.__disk_instance__.attributes.has('bar') == False
+			assert o.services.Memory.get(f'{t1.__proto__}.bar', UNDEFINED) is UNDEFINED
 
 			t2 = ObjectDefaultIsInheritedUntilOverride(foo='world', bar=9)
-			bar_id = t2.__disk_instance__.attributes.get('bar')
+			bar_id = o.services.Memory.get(f'{t2.__proto__}.bar')
 
 			assert isinstance(t2.bar, int)
 			assert t2.bar == 9
 			assert 'bar' in t2.__dict__
-			assert t2.__disk_instance__.attributes.has('bar')
+			assert o.services.Memory.get(f'{t2.__proto__}.bar', UNDEFINED) is not UNDEFINED
 			assert isinstance(bar_id, int)
 		finally:
 			cls._restore_runtime(state)
@@ -253,16 +257,17 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			GetattrReadsPersistedChildViaEntitiesRegistry = o.T.extend(
-				'GetattrReadsPersistedChildViaEntitiesRegistry',
+				f'GetattrReadsPersistedChildViaEntitiesRegistry_{root_name}',
 				foo=str,
 			)
 
 			t1     = GetattrReadsPersistedChildViaEntitiesRegistry(foo='hello')
-			foo_id = t1.__disk_instance__.attributes.get('foo')
+			foo_id = o.services.Memory.get(f'{t1.__proto__}.foo')
 
 			del t1.__dict__['foo']
-			assert t1.__disk_instance__.attributes.has('foo') == True
+			assert o.services.Memory.get(f'{t1.__proto__}.foo', UNDEFINED) is not UNDEFINED
 			assert isinstance(foo_id, int)
 			assert o.get(foo_id).__value__ == 'hello'
 			assert t1.foo == 'hello'
@@ -276,8 +281,9 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			DelattrRemovesMaterializedAttr = o.T.extend(
-				'DelattrRemovesMaterializedAttr',
+				f'DelattrRemovesMaterializedAttr_{root_name}',
 				foo=str,
 			)
 
@@ -285,12 +291,12 @@ class TestInstance(o.Tester):
 
 			assert t1.foo == 'hello'
 			assert 'foo' in t1.__dict__
-			assert t1.__disk_instance__.attributes.has('foo') == True
+			assert o.services.Memory.get(f'{t1.__proto__}.foo', UNDEFINED) is not UNDEFINED
 
 			del t1.foo
 
 			assert 'foo' not in t1.__dict__
-			assert t1.__disk_instance__.attributes.has('foo') == False
+			assert o.services.Memory.get(f'{t1.__proto__}.foo', UNDEFINED) is UNDEFINED
 
 			try:
 				t1.foo
@@ -306,8 +312,9 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			DelattrRemovesAttrAfterCacheSlotDrop = o.T.extend(
-				'DelattrRemovesAttrAfterCacheSlotDrop',
+				f'DelattrRemovesAttrAfterCacheSlotDrop_{root_name}',
 				foo=str,
 			)
 
@@ -316,12 +323,12 @@ class TestInstance(o.Tester):
 			del t1.__dict__['foo']
 
 			assert 'foo' not in t1.__dict__
-			assert t1.__disk_instance__.attributes.has('foo') == True
+			assert o.services.Memory.get(f'{t1.__proto__}.foo', UNDEFINED) is not UNDEFINED
 
 			del t1.foo
 
 			assert 'foo' not in t1.__dict__
-			assert t1.__disk_instance__.attributes.has('foo') == False
+			assert o.services.Memory.get(f'{t1.__proto__}.foo', UNDEFINED) is UNDEFINED
 
 			try:
 				t1.foo
@@ -337,15 +344,16 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Child  = o.T.extend('Child', name=str)
-			Parent = o.T.extend('Parent', child=Child)
+			root_name = os.path.basename(state['root'])
+			Child     = o.T.extend(f'Child_{root_name}', name=str)
+			Parent    = o.T.extend(f'Parent_{root_name}', child=Child)
 
 			child  = Child(name='alex')
 			parent = Parent(child=child)
 
 			assert 'child' in parent.__dict__
-			assert parent.__disk_instance__.attributes.has('child') == True
-			assert parent.__disk_instance__.attributes.get('child') == child.id
+			assert o.services.Memory.get(f'{parent.__proto__}.child', UNDEFINED) is not UNDEFINED
+			assert o.services.Memory.get(f'{parent.__proto__}.child') == child.id
 			assert parent.child is child
 			assert parent.child.name == 'alex'
 		finally:
@@ -440,14 +448,15 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Child  = o.T.extend('Child', name=str)
-			Parent = o.T.extend('Parent', child=Child)
+			root_name = os.path.basename(state['root'])
+			Child     = o.T.extend(f'Child_{root_name}', name=str)
+			Parent    = o.T.extend(f'Parent_{root_name}', child=Child)
 
 			child  = Child(name='alex')
 			parent = Parent(child=child)
 
 			assert parent.child is child
-			assert parent.__disk_instance__.attributes.get('child') == child.id
+			assert o.services.Memory.get(f'{parent.__proto__}.child') == child.id
 		finally:
 			cls._restore_runtime(state)
 
@@ -457,16 +466,17 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			FieldOverwriteUpdatesPersistedChildId = o.T.extend('FieldOverwriteUpdatesPersistedChildId', foo=str)
+			root_name                            = os.path.basename(state['root'])
+			FieldOverwriteUpdatesPersistedChildId = o.T.extend(f'FieldOverwriteUpdatesPersistedChildId_{root_name}', foo=str)
 
 			t1       = FieldOverwriteUpdatesPersistedChildId(foo='hello')
-			first_id = t1.__disk_instance__.attributes.get('foo')
+			first_id = o.services.Memory.get(f'{t1.__proto__}.foo')
 
 			t1.foo = 'world'
 
 			assert isinstance(t1.foo, str)
 			assert t1.foo == 'world'
-			assert t1.__disk_instance__.attributes.get('foo') != first_id
+			assert o.services.Memory.get(f'{t1.__proto__}.foo') != first_id
 		finally:
 			cls._restore_runtime(state)
 
@@ -476,15 +486,16 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Child  = o.T.extend('Child', name=str)
-			Parent = o.T.extend('Parent', child=Child)
+			root_name = os.path.basename(state['root'])
+			Child     = o.T.extend(f'Child_{root_name}', name=str)
+			Parent    = o.T.extend(f'Parent_{root_name}', child=Child)
 
 			child  = Child(name='alex')
 			parent = Parent(child=child)
 
 			assert 'child' in parent.__dict__
-			assert parent.__disk_instance__.attributes.has('child') == True
-			assert parent.__disk_instance__.attributes.get('child') == child.id
+			assert o.services.Memory.get(f'{parent.__proto__}.child', UNDEFINED) is not UNDEFINED
+			assert o.services.Memory.get(f'{parent.__proto__}.child') == child.id
 			assert parent.child is child
 			assert isinstance(parent.child, Child)
 			assert parent.child.name == 'alex'
@@ -497,14 +508,15 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Base  = o.T.extend('Base', foo=o.F(int, default=7))
-			Child = Base.extend('Child')
+			root_name = os.path.basename(state['root'])
+			Base      = o.T.extend(f'Base_{root_name}', foo=o.F(int, default=7))
+			Child     = Base.extend(f'Child_{root_name}')
 
 			obj = Child()
 
 			assert obj.foo == 7
 			assert 'foo' not in obj.__dict__
-			assert obj.__disk_instance__.attributes.has('foo') == False
+			assert o.services.Memory.get(f'{obj.__proto__}.foo', UNDEFINED) is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -514,8 +526,9 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			InstanceOverrideDeletesBackToInheritedDefault = o.T.extend(
-				'InstanceOverrideDeletesBackToInheritedDefault',
+				f'InstanceOverrideDeletesBackToInheritedDefault_{root_name}',
 				foo=o.F(int, default=7)
 			)
 
@@ -523,19 +536,19 @@ class TestInstance(o.Tester):
 
 			assert obj.foo == 7
 			assert 'foo' not in obj.__dict__
-			assert obj.__disk_instance__.attributes.has('foo') == False
+			assert o.services.Memory.get(f'{obj.__proto__}.foo', UNDEFINED) is UNDEFINED
 
 			obj.foo = 9
 
 			assert obj.foo == 9
 			assert 'foo' in obj.__dict__
-			assert obj.__disk_instance__.attributes.has('foo') == True
+			assert o.services.Memory.get(f'{obj.__proto__}.foo', UNDEFINED) is not UNDEFINED
 
 			del obj.foo
 
 			assert obj.foo == 7
 			assert 'foo' not in obj.__dict__
-			assert obj.__disk_instance__.attributes.has('foo') == False
+			assert o.services.Memory.get(f'{obj.__proto__}.foo', UNDEFINED) is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -545,7 +558,8 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			ExistsAlignsWithInstanceRoom = o.T.extend('ExistsAlignsWithInstanceRoom', foo=str)
+			root_name                   = os.path.basename(state['root'])
+			ExistsAlignsWithInstanceRoom = o.T.extend(f'ExistsAlignsWithInstanceRoom_{root_name}', foo=str)
 
 			t1 = ExistsAlignsWithInstanceRoom(foo='hello')
 
@@ -560,7 +574,7 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			assert o.get(999999) is o.Undefined
+			assert o.get(999999) is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -570,12 +584,13 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			GetReconstructsObjectInstanceOnCacheMiss = o.T.extend('GetReconstructsObjectInstanceOnCacheMiss', foo=str)
+			root_name                               = os.path.basename(state['root'])
+			GetReconstructsObjectInstanceOnCacheMiss = o.T.extend(f'GetReconstructsObjectInstanceOnCacheMiss_{root_name}', foo=str)
 
 			t1       = GetReconstructsObjectInstanceOnCacheMiss(foo='hello')
 			id       = t1.id
 			proto    = t1.__proto__
-			count    = GetReconstructsObjectInstanceOnCacheMiss.__disk_class__.instances.count
+			count    = o.services.Memory.get(f'{GetReconstructsObjectInstanceOnCacheMiss.__proto__}.__version__')
 
 			del o.__entities__[id]
 
@@ -584,7 +599,7 @@ class TestInstance(o.Tester):
 			assert reopened.id == id
 			assert reopened.__proto__ == proto
 			assert reopened.foo == 'hello'
-			assert GetReconstructsObjectInstanceOnCacheMiss.__disk_class__.instances.count == count
+			assert o.services.Memory.get(f'{GetReconstructsObjectInstanceOnCacheMiss.__proto__}.__version__') == count
 		finally:
 			cls._restore_runtime(state)
 

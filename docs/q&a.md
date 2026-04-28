@@ -68,14 +68,15 @@ I read the full `docs` set in `/Users/alexander/dev/o/docs` and extracted the ar
 - Class side:
   - `__fields__/`
   - `__subclasses__/`
-  - `__instances__/__index__`
+  - `__version__`
+  - `__items__`
 - Instance side:
 - `__attributes__` for packed named refs
   - `__list__` for ordered refs
   - `__dict__` for keyed refs
   - `__value__` for atomic payload
 - `__fields__` layout is slot-first: `__fields__/<slot>/<metadata>`. See [disk_api.md](/Users/alexander/dev/o/docs/disk_api.md) and [o_implementation_updates_1.md](/Users/alexander/dev/o/docs/o_implementation_updates_1.md).
-- `__instances__/__index__` is room state: `count` is next birth number, `order` is current live order. Birth id is stable; position is not. See [o_folder_structure_inspiration_3.md](/Users/alexander/dev/o/docs/o_folder_structure_inspiration_3.md).
+- `__version__` plus `__items__` are room state: birth id is stable; position is not. See [o_folder_structure_inspiration_3.md](/Users/alexander/dev/o/docs/o_folder_structure_inspiration_3.md).
 - `get` must resolve only, never materialize as a side effect. See [o_disk_api_qa_resolution_2026_03_27.md](/Users/alexander/dev/o/docs/o_disk_api_qa_resolution_2026_03_27.md).
 - Exactness/simultaneity is protected: disk should be an exact replica of materialized memory, and one logical act should commit as one write. See [o_folder_storage_concept.md](/Users/alexander/dev/o/docs/o_folder_storage_concept.md) and [o_folder_structure_inspiration_3.md](/Users/alexander/dev/o/docs/o_folder_structure_inspiration_3.md).
 

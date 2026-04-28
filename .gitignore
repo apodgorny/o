@@ -1,5 +1,8 @@
 # o data
 root/_/
+root/__memory__/
+.DS_Store
+*.mdb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

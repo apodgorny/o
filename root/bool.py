@@ -18,4 +18,4 @@ class Bool(o.Atom):
 	# ----------------------------------------------------------------------
 	def __cast_in__(self, value):
 		object.__setattr__(self, '__value__', value)
-		self.__disk_instance__.atomic.set(b'1' if value else b'0')
+		o.services.Memory.set(f'{self.__proto__}.__value__', value)

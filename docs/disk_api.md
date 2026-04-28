@@ -15,7 +15,6 @@
 			<ClassName>/
 
 		__instances__/
-			__index__
 			_<n>/
 				__attributes__
 				__list__      # list instance only
@@ -84,7 +83,7 @@ Entity rooms remain folder-based.
 | Signature | Returns / does |
 | --- | --- |
 | `class Instances(o.Module)` | Manager for class instance rooms and live order. |
-| `Instances.set(self, count, order)` | Rewrites `__index__` with next birth number and live order. |
+| `Instances.set(self, count, order)` | Rewrites class-side sequence state with next birth number and live order. |
 | `Instances.create(self, annotation)` | Creates next instance room by append-only birth path. |
 | `Instances.remove(self, version)` | Removes one version from live order without deleting the room itself. |
 | `Instances.get(self, version)` | Reopens room by underscored version token if it exists. |

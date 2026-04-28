@@ -4,6 +4,8 @@ import tempfile
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class TestList(o.Tester):
 
@@ -27,7 +29,7 @@ class TestList(o.Tester):
 				del state['paths'][id]
 
 		def get(id):
-			return state['paths'].get(id, o.Undefined)
+			return state['paths'].get(id, UNDEFINED)
 
 		registry.add    = add
 		registry.remove = remove
@@ -63,7 +65,6 @@ class TestList(o.Tester):
 			'registry'      : registry_state,
 			'data_dir'      : o.DATA_DIR,
 			'entities'      : dict(o.__entities__),
-			'disk_classes'  : dict(o.__disk_classes__),
 			'cast_map'      : dict(o.__cast_map__),
 		}
 
@@ -79,14 +80,13 @@ class TestList(o.Tester):
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
-		o.__disk_classes__.clear()
-		o.__disk_classes__.update(state['disk_classes'])
-
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
 		cls._restore_registry(state['registry'])
-		shutil.rmtree(state['root'])
+
+		if os.path.isdir(state['root']):
+			shutil.rmtree(state['root'])
 
 		if os.path.isdir(state['temp_root']):
 			shutil.rmtree(state['temp_root'])
@@ -114,7 +114,8 @@ class TestList(o.Tester):
 
 		try:
 			x        = o.List([1, 2])
-			first_id = x.__disk_instance__.list.get(1)
+			items    = o.services.Memory.get(f'{x.__proto__}.__items__', [])
+			first_id = items[1]
 
 			x[1] = 'b'
 			x.append(3)
@@ -123,7 +124,7 @@ class TestList(o.Tester):
 			assert x[0] == 'b'
 			assert x[1] == 3
 			assert len(x) == 2
-			assert x.__disk_instance__.list.get(0) != first_id
+			assert o.services.Memory.get(f'{x.__proto__}.__items__', [])[0] != first_id
 		finally:
 			cls._restore_runtime(state)
 
@@ -133,7 +134,7 @@ class TestList(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Child = o.T.extend('ListChild', name=str)
+			Child = o.T.extend(name=str)
 			x     = o.List([Child(name='alex')])
 
 			assert isinstance(x[0], Child)
@@ -151,7 +152,7 @@ class TestList(o.Tester):
 			x.title = 'numbers'
 
 			assert x.title == 'numbers'
-			assert x.__disk_instance__.attributes.has('title') == True
+			assert o.services.Memory.get(f'{x.__proto__}.title', UNDEFINED) is not UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 

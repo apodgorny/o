@@ -1,5 +1,7 @@
 import o
 
+UNDEFINED = o.Undefined
+
 
 class JsonPrompt(o.Module):
 
@@ -37,10 +39,10 @@ class JsonPrompt(o.Module):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _get_root_prompt_lines(cls, t_cls, stack):
-		annotation = getattr(t_cls, '__annotation__', o.Undefined)
+		annotation = getattr(t_cls, '__annotation__', UNDEFINED)
 		lines      = ()
 
-		if annotation is o.Undefined:
+		if annotation is UNDEFINED:
 			lines = cls._get_object_prompt_lines(t_cls, stack)
 		else:
 			lines = cls._get_annotation_prompt_lines(annotation, stack)
@@ -51,11 +53,11 @@ class JsonPrompt(o.Module):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _get_class_prompt_lines(cls, t_cls, stack):
-		annotation = getattr(t_cls, '__annotation__', o.Undefined)
+		annotation = getattr(t_cls, '__annotation__', UNDEFINED)
 		lines      = ()
 		name       = cls._get_class_name(t_cls)
 
-		if annotation is o.Undefined:
+		if annotation is UNDEFINED:
 			if name in stack:
 				lines = (name,)
 			else:
@@ -84,9 +86,9 @@ class JsonPrompt(o.Module):
 		elif annotation.is_dict:
 			lines = cls._get_dict_prompt_lines(annotation.key, annotation.value, stack)
 		else:
-			text = cls.ATOMIC_TYPES.get(annotation.origin, o.Undefined)
+			text = cls.ATOMIC_TYPES.get(annotation.origin, UNDEFINED)
 
-			if text is o.Undefined:
+			if text is UNDEFINED:
 				raise TypeError(f'Unsupported JSON prompt annotation: `{annotation}`')
 
 			lines = (text,)
@@ -164,7 +166,7 @@ class JsonPrompt(o.Module):
 			field_lines   = list(cls._get_field_prompt_lines(field, stack))
 			description   = cls._get_field_description(field)
 			comment       = ''
-			has_comment   = description is not o.Undefined and description is not None
+			has_comment   = description is not UNDEFINED and description is not None
 			is_last       = index == len(items) - 1
 
 			if has_comment:
@@ -220,10 +222,10 @@ class JsonPrompt(o.Module):
 	@classmethod
 	def _get_field_prompt_lines(cls, field, stack):
 		field_cls  = field.type
-		annotation = getattr(field_cls, '__annotation__', o.Undefined)
+		annotation = getattr(field_cls, '__annotation__', UNDEFINED)
 		lines      = ()
 
-		if annotation is o.Undefined:
+		if annotation is UNDEFINED:
 			lines = cls._get_class_prompt_lines(field_cls, stack)
 		else:
 			lines = cls._get_annotation_prompt_lines(annotation, stack)
@@ -253,11 +255,11 @@ class JsonPrompt(o.Module):
 	@classmethod
 	def _is_field_nullable(cls, field):
 		field_cls      = field.type
-		field_type     = getattr(field_cls, '__annotation__', o.Undefined)
-		default        = getattr(field, 'default', o.Undefined)
+		field_type     = getattr(field_cls, '__annotation__', UNDEFINED)
+		default        = getattr(field, 'default', UNDEFINED)
 		field_nullable = False
 
-		if field_type is not o.Undefined:
+		if field_type is not UNDEFINED:
 			field_nullable = o.Annotation(field_type).is_optional
 
 		return field_nullable or (default is None)
@@ -266,12 +268,12 @@ class JsonPrompt(o.Module):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _get_field_description(cls, field):
-		description = o.Undefined
+		description = UNDEFINED
 
 		try:
 			description = field.description
 		except AttributeError:
-			description = o.Undefined
+			description = UNDEFINED
 
 		return description
 

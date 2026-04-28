@@ -5,6 +5,8 @@ import tempfile
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class TestClass(o.Tester):
 
@@ -28,7 +30,7 @@ class TestClass(o.Tester):
 				del state['paths'][id]
 
 		def get(id):
-			return state['paths'].get(id, o.Undefined)
+			return state['paths'].get(id, UNDEFINED)
 
 		registry.add    = add
 		registry.remove = remove
@@ -67,7 +69,6 @@ class TestClass(o.Tester):
 			'registry'      : registry_state,
 			'data_dir'      : o.DATA_DIR,
 			'entities'      : dict(o.__entities__),
-			'disk_classes'  : dict(o.__disk_classes__),
 			'cast_map'      : dict(o.__cast_map__),
 			'modules'       : [],
 			'paths'         : [],
@@ -85,9 +86,6 @@ class TestClass(o.Tester):
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
-		o.__disk_classes__.clear()
-		o.__disk_classes__.update(state['disk_classes'])
-
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
@@ -100,7 +98,9 @@ class TestClass(o.Tester):
 				os.remove(path)
 
 		cls._restore_registry(state['registry'])
-		shutil.rmtree(state['root'])
+
+		if os.path.isdir(state['root']):
+			shutil.rmtree(state['root'])
 
 		if os.path.isdir(state['source_root']):
 			shutil.rmtree(state['source_root'])
@@ -184,15 +184,15 @@ class TestClass(o.Tester):
 				)
 			)
 
-			name_field = FieldDefinitionFromSource.__disk_class__.fields.get('name')
-			age_field  = FieldDefinitionFromSource.__disk_class__.fields.get('age')
+			name_field = FieldDefinitionFromSource._.name
+			age_field  = FieldDefinitionFromSource._.age
 
 			assert name_field is not None
 			assert age_field is not None
-			assert name_field.get('type') == o.Str.id
-			assert age_field.get('type') == o.Int.id
-			assert age_field.get('default') == 7
-			assert age_field.get('description') == 'Age'
+			assert name_field.type is o.Str
+			assert age_field.type is o.Int
+			assert age_field.default == 7
+			assert age_field.description == 'Age'
 			assert FieldDefinitionFromSource.age == 7
 			assert FieldDefinitionFromSource.__annotations__['name'] == o.Str.__annotation__
 			assert FieldDefinitionFromSource.__annotations__['age'] == o.Int.__annotation__
@@ -220,7 +220,7 @@ class TestClass(o.Tester):
 			FieldPropsGetterAndSetter._.age.label = 'Years'
 
 			assert FieldPropsGetterAndSetter._.age.label == 'Years'
-			assert FieldPropsGetterAndSetter.__disk_class__.fields.get('age').get('label') == 'Years'
+			assert o.services.Memory.get(f'{FieldPropsGetterAndSetter.__proto__}._.age.label') == 'Years'
 
 			entity_id = FieldPropsGetterAndSetter.id
 
@@ -238,18 +238,19 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			class_name = f'SourceDefinitionIsAuthoritative_{os.path.basename(state["root"])}'
+
 			SourceDefinitionIsAuthoritative = o.T.extend(
-				'SourceDefinitionIsAuthoritative',
+				class_name,
 				name=str,
 				age=o.F(int, default=7, description='Age')
 			)
 
-			first_path = SourceDefinitionIsAuthoritative.__disk_class__.path
-			assert os.path.isdir(os.path.join(first_path, '__fields__', 'name'))
-			assert os.path.isdir(os.path.join(first_path, '__fields__', 'age'))
+			assert SourceDefinitionIsAuthoritative._.name.type is o.Str
+			assert SourceDefinitionIsAuthoritative._.age.type is o.Int
 
 			try:
-				o.T.extend('SourceDefinitionIsAuthoritative', name=o.F(str, description='Name'))
+				o.T.extend(class_name, name=o.F(str, description='Name'))
 				assert False
 			except TypeError as e:
 				assert 'already exists' in str(e)
@@ -262,23 +263,22 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			ClassAnnotationCycle = o.T.extend('ClassAnnotationCycle', list[str])
+			class_name = f'ClassAnnotationCycle_{os.path.basename(state["root"])}'
+			ClassAnnotationCycle = o.T.extend(class_name, list[str])
 
 			base = ClassAnnotationCycle.__bases__[0]
 
 			assert ClassAnnotationCycle.__annotation__ == o.Annotation(list[str])
-			assert ClassAnnotationCycle.__dict__.get('__annotation__', o.Undefined) is o.Undefined
-			assert ClassAnnotationCycle.__disk_class__.annotation is o.Undefined
+			assert ClassAnnotationCycle.__dict__.get('__annotation__', UNDEFINED) is UNDEFINED
 			assert base.__annotation__ == o.Annotation(list[str])
-			assert base.__disk_class__.annotation.annotation == list[str]
+			assert base.__annotation__.annotation == list[str]
 
 			del o.__entities__[ClassAnnotationCycle.id]
-			reopened = base.ClassAnnotationCycle
+			reopened = getattr(base, class_name)
 
 			assert reopened.__proto__ == ClassAnnotationCycle.__proto__
 			assert reopened.__annotation__ == o.Annotation(list[str])
-			assert reopened.__dict__.get('__annotation__', o.Undefined) is o.Undefined
-			assert reopened.__disk_class__.annotation is o.Undefined
+			assert reopened.__dict__.get('__annotation__', UNDEFINED) is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -288,13 +288,13 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			UserClassInheritsAnnotation = o.T.extend('UserClassInheritsAnnotation', list[str])
+			class_name = f'UserClassInheritsAnnotation_{os.path.basename(state["root"])}'
+			UserClassInheritsAnnotation = o.T.extend(class_name, list[str])
 
 			base = UserClassInheritsAnnotation.__bases__[0]
 
 			assert UserClassInheritsAnnotation.__annotation__ == o.Annotation(list[str])
-			assert UserClassInheritsAnnotation.__dict__.get('__annotation__', o.Undefined) is o.Undefined
-			assert UserClassInheritsAnnotation.__disk_class__.annotation is o.Undefined
+			assert UserClassInheritsAnnotation.__dict__.get('__annotation__', UNDEFINED) is UNDEFINED
 			assert base.__annotation__ == o.Annotation(list[str])
 			assert base.__dict__['__annotation__'] == o.Annotation(list[str])
 			assert str(base.__annotation__.annotation) == 'list[str]'
@@ -307,8 +307,9 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			EmbodiedGenericBaseOne = o.T.extend('EmbodiedGenericBaseOne', dict[str, int])
-			EmbodiedGenericBaseTwo = o.T.extend('EmbodiedGenericBaseTwo', dict[str, int])
+			root_name              = os.path.basename(state['root'])
+			EmbodiedGenericBaseOne = o.T.extend(f'EmbodiedGenericBaseOne_{root_name}', dict[str, int])
+			EmbodiedGenericBaseTwo = o.T.extend(f'EmbodiedGenericBaseTwo_{root_name}', dict[str, int])
 
 			assert EmbodiedGenericBaseOne.__bases__[0] is EmbodiedGenericBaseTwo.__bases__[0]
 			assert EmbodiedGenericBaseOne.__bases__[0].__name__.startswith('Generic')
@@ -321,7 +322,8 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			RootOnlyAnnotationOk = o.T.extend('RootOnlyAnnotationOk', list[int])
+			root_name            = os.path.basename(state['root'])
+			RootOnlyAnnotationOk = o.T.extend(f'RootOnlyAnnotationOk_{root_name}', list[int])
 
 			assert RootOnlyAnnotationOk.__annotation__ == o.Annotation(list[int])
 
@@ -339,15 +341,15 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			FieldTypeLaw = o.T.extend('FieldTypeLaw', payload=dict[str, int])
+			class_name   = f'FieldTypeLaw_{os.path.basename(state["root"])}'
+			FieldTypeLaw = o.T.extend(class_name, data=dict[str, int])
 
-			disk_field = FieldTypeLaw.__disk_class__.fields.get('payload')
-			type_id    = disk_field.get('type')
-			type_cls   = o.get(type_id)
+			field    = FieldTypeLaw._.data
+			type_cls = field.type
 
-			assert disk_field.has('annotation') == False
+			assert field.annotation == o.Annotation(dict[str, int])
 			assert type_cls.__annotation__ == o.Annotation(dict[str, int])
-			assert FieldTypeLaw.__annotations__['payload'] == type_cls.__annotation__
+			assert FieldTypeLaw.__annotations__['data'] == type_cls.__annotation__
 		finally:
 			cls._restore_runtime(state)
 
@@ -357,19 +359,20 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			class_name = f'MaterializationThroughGetattr_{os.path.basename(state["root"])}'
 			MaterializationThroughGetattr = o.T.extend(
-				'MaterializationThroughGetattr',
+				class_name,
 				age=o.F(int, default=7, description='Age')
 			)
 
 			entity_id = MaterializationThroughGetattr.id
 
 			del o.__entities__[entity_id]
-			reopened = o.T.MaterializationThroughGetattr
+			reopened = getattr(o.T, class_name)
 
 			assert reopened.id == entity_id
-			assert reopened.__proto__ == 'o.T.MaterializationThroughGetattr'
-			assert reopened.__disk_class__.fields.has('age') == True
+			assert reopened.__proto__ == f'o.T.{class_name}'
+			assert reopened._.age.type is o.Int
 			assert reopened.age == 7
 			assert reopened.__annotations__['age'] == o.Int.__annotation__
 		finally:
@@ -381,16 +384,17 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			extended_fields = o.T.extend('ExtendedFieldsPath', name=str)
-			extended_list   = o.T.extend('ExtendedListPath', list[str])
+			fields_name     = f'ExtendedFieldsPath_{os.path.basename(state["root"])}'
+			list_name       = f'ExtendedListPath_{os.path.basename(state["root"])}'
+			extended_fields = o.T.extend(fields_name, name=str)
+			extended_list   = o.T.extend(list_name, list[str])
 
-			assert extended_fields.__proto__ == 'o.T.ExtendedFieldsPath'
-			assert extended_fields.__disk_class__.fields.has('name') == True
-			assert extended_fields.__disk_class__.fields.get('name').get('type') == o.Str.id
+			assert extended_fields.__proto__ == f'o.T.{fields_name}'
+			assert extended_fields._.name.type is o.Str
 			assert extended_list.__annotation__ == o.Annotation(list[str])
 
 			try:
-				o.T.extend('ExtendedFieldsPath', age=int)
+				o.T.extend(fields_name, age=int)
 				assert False
 			except TypeError as e:
 				assert 'already exists' in str(e)
@@ -403,8 +407,9 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			CastMapAndEmbodimentReuseOne = o.T.extend('CastMapAndEmbodimentReuseOne', list[dict[str, int]])
-			CastMapAndEmbodimentReuseTwo = o.T.extend('CastMapAndEmbodimentReuseTwo', list[dict[str, int]])
+			root_name                    = os.path.basename(state['root'])
+			CastMapAndEmbodimentReuseOne = o.T.extend(f'CastMapAndEmbodimentReuseOne_{root_name}', list[dict[str, int]])
+			CastMapAndEmbodimentReuseTwo = o.T.extend(f'CastMapAndEmbodimentReuseTwo_{root_name}', list[dict[str, int]])
 
 			assert o.__cast_map__[int] is o.Int
 			assert o.__cast_map__[str] is o.Str
@@ -418,7 +423,8 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			ExistsAlignsWithClassRoom = o.T.extend('ExistsAlignsWithClassRoom')
+			class_name                = f'ExistsAlignsWithClassRoom_{os.path.basename(state["root"])}'
+			ExistsAlignsWithClassRoom = o.T.extend(class_name)
 
 			assert o.exists(ExistsAlignsWithClassRoom.__proto__) == True
 			assert o.exists(ExistsAlignsWithClassRoom.id) == True
@@ -478,7 +484,7 @@ class TestClass(o.Tester):
 			)
 
 			assert SourceBackedClassPersistsOModule.__has_own_module__ == True
-			assert SourceBackedClassPersistsOModule.__disk_class__.route == SourceBackedClassPersistsOModule.__route__
+			assert o.get_route(SourceBackedClassPersistsOModule.__route__)['proto'] == SourceBackedClassPersistsOModule.__proto__
 		finally:
 			cls._restore_runtime(state)
 
@@ -488,9 +494,11 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			RuntimeDefinedClassHasNoOModule = o.T.extend('RuntimeDefinedClassHasNoOModule')
+			root_name                       = os.path.basename(state['root'])
+			class_name                      = f'RuntimeDefinedClassHasNoOModule_{root_name}'
+			RuntimeDefinedClassHasNoOModule = o.T.extend(class_name)
 
-			assert RuntimeDefinedClassHasNoOModule.__disk_class__.route is o.Undefined
+			assert RuntimeDefinedClassHasNoOModule.__route__ is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -532,7 +540,7 @@ class TestClass(o.Tester):
 			reopened = o.get(id)
 
 			assert reopened.__class__.__proto__ == f'o.T.{class_name}'
-			assert reopened.__class__.__disk_class__.route == reopened.__class__.__route__
+			assert o.get_route(reopened.__class__.__route__)['proto'] == reopened.__class__.__proto__
 			assert reopened.name == 'alex'
 			assert list(reopened.items) == [1, 2]
 			assert dict(reopened.meta.items()) == {'lang': 'uk'}
@@ -545,8 +553,10 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name  = os.path.basename(state['root'])
+			class_name = f'RuntimeDefinedRestoresFormAndValuesAfterReload_{root_name}'
 			RuntimeDefinedRestoresFormAndValuesAfterReload = o.T.extend(
-				'RuntimeDefinedRestoresFormAndValuesAfterReload',
+				class_name,
 				name=str,
 			)
 
@@ -563,8 +573,8 @@ class TestClass(o.Tester):
 
 			reopened = o.get(id)
 
-			assert reopened.__class__.__proto__ == 'o.T.RuntimeDefinedRestoresFormAndValuesAfterReload'
-			assert reopened.__class__.__disk_class__.route is o.Undefined
+			assert reopened.__class__.__proto__ == f'o.T.{class_name}'
+			assert reopened.__class__.__route__ is UNDEFINED
 			assert reopened.name == 'alex'
 			assert list(reopened.items) == [1, 2]
 			assert dict(reopened.meta.items()) == {'lang': 'uk'}
@@ -586,11 +596,12 @@ class TestClass(o.Tester):
 					'\tpass\n'
 				)
 			)
-			RuntimeChild = SourceParentRuntimeChild.extend('RuntimeChild')
+			child_name   = f'RuntimeChild_{os.path.basename(state["root"])}'
+			RuntimeChild = SourceParentRuntimeChild.extend(child_name)
 
 			assert RuntimeChild.__bases__[0] is SourceParentRuntimeChild
-			assert SourceParentRuntimeChild.__disk_class__.route == SourceParentRuntimeChild.__route__
-			assert RuntimeChild.__disk_class__.route is o.Undefined
+			assert o.get_route(SourceParentRuntimeChild.__route__)['proto'] == SourceParentRuntimeChild.__proto__
+			assert RuntimeChild.__route__ is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -600,20 +611,22 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			RuntimeParentSourceChild = o.T.extend('RuntimeParentSourceChild')
+			root_name                = os.path.basename(state['root'])
+			parent_name              = f'RuntimeParentSourceChild_{root_name}'
+			RuntimeParentSourceChild = o.T.extend(parent_name)
 			LoadedChild              = cls._source_class(
 				state,
 				'LoadedChild',
 				(
 					'import o\n\n'
-					'class LoadedChild(o.T.RuntimeParentSourceChild):\n'
+					f'class LoadedChild(o.T.{parent_name}):\n'
 					'\tpass\n'
 				)
 			)
 
 			assert RuntimeParentSourceChild in LoadedChild.__mro__[1:]
-			assert RuntimeParentSourceChild.__disk_class__.route is o.Undefined
-			assert LoadedChild.__disk_class__.route == LoadedChild.__route__
+			assert RuntimeParentSourceChild.__route__ is UNDEFINED
+			assert o.get_route(LoadedChild.__route__)['proto'] == LoadedChild.__proto__
 		finally:
 			cls._restore_runtime(state)
 
@@ -623,8 +636,11 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			NestedSubclassProtoChainMaterialization = o.T.extend('NestedSubclassProtoChainMaterialization')
-			Inner = NestedSubclassProtoChainMaterialization.extend('Inner')
+			root_name = os.path.basename(state['root'])
+			outer_name = f'NestedSubclassProtoChainMaterialization_{root_name}'
+			inner_name = f'Inner_{root_name}'
+			NestedSubclassProtoChainMaterialization = o.T.extend(outer_name)
+			Inner = NestedSubclassProtoChainMaterialization.extend(inner_name)
 
 			outer_id = NestedSubclassProtoChainMaterialization.id
 			inner_id = Inner.id
@@ -632,10 +648,10 @@ class TestClass(o.Tester):
 			del o.__entities__[outer_id]
 			del o.__entities__[inner_id]
 
-			reopened = o.T.NestedSubclassProtoChainMaterialization.Inner
+			reopened = getattr(getattr(o.T, outer_name), inner_name)
 
 			assert reopened.id == inner_id
-			assert reopened.__proto__ == 'o.T.NestedSubclassProtoChainMaterialization.Inner'
+			assert reopened.__proto__ == f'o.T.{outer_name}.{inner_name}'
 		finally:
 			cls._restore_runtime(state)
 
@@ -655,8 +671,11 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			RuntimeChildParentIsPublicBase = o.T.extend('RuntimeChildParentIsPublicBase')
-			Inner = RuntimeChildParentIsPublicBase.extend('Inner')
+			root_name                    = os.path.basename(state['root'])
+			parent_name                  = f'RuntimeChildParentIsPublicBase_{root_name}'
+			child_name                   = f'Inner_{root_name}'
+			RuntimeChildParentIsPublicBase = o.T.extend(parent_name)
+			Inner                        = RuntimeChildParentIsPublicBase.extend(child_name)
 
 			assert RuntimeChildParentIsPublicBase.__parent__ is o.T
 			assert Inner.__parent__ is RuntimeChildParentIsPublicBase
@@ -757,11 +776,11 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			extended = o.T.extend('ExtendWithAnnotationAndFields', list[str], title=str)
+			root_name = os.path.basename(state['root'])
+			extended  = o.T.extend(f'ExtendWithAnnotationAndFields_{root_name}', list[str], title=str)
 
 			assert extended.__annotation__ == o.Annotation(list[str])
-			assert extended.__disk_class__.fields.has('title') == True
-			assert extended.__disk_class__.fields.get('title').get('type') == o.Str.id
+			assert extended._.title.type is o.Str
 		finally:
 			cls._restore_runtime(state)
 

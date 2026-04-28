@@ -25,10 +25,12 @@
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class F(o.Module):
 
-	def __init__(self, type, description=None, default=o.Undefined, **kwargs):
+	def __init__(self, type, description=None, default=UNDEFINED, **kwargs):
 		self.type    = type
 		self.default = default.copy() if hasattr(default, 'copy') else default
 		self.props   = {**kwargs, 'description' : description}

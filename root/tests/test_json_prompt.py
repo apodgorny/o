@@ -4,6 +4,8 @@ import tempfile
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class TestJsonPrompt(o.Tester):
 
@@ -27,7 +29,7 @@ class TestJsonPrompt(o.Tester):
 				del state['paths'][id]
 
 		def get(id):
-			return state['paths'].get(id, o.Undefined)
+			return state['paths'].get(id, UNDEFINED)
 
 		registry.add    = add
 		registry.remove = remove
@@ -63,7 +65,6 @@ class TestJsonPrompt(o.Tester):
 			'registry'      : registry_state,
 			'data_dir'      : o.DATA_DIR,
 			'entities'      : dict(o.__entities__),
-			'disk_classes'  : dict(o.__disk_classes__),
 			'cast_map'      : dict(o.__cast_map__),
 		}
 
@@ -79,14 +80,13 @@ class TestJsonPrompt(o.Tester):
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
-		o.__disk_classes__.clear()
-		o.__disk_classes__.update(state['disk_classes'])
-
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
 		cls._restore_registry(state['registry'])
-		shutil.rmtree(state['root'])
+
+		if os.path.isdir(state['root']):
+			shutil.rmtree(state['root'])
 
 		if os.path.isdir(state['temp_root']):
 			shutil.rmtree(state['temp_root'])
@@ -118,8 +118,9 @@ class TestJsonPrompt(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			ListOfString = o.T.extend('JsonPromptListOfString', list[str])
-			DictOfInt    = o.T.extend('JsonPromptDictOfInt', dict[str, int])
+			root_name    = os.path.basename(state['root'])
+			ListOfString = o.T.extend(f'JsonPromptListOfString_{root_name}', list[str])
+			DictOfInt    = o.T.extend(f'JsonPromptDictOfInt_{root_name}', dict[str, int])
 
 			assert ListOfString.to_prompt() == '[str]'
 			assert DictOfInt.to_prompt() == (
@@ -136,16 +137,17 @@ class TestJsonPrompt(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			User = o.T.extend(
-				'JsonPromptUser',
+				f'JsonPromptUser_{root_name}',
 				name = o.F(str, description='Human readable full name'),
 				age  = o.F(int, description='Age', default=None),
 			)
 
 			assert User.to_prompt() == (
 				'{\n'
-				'    \'name\' : str,        # Human readable full name\n'
-				'    \'age\'  : int | null  # Age\n'
+				'    \'age\'  : int | null,  # Age\n'
+				'    \'name\' : str          # Human readable full name\n'
 				'}'
 			)
 		finally:
@@ -157,12 +159,13 @@ class TestJsonPrompt(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			Child  = o.T.extend(
-				'JsonPromptChild',
+				f'JsonPromptChild_{root_name}',
 				name = o.F(str, description='Child name'),
 			)
 			Parent = o.T.extend(
-				'JsonPromptParent',
+				f'JsonPromptParent_{root_name}',
 				child = o.F(Child, description='Nested child'),
 			)
 
@@ -182,8 +185,9 @@ class TestJsonPrompt(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			User = o.T.extend(
-				'JsonPromptDictFieldUser',
+				f'JsonPromptDictFieldUser_{root_name}',
 				scores = o.F(dict[str, int], description='Score by subject'),
 			)
 
@@ -203,12 +207,13 @@ class TestJsonPrompt(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			Contact = o.T.extend(
-				'JsonPromptListObjectContact',
+				f'JsonPromptListObjectContact_{root_name}',
 				email = o.F(str, description='Primary email'),
 			)
 			User = o.T.extend(
-				'JsonPromptListObjectUser',
+				f'JsonPromptListObjectUser_{root_name}',
 				contacts = o.F(list[Contact], description='Previous contacts'),
 			)
 

@@ -13,4 +13,4 @@ class Float(o.Atom):
 	# ----------------------------------------------------------------------
 	def __cast_in__(self, value):
 		object.__setattr__(self, '__value__', value)
-		self.__disk_instance__.atomic.set(str(value).encode('utf-8'))
+		o.services.Memory.set(f'{self.__proto__}.__value__', value)

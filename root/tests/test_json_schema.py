@@ -4,6 +4,8 @@ import tempfile
 
 import o
 
+UNDEFINED = o.Undefined
+
 
 class TestJsonSchema(o.Tester):
 
@@ -27,7 +29,7 @@ class TestJsonSchema(o.Tester):
 				del state['paths'][id]
 
 		def get(id):
-			return state['paths'].get(id, o.Undefined)
+			return state['paths'].get(id, UNDEFINED)
 
 		registry.add    = add
 		registry.remove = remove
@@ -63,7 +65,6 @@ class TestJsonSchema(o.Tester):
 			'registry'      : registry_state,
 			'data_dir'      : o.DATA_DIR,
 			'entities'      : dict(o.__entities__),
-			'disk_classes'  : dict(o.__disk_classes__),
 			'cast_map'      : dict(o.__cast_map__),
 		}
 
@@ -79,14 +80,13 @@ class TestJsonSchema(o.Tester):
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
-		o.__disk_classes__.clear()
-		o.__disk_classes__.update(state['disk_classes'])
-
 		o.__cast_map__.clear()
 		o.__cast_map__.update(state['cast_map'])
 
 		cls._restore_registry(state['registry'])
-		shutil.rmtree(state['root'])
+
+		if os.path.isdir(state['root']):
+			shutil.rmtree(state['root'])
 
 		if os.path.isdir(state['temp_root']):
 			shutil.rmtree(state['temp_root'])
@@ -118,7 +118,8 @@ class TestJsonSchema(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			ListOfString = o.T.extend('JsonSchemaListOfString', list[str])
+			root_name    = os.path.basename(state['root'])
+			ListOfString = o.T.extend(f'JsonSchemaListOfString_{root_name}', list[str])
 
 			assert ListOfString.to_json_schema() == {
 				'type'  : 'array',
@@ -133,7 +134,8 @@ class TestJsonSchema(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			DictOfInt = o.T.extend('JsonSchemaDictOfInt', dict[str, int])
+			root_name = os.path.basename(state['root'])
+			DictOfInt = o.T.extend(f'JsonSchemaDictOfInt_{root_name}', dict[str, int])
 
 			assert DictOfInt.to_json_schema() == {
 				'type'                 : 'object',
@@ -148,8 +150,9 @@ class TestJsonSchema(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
+			root_name = os.path.basename(state['root'])
 			User = o.T.extend(
-				'JsonSchemaUser',
+				f'JsonSchemaUser_{root_name}',
 				name=str,
 				age=o.F(int, default=None),
 			)
@@ -172,18 +175,19 @@ class TestJsonSchema(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Child  = o.T.extend('JsonSchemaChild', name=str)
-			Parent = o.T.extend('JsonSchemaParent', child=Child)
+			root_name = os.path.basename(state['root'])
+			Child     = o.T.extend(f'JsonSchemaChild_{root_name}', name=str)
+			Parent    = o.T.extend(f'JsonSchemaParent_{root_name}', child=Child)
 
 			assert Parent.to_json_schema() == {
 				'type'                 : 'object',
 				'properties'           : {
-					'child' : { '$ref' : '#/$defs/o.T.JsonSchemaChild' },
+					'child' : { '$ref' : f'#/$defs/{Child.__proto__}' },
 				},
 				'required'             : ['child'],
 				'additionalProperties' : False,
 				'$defs'                : {
-					'o.T.JsonSchemaChild' : {
+					Child.__proto__ : {
 						'type'                 : 'object',
 						'properties'           : {
 							'name' : { 'type' : 'string' },

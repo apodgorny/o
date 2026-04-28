@@ -2,31 +2,17 @@
 
 Supplemental to the previous folder-structure notes. This file captures the new discoveries from the current conversation.
 
-## 1. `__index__` is room state
+## 1. Room state is `__version__` plus `__items__`
 
-For ordered rooms, `__index__` is not just an index in the narrow sense. It is the state of the room.
+For ordered rooms, room state is not a single file anymore. It is the pair:
+
+- `__version__` — the next birth number to issue
+- `__items__` — the current ordered live set
 
 For sequence-like rooms, it holds:
 
 - `count` — the next birth number to issue
 - `order` — the current ordered live set
-
-So the binary file is conceptually:
-
-```text
-[count, version_0, version_1, version_2, ...]
-```
-
-Example:
-
-```text
-[4, 0, 2, 3]
-```
-
-means:
-
-- the next born version will be `4`
-- the currently live ordered set is `0, 2, 3`
 
 This preserves history without forcing renumbering after deletion.
 
@@ -316,4 +302,3 @@ Which means:
 - dict lookup token is not the same thing as object embodiment
 
 This split clarifies the architecture substantially.
-
