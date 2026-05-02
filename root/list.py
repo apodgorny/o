@@ -13,11 +13,9 @@ class List(o.T):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def __read__(cls, version):
-		self      = super().__read__(version)
-		items_key = f'{self.__proto__}.__items__'
-		items     = o.services.Memory.get(items_key, [])
+		self  = super().__read__(version)
+		items = self.__zone__.get('__items__', [])
 
-		object.__setattr__(self, '__items_key__', items_key)
 		object.__setattr__(self, '__items__', items)
 
 		return self
@@ -46,7 +44,7 @@ class List(o.T):
 				o.services.Garbage.on_instance_link(child)
 
 			self.__items__[index] = child.id
-			o.services.Memory.set(self.__items_key__, self.__items__)
+			self.__zone__.set('__items__', self.__items__)
 
 		o.Timer.stop('o.List.__setitem__')
 
@@ -56,7 +54,7 @@ class List(o.T):
 		with o.services.Memory.write():
 			o.services.Garbage.on_instance_unlink(o.get(self.__items__[index]))
 			del self.__items__[index]
-			o.services.Memory.set(self.__items_key__, self.__items__)
+			self.__zone__.set('__items__', self.__items__)
 
 	# Get list length
 	# ----------------------------------------------------------------------
@@ -94,7 +92,7 @@ class List(o.T):
 				o.services.Garbage.on_instance_link(child)
 				new_ids.append(child.id)
 
-			o.services.Memory.set(self.__items_key__, new_ids)
+			self.__zone__.set('__items__', new_ids)
 
 		object.__setattr__(self, '__items__', new_ids)
 
@@ -109,4 +107,4 @@ class List(o.T):
 			child = value if isinstance(value, o.T) else o.T(value)
 			o.services.Garbage.on_instance_link(child)
 			self.__items__.append(child.id)
-			o.services.Memory.set(self.__items_key__, self.__items__)
+			self.__zone__.set('__items__', self.__items__)

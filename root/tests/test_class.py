@@ -786,6 +786,22 @@ class TestClass(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def test_class_has_zone_and_accessor_reuses_it(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			ClassWithZone = o.T.extend(f'ClassWithZone_{root_name}', name=str)
+
+			assert ClassWithZone.__zone__.prefix == f'{ClassWithZone.__proto__}.'
+			assert ClassWithZone._.zone is ClassWithZone.__zone__
+			assert ClassWithZone.__zone__.get('_.name.type') == o.Str.id
+			assert o.services.Memory.get(f'{ClassWithZone.__proto__}._.name.type') == o.Str.id
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def test_temp_class_can_not_be_subclassed(cls):
 		state = cls._patch_runtime()
 

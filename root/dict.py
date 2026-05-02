@@ -37,15 +37,13 @@ class Dict(o.T):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def __read__(cls, version):
-		self      = super().__read__(version)
-		items_key = f'{self.__proto__}.__items__'
-		items     = o.services.Memory.get(items_key, {})
-		key_ids   = {}
+		self    = super().__read__(version)
+		items   = self.__zone__.get('__items__', {})
+		key_ids = {}
 
 		for key_id in items:
 			key_ids[self._key_id(o.get(key_id))] = key_id
 
-		object.__setattr__(self, '__items_key__', items_key)
 		object.__setattr__(self, '__items__', items)
 		object.__setattr__(self, '__key_ids__', key_ids)
 
@@ -96,7 +94,7 @@ class Dict(o.T):
 				o.services.Garbage.on_instance_link(value_child)
 
 			items[key_id] = value_child.id
-			o.services.Memory.set(self.__items_key__, items)
+			self.__zone__.set('__items__', items)
 
 		o.Timer.stop('o.Dict.__setitem__')
 
@@ -111,7 +109,7 @@ class Dict(o.T):
 				o.services.Garbage.on_instance_unlink(o.get(self.__items__[key_id]))
 				del self.__key_ids__[self._key_id(key)]
 				del self.__items__[key_id]
-				o.services.Memory.set(self.__items_key__, self.__items__)
+				self.__zone__.set('__items__', self.__items__)
 		else:
 			raise KeyError(key)
 
@@ -155,7 +153,7 @@ class Dict(o.T):
 				new_items[key_child.id] = value_child.id
 				key_ids[self._key_id(key_child)] = key_child.id
 
-			o.services.Memory.set(self.__items_key__, new_items)
+			self.__zone__.set('__items__', new_items)
 
 		object.__setattr__(self, '__items__', new_items)
 		object.__setattr__(self, '__key_ids__', key_ids)

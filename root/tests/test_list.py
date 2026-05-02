@@ -99,6 +99,8 @@ class TestList(o.Tester):
 		try:
 			x = o.List([1, 'a', None])
 
+			assert x.__zone__.prefix == f'{x.__proto__}.'
+			assert x.__zone__.get('__items__') == o.services.Memory.get(f'{x.__proto__}.__items__')
 			assert len(x) == 3
 			assert x[0] == 1
 			assert x[1] == 'a'

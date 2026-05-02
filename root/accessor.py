@@ -17,7 +17,7 @@ class Accessor(o.Module):
 	def __init__(self, target, route=None, zone=None):
 		self.target = target
 		self.route  = route or []
-		self.zone   = zone or o.services.Memory.zone(f'{target.__proto__}.')
+		self.zone   = zone or target.__zone__
 
 	# Move accessor
 	# ----------------------------------------------------------------------

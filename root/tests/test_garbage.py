@@ -284,10 +284,13 @@ class TestGarbage(o.Tester):
 			memory = state['memory']
 			garbage = state['garbage']
 			proto = 'o.T.Node._2'
+			other_proto = 'o.T.Node._20'
 			id = 26
 
 			memory.set(proto, True)
 			memory.set(f'{proto}.name', 7)
+			memory.set(other_proto, True)
+			memory.set(f'{other_proto}.name', 20)
 			memory.set('o.T.Other._0', True)
 			garbage.garbage.set(id, proto)
 
@@ -295,6 +298,8 @@ class TestGarbage(o.Tester):
 
 			assert memory.has(proto) == False
 			assert memory.has(f'{proto}.name') == False
+			assert memory.has(other_proto) == True
+			assert memory.has(f'{other_proto}.name') == True
 			assert memory.has('o.T.Other._0') == True
 			assert garbage.garbage.has(id) == False
 		finally:

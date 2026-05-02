@@ -44,8 +44,7 @@ class T(o.Module, metaclass=o.TMeta):
 	# ----------------------------------------------------------------------
 	def __setattr__(self, name, value):
 		o.Timer.start('o.T.__setattr__')
-		key       = f'{self.__proto__}.{name}'
-		old_id    = o.services.Memory.get(key, UNDEFINED)
+		old_id = self.__zone__.get(name, UNDEFINED)
 
 		if name.startswith('_'):
 			raise AttributeError(f'Invalid name `{name}`: attribute can not start with "_"')
@@ -60,7 +59,7 @@ class T(o.Module, metaclass=o.TMeta):
 				if old_id is not UNDEFINED:
 					o.services.Garbage.on_instance_unlink(o.get(old_id))
 
-			o.services.Memory.set(key, child_id)
+			self.__zone__.set(name, child_id)
 
 		object.__setattr__(self, name, value)
 
@@ -77,11 +76,9 @@ class T(o.Module, metaclass=o.TMeta):
 			if name.startswith('_'):
 				raise AttributeError(name)
 
-			key = f'{self.__proto__}.{name}'
-
-			with o.services.Memory.read() as memory:
-				if memory.has(key):
-					value = o.value(memory.get(key))
+			with o.services.Memory.read():
+				if self.__zone__.has(name):
+					value = o.value(self.__zone__.get(name))
 					object.__setattr__(self, name, value)
 				else:
 					value = self.__get_builtin_attr__(name)
@@ -121,8 +118,7 @@ class T(o.Module, metaclass=o.TMeta):
 	# Delete object attribute
 	# ----------------------------------------------------------------------
 	def __delattr__(self, name):
-		key      = f'{self.__proto__}.{name}'
-		child_id = o.services.Memory.get(key, UNDEFINED)
+		child_id = self.__zone__.get(name, UNDEFINED)
 
 		if name.startswith('_'):
 			raise AttributeError(name)
@@ -132,7 +128,7 @@ class T(o.Module, metaclass=o.TMeta):
 
 		with o.services.Memory.write():
 			o.services.Garbage.on_instance_unlink(o.get(child_id))
-			o.services.Memory.unset(key)
+			self.__zone__.unset(name)
 
 		if name in self.__dict__:
 			object.__delattr__(self, name)
@@ -149,6 +145,7 @@ class T(o.Module, metaclass=o.TMeta):
 		object.__setattr__(self, 'id',          id             )
 		object.__setattr__(self, '__version__', version_number )
 		object.__setattr__(self, '__proto__',   proto          )
+		object.__setattr__(self, '__zone__',    o.services.Memory.zone(f'{proto}.'))
 		object.__setattr__(self, '__refcount__', 0             )
 
 		o.register_entity(self)
@@ -162,7 +159,7 @@ class T(o.Module, metaclass=o.TMeta):
 		o.Timer.start('o.T.__write__')
 
 		with o.services.Memory.write() as memory:
-			version = cls.__inc_version__(memory)
+			version = cls.__inc_version__()
 			proto   = f'{cls.__proto__}._{version}'
 			id      = o.proto_to_id(proto)
 
@@ -187,11 +184,8 @@ class T(o.Module, metaclass=o.TMeta):
 	# Get retained dependants
 	# ----------------------------------------------------------------------
 	def __dependants__(self):
-		prefix = f'{self.__proto__}.'
-
 		with o.services.Memory.read() as memory:
-			for key, child_id in memory.items(prefix):
-				name  = key[len(prefix):]
+			for name, child_id in self.__zone__.items():
 				child = UNDEFINED
 
 				if '.' not in name and not name.startswith('_'):
@@ -203,7 +197,7 @@ class T(o.Module, metaclass=o.TMeta):
 	def delete(self):
 		with o.services.Memory.write() as memory:
 			o.services.Garbage.on_instance_delete(self)
-			memory.unset_all(f'{self.__proto__}.')
+			self.__zone__.clear()
 			memory.unset(self.__proto__)
 			memory.unset(str(self.id))
 

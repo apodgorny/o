@@ -98,6 +98,8 @@ class TestDict(o.Tester):
 			DictBasicSurface = o.T.extend(f'DictBasicSurface_{root_name}', dict)
 			x                = DictBasicSurface({'a': 1, 'b': 2})
 
+			assert x.__zone__.prefix == f'{x.__proto__}.'
+			assert x.__zone__.get('__items__') == o.services.Memory.get(f'{x.__proto__}.__items__')
 			assert x['a'] == 1
 			assert x['b'] == 2
 			assert 'a' in x

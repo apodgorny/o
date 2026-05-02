@@ -58,11 +58,12 @@ class TMeta(type(o.Module)):
 		# Resolve proto
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
 		proto = 'o.T' if is_root_t else f'{cls.__parent__.__proto__}.{name}'
+		zone  = o.services.Memory.zone(f'{proto}.')
 
 		# if is_temp: o.services.TempClasses.set(proto)
 
 		with o.services.Memory.read() as memory:
-			version = memory.get(f'{proto}.__version__', 0)
+			version = zone.get('__version__', 0)
 
 		cls.__module__         = 'o'
 		cls.__has_own_module__ = has_own_module
@@ -70,6 +71,7 @@ class TMeta(type(o.Module)):
 		cls.__is_temp__        = is_temp
 		cls.__version__        = version
 		cls.id                 = o.proto_to_id(proto)
+		cls.__zone__           = zone
 		cls._                  = o.Accessor(cls, ['_'])
 
 		if not has_own_module:
@@ -111,12 +113,10 @@ class TMeta(type(o.Module)):
 		result = type.__subclasses__(cls)
 
 		if hasattr(cls, '__proto__'):
-			prefix = f'{cls.__proto__}.'
-			names  = set()
+			names = set()
 
-			for key in o.services.Memory.keys(prefix):
-				tail = key[len(prefix):]
-				name = tail.split('.')[0]
+			for key in cls.__zone__.keys():
+				name = key.split('.')[0]
 
 				if o.is_class_name(name):
 					names.add(name)
@@ -271,10 +271,10 @@ class TMeta(type(o.Module)):
 		with o.services.Memory.write() as memory:
 			memory.set(proto, True)
 			memory.set(str(cls_id), proto)
-			memory.set(f'{proto}.__version__', cls.__version__)
+			cls.__zone__.set('__version__', cls.__version__)
 
 			if annotation is not UNDEFINED:
-				memory.set(f'{proto}.__annotation__', str(annotation.annotation))
+				cls.__zone__.set('__annotation__', str(annotation.annotation))
 
 			if cls.__has_own_module__ and proto != 'o.T':
 				route = cls.__route__
@@ -283,17 +283,17 @@ class TMeta(type(o.Module)):
 					'proto' : proto,
 					'mtime' : cls.__mtime__,
 				})
-				memory.set(f'{proto}.__route__', route)
+				cls.__zone__.set('__route__', route)
 
 			for name, props in fields.items():
-				field_proto = f'{proto}._.{name}'
+				field_key = f'_.{name}'
 				for prop_name, prop_value in props.items():
-					prop_proto = f'{field_proto}.{prop_name}'
+					prop_key = f'{field_key}.{prop_name}'
 
 					if prop_name == 'default' and prop_value is UNDEFINED:
-						memory.unset(prop_proto)
+						cls.__zone__.unset(prop_key)
 					else:
-						memory.set(prop_proto, prop_value)
+						cls.__zone__.set(prop_key, prop_value)
 
 		o.Timer.stop('o.TMeta.__write__')
 
@@ -323,11 +323,10 @@ class TMeta(type(o.Module)):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def __bind_annotation__(mcls, cls):
-		key        = f'{cls.__proto__}.__annotation__'
 		annotation = cls.__dict__.get('__annotation__', UNDEFINED)
 
 		if annotation is UNDEFINED:
-			annotation = o.services.Memory.get(key, UNDEFINED)
+			annotation = cls.__zone__.get('__annotation__', UNDEFINED)
 
 		if annotation is not UNDEFINED:
 			annotation = o.Annotation(annotation)
@@ -356,10 +355,10 @@ class TMeta(type(o.Module)):
 	
 	# Increment class version and return issued value
 	# ----------------------------------------------------------------------
-	def __inc_version__(cls, memory):
+	def __inc_version__(cls):
 		version = cls.__version__
 		cls.__version__ += 1
-		memory.set(f'{cls.__proto__}.__version__', cls.__version__)
+		cls.__zone__.set('__version__', cls.__version__)
 		return version
 
 	# ======================================================================
@@ -395,10 +394,11 @@ class TMeta(type(o.Module)):
 	# ----------------------------------------------------------------------
 	def delete(cls):
 		proto = cls.__proto__
-		route = o.services.Memory.get(f'{proto}.__route__', UNDEFINED)
+		route = cls.__zone__.get('__route__', UNDEFINED)
 
 		with o.services.Memory.write() as memory:
-			memory.unset_all(proto)
+			cls.__zone__.clear()
+			memory.unset(proto)
 			if route is not UNDEFINED:
 				memory.unset(route)
 

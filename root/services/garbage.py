@@ -89,7 +89,8 @@ class Garbage(o.Service):
 	def collect(self):
 		with o.services.Memory.write():
 			for id, proto in self.garbage.items():
-				o.services.Memory.unset_all(proto)
+				o.services.Memory.unset(proto)
+				o.services.Memory.zone(f'{proto}.').clear()
 
 			self.clear()
 

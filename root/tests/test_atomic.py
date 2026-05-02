@@ -115,7 +115,10 @@ class TestAtomic(o.Tester):
 			for Type, value in values:
 				x = Type(value)
 
+				assert x.__zone__.prefix == f'{x.__proto__}.'
 				assert x.__value__ == value
+				assert x.__zone__.get('__value__') == value
+				assert o.services.Memory.get(f'{x.__proto__}.__value__') == value
 		finally:
 			cls._restore_runtime(state)
 

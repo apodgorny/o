@@ -26,7 +26,7 @@ class Atom(o.T):
 	@classmethod
 	def __read__(cls, version):
 		self  = super().__read__(version)
-		value = o.services.Memory.get(f'{self.__proto__}.__value__', UNDEFINED)
+		value = self.__zone__.get('__value__', UNDEFINED)
 
 		if value is not UNDEFINED:
 			object.__setattr__(self, '__value__', value)

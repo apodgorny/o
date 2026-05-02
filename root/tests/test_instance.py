@@ -598,7 +598,9 @@ class TestInstance(o.Tester):
 
 			assert reopened.id == id
 			assert reopened.__proto__ == proto
+			assert reopened.__zone__.prefix == f'{proto}.'
 			assert reopened.foo == 'hello'
+			assert reopened.__zone__.get('foo') == o.services.Memory.get(f'{proto}.foo')
 			assert o.services.Memory.get(f'{GetReconstructsObjectInstanceOnCacheMiss.__proto__}.__version__') == count
 		finally:
 			cls._restore_runtime(state)
