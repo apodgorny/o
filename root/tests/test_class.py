@@ -784,6 +784,24 @@ class TestClass(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_temp_class_can_not_be_subclassed(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Temp   = o.T.extend()
+			raised = False
+
+			try:
+				Temp.extend('TempClassCanNotBeSubclassed')
+			except TypeError:
+				raised = True
+
+			assert raised == True
+		finally:
+			cls._restore_runtime(state)
+
 
 if __name__ == '__main__':
 	TestClass.run()

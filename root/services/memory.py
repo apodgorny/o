@@ -8,88 +8,197 @@ import o
 UNDEFINED = o.Undefined
 
 
-class MemoryWrite:
+class MemoryBatch:
 
-	# Create write scope
+	# Create batch
 	# ----------------------------------------------------------------------
-	def __init__(self, memory):
+	def __init__(self, memory, write=True):
 		self.memory = memory
+		self.write  = write
+		self.ctx    = None
+		self.tx     = None
+		self.depth  = 0
 
-	# Enter write scope
+	# If we are already in a transaction, just return ourselves
 	# ----------------------------------------------------------------------
 	def __enter__(self):
-		memory = self.memory
-		depth  = memory.__dict__.get('_write_depth', 0)
+		self.depth += 1
+		if self.tx is not None:
+			return self
+		
+		self.ctx = self.memory.env.begin(write=self.write)
+		self.tx  = self.ctx.__enter__()
+		return self
 
-		if depth == 0:
-			memory._write_scope = memory.env.begin(write=True)
-			memory._write_txn   = memory._write_scope.__enter__()
-
-		memory._write_depth = depth + 1
-
-		return memory
-
-	# Exit write scope
+	# Only the opener of the context manager should close it.
 	# ----------------------------------------------------------------------
 	def __exit__(self, exc_type, exc, tb):
-		memory = self.memory
-		depth  = memory.__dict__.get('_write_depth', 1) - 1
-		result = False
+		self.depth -= 1
+		if self.ctx and self.depth == 0:
+			try:
+				self.ctx.__exit__(exc_type, exc, tb)
+			finally:
+				if self.write : self.memory._write = None
+				else          : self.memory._read  = None
 
-		memory._write_depth = depth
+				self.tx  = None
+				self.ctx = None
+		return False
+	
+	# Delegation
+	# ----------------------------------------------------------------------
+	def __getattr__(self, name):
+		return getattr(self.memory, name)
 
-		if depth == 0:
-			memory._write_scope.__exit__(exc_type, exc, tb)
+	# Store value
+	# ----------------------------------------------------------------------
+	def set(self, key, value):
+		self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
-			if '_write_txn' in memory.__dict__:
-				del memory.__dict__['_write_txn']
+	# Remove key
+	# ----------------------------------------------------------------------
+	def unset(self, key):
+		self.tx.delete(self.memory._key(key))
 
-			if '_write_scope' in memory.__dict__:
-				del memory.__dict__['_write_scope']
+	# Unset all keys by prefix
+	# ----------------------------------------------------------------------
+	def unset_all(self, key_prefix):
+		prefix = self.memory._key(key_prefix)
+		cursor = self.tx.cursor()
+		ok     = cursor.set_range(prefix)
+
+		while ok:
+			key = cursor.key()
+
+			if not key.startswith(prefix):
+				break
+
+			cursor.delete()
+			ok = cursor.set_range(prefix)
+
+	# Resolve stored value
+	# ----------------------------------------------------------------------
+	def get(self, key, default=UNDEFINED):
+		value = default
+		data  = self.tx.get(self.memory._key(key))
+
+		if data is not None:
+			value = self.memory.from_bytes(data)
+
+		return value
+
+	# Check whether key exists
+	# ----------------------------------------------------------------------
+	def has(self, key):
+		key_bytes = self.memory._key(key)
+		result    = False
+
+		with self.tx.cursor() as cur:
+			result = cur.set_key(key_bytes)
 
 		return result
 
-
-class MemoryRead:
-
-	# Create read scope
+	# Iterate stored pairs by prefix
 	# ----------------------------------------------------------------------
-	def __init__(self, memory):
-		self.memory = memory
+	def _pairs(self, prefix=''):
+		key      = self.memory._key(prefix)
+		cursor   = self.tx.cursor()
+		has_item = cursor.set_range(key) if key else cursor.first()
 
-	# Enter read scope
+		while has_item:
+			key_bytes   = cursor.key()
+			value_bytes = cursor.value()
+
+			if not key_bytes.startswith(key):
+				break
+
+			yield key_bytes.decode('utf-8'), value_bytes
+			has_item = cursor.next()
+
+	# Iterate stored items by prefix
 	# ----------------------------------------------------------------------
-	def __enter__(self):
-		memory = self.memory
-		depth  = memory.__dict__.get('_read_depth', 0)
+	def items(self, prefix=''):
+		for key, value_bytes in self._pairs(prefix):
+			yield key, self.memory.from_bytes(value_bytes)
 
-		if depth == 0 and '_write_txn' not in memory.__dict__:
-			memory._read_scope = memory.env.begin()
-			memory._read_txn   = memory._read_scope.__enter__()
-
-		memory._read_depth = depth + 1
-
-		return memory
-
-	# Exit read scope
+	# Iterate stored keys by prefix
 	# ----------------------------------------------------------------------
-	def __exit__(self, exc_type, exc, tb):
-		memory = self.memory
-		depth  = memory.__dict__.get('_read_depth', 1) - 1
-		result = False
+	def keys(self, prefix=''):
+		for key, value in self._pairs(prefix):
+			yield key
 
-		memory._read_depth = depth
 
-		if depth == 0 and '_read_scope' in memory.__dict__:
-			memory._read_scope.__exit__(exc_type, exc, tb)
+class Zone:
 
-			if '_read_txn' in memory.__dict__:
-				del memory.__dict__['_read_txn']
+	# Constructor
+	# ----------------------------------------------------------------------
+	def __init__(self, prefix):
+		self.prefix = prefix
+		self.cache  = {}
+		self.memory = o.services.Memory
 
-			if '_read_scope' in memory.__dict__:
-				del memory.__dict__['_read_scope']
+	# Get memory key
+	# ----------------------------------------------------------------------
+	def _key(self, key):
+		return f'{self.prefix}{key}'
 
-		return result
+	# Get value
+	# ----------------------------------------------------------------------
+	def get(self, key, default=UNDEFINED):
+		if key not in self.cache:
+			self.cache[key] = self.memory.get(self._key(key), UNDEFINED)
+
+		value = self.cache[key]
+
+		if value is UNDEFINED:
+			value = default
+
+		return value
+
+	# Check value
+	# ----------------------------------------------------------------------
+	def has(self, key):
+		if key not in self.cache:
+			self.cache[key] = self.memory.get(self._key(key), UNDEFINED)
+
+		return self.cache[key] is not UNDEFINED
+
+	# Set value
+	# ----------------------------------------------------------------------
+	def set(self, key, value=None):
+		self.cache[key] = value
+		self.memory.set(self._key(key), value)
+
+	# Remove value
+	# ----------------------------------------------------------------------
+	def unset(self, key):
+		self.cache[key] = UNDEFINED
+		self.memory.unset(self._key(key))
+
+	# Clear zone
+	# ----------------------------------------------------------------------
+	def clear(self):
+		self.cache.clear()
+		self.memory.unset_all(self.prefix)
+
+	# Iterate zone items
+	# ----------------------------------------------------------------------
+	def items(self, prefix=''):
+		offset = len(self.prefix)
+
+		for key, value in self.memory.items(self._key(prefix)):
+			key = key[offset:]
+			self.cache[key] = value
+
+			yield key, value
+
+	# Iterate zone keys
+	# ----------------------------------------------------------------------
+	def keys(self, prefix=''):
+		offset = len(self.prefix)
+
+		for key in self.memory.keys(self._key(prefix)):
+			yield key[offset:]
 
 
 class Memory(o.Service):
@@ -109,6 +218,15 @@ class Memory(o.Service):
 	@classmethod
 	def from_bytes(cls, data):
 		return msgpack.unpackb(data, raw=False, strict_map_key=False)
+
+	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
+
+	# Encode key
+	# ----------------------------------------------------------------------
+	def _key(self, key):
+		return str(key).encode('utf-8')
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -135,134 +253,70 @@ class Memory(o.Service):
 			subdir   = True,
 		)
 
-		if '_write_depth' in self.__dict__:
-			del self.__dict__['_write_depth']
+		self._read  = None
+		self._write = None
 
-		if '_write_txn' in self.__dict__:
-			del self.__dict__['_write_txn']
-
-		if '_write_scope' in self.__dict__:
-			del self.__dict__['_write_scope']
-
-		if '_read_depth' in self.__dict__:
-			del self.__dict__['_read_depth']
-
-		if '_read_txn' in self.__dict__:
-			del self.__dict__['_read_txn']
-
-		if '_read_scope' in self.__dict__:
-			del self.__dict__['_read_scope']
-
-	# Open write scope
-	# ----------------------------------------------------------------------
-	def write(self):
-		scope = MemoryWrite(self)
-		return scope
-
-	# Open read scope
+	# Open read batch
 	# ----------------------------------------------------------------------
 	def read(self):
-		scope = MemoryRead(self)
-		return scope
+		if self._read is None:
+			self._read = MemoryBatch(self, False)
+		return self._read
+	
+	# Open write batch
+	# ----------------------------------------------------------------------
+	def write(self):
+		if self._write is None:
+			self._write = MemoryBatch(self, True)
+		return self._write
+
+	# Get memory zone
+	# ----------------------------------------------------------------------
+	def zone(self, prefix):
+		return Zone(prefix)
 
 	# Store value
 	# ----------------------------------------------------------------------
-	def set(self, key, value):
-		key_bytes = str(key).encode('utf-8')
-		data      = self.to_bytes(value)
-		txn       = self.__dict__.get('_write_txn', UNDEFINED)
-
-		if txn is UNDEFINED:
-			with self.env.begin(write=True) as txn:
-				txn.put(key_bytes, data)
-		else:
-			txn.put(key_bytes, data)
+	def set(self, key, value=None):
+		with self.write() as batch:
+			batch.set(key, value)
 
 	# Remove key
 	# ----------------------------------------------------------------------
 	def unset(self, key):
-		key_bytes = str(key).encode('utf-8')
-		txn       = self.__dict__.get('_write_txn', UNDEFINED)
+		with self.write() as batch:
+			batch.unset(key)
 
-		if txn is UNDEFINED:
-			with self.env.begin(write=True) as txn:
-				txn.delete(key_bytes)
-		else:
-			txn.delete(key_bytes)
+	# Unset all keys by prefix
+	# ----------------------------------------------------------------------
+	def unset_all(self, key_prefix):
+		with self.write() as batch:
+			batch.unset_all(key_prefix)
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
 	def get(self, key, default=UNDEFINED):
-		key_bytes = str(key).encode('utf-8')
-		txn       = self.__dict__.get('_write_txn', UNDEFINED)
-		value     = default
-		data      = None
-
-		if txn is UNDEFINED:
-			txn = self.__dict__.get('_read_txn', UNDEFINED)
-
-		if txn is UNDEFINED:
-			with self.env.begin() as txn:
-				data = txn.get(key_bytes)
-		else:
-			data = txn.get(key_bytes)
-
-		if data is not None:
-			value = self.from_bytes(data)
-
+		with self.read() as batch:
+			value = batch.get(key, default)
+		
 		return value
 
 	# Check whether key exists
 	# ----------------------------------------------------------------------
 	def has(self, key):
-		key_bytes = str(key).encode('utf-8')
-		txn       = self.__dict__.get('_write_txn', UNDEFINED)
-		result    = False
-
-		if txn is UNDEFINED:
-			txn = self.__dict__.get('_read_txn', UNDEFINED)
-
-		if txn is UNDEFINED:
-			with self.env.begin() as txn:
-				result = txn.get(key_bytes) is not None
-		else:
-			result = txn.get(key_bytes) is not None
+		with self.read() as batch:
+			result = batch.has(key)
 
 		return result
 
 	# Iterate stored items by prefix
 	# ----------------------------------------------------------------------
 	def items(self, prefix=''):
-		prefix_bytes = str(prefix).encode('utf-8')
-		txn          = self.__dict__.get('_write_txn', UNDEFINED)
+		with self.read() as batch:
+			yield from batch.items(prefix)
 
-		if txn is UNDEFINED:
-			txn = self.__dict__.get('_read_txn', UNDEFINED)
-
-		if txn is UNDEFINED:
-			with self.env.begin() as txn:
-				cursor   = txn.cursor()
-				has_item = cursor.set_range(prefix_bytes) if prefix_bytes else cursor.first()
-
-				while has_item:
-					key_bytes   = cursor.key()
-					value_bytes = cursor.value()
-
-					if prefix_bytes and not key_bytes.startswith(prefix_bytes):
-						break
-
-					yield key_bytes.decode('utf-8'), self.from_bytes(value_bytes)
-					has_item = cursor.next()
-		else:
-			cursor   = txn.cursor()
-			has_item = cursor.set_range(prefix_bytes) if prefix_bytes else cursor.first()
-
-			while has_item:
-				key_bytes   = cursor.key()
-				value_bytes = cursor.value()
-
-				if prefix_bytes and not key_bytes.startswith(prefix_bytes):
-					break
-
-				yield key_bytes.decode('utf-8'), self.from_bytes(value_bytes)
-				has_item = cursor.next()
+	# Iterate stored keys by prefix
+	# ----------------------------------------------------------------------
+	def keys(self, prefix=''):
+		with self.read() as batch:
+			yield from batch.keys(prefix)

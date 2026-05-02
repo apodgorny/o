@@ -160,27 +160,28 @@ class JsonPrompt(o.Module):
 		max_key_width = 0
 		max_line_len  = 0
 
-		for index, item in enumerate(items):
-			name, field   = item
-			key_text      = f'\'{name}\''
-			field_lines   = list(cls._get_field_prompt_lines(field, stack))
-			description   = cls._get_field_description(field)
-			comment       = ''
-			has_comment   = description is not UNDEFINED and description is not None
-			is_last       = index == len(items) - 1
+		with o.services.Memory.read():
+			for index, item in enumerate(items):
+				name, field   = item
+				key_text      = f'\'{name}\''
+				field_lines   = list(cls._get_field_prompt_lines(field, stack))
+				description   = cls._get_field_description(field)
+				comment       = ''
+				has_comment   = description is not UNDEFINED and description is not None
+				is_last       = index == len(items) - 1
 
-			if has_comment:
-				comment = f'# {description}'
+				if has_comment:
+					comment = f'# {description}'
 
-			if len(key_text) > max_key_width:
-				max_key_width = len(key_text)
+				if len(key_text) > max_key_width:
+					max_key_width = len(key_text)
 
-			entries.append({
-				'key_text'    : key_text,
-				'field_lines' : field_lines,
-				'comment'     : comment,
-				'is_last'     : is_last,
-			})
+				entries.append({
+					'key_text'    : key_text,
+					'field_lines' : field_lines,
+					'comment'     : comment,
+					'is_last'     : is_last,
+				})
 
 		for entry in entries:
 			key_text    = entry['key_text']

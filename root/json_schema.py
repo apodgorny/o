@@ -129,11 +129,12 @@ class JsonSchema(o.Module):
 		properties = {}
 		required   = []
 
-		for name, field in cls._get_fields(t_cls).items():
-			properties[name] = cls._get_field_schema(field, defs, stack)
+		with o.services.Memory.read():
+			for name, field in cls._get_fields(t_cls).items():
+				properties[name] = cls._get_field_schema(field, defs, stack)
 
-			if not cls._is_field_optional(field):
-				required.append(name)
+				if not cls._is_field_optional(field):
+					required.append(name)
 
 		schema = {
 			'type'                 : 'object',

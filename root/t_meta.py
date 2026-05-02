@@ -20,6 +20,7 @@ class TMeta(type(o.Module)):
 		has_own_module       = False if is_runtime_defined else mcls.has_own_module(namespace)
 		is_root_t            = name == 'T' and len(bases) == 1 and bases[0] is o.Module
 		is_runtime_class_def = not is_runtime_defined and not has_own_module
+		is_temp              = o.is_temp_class_name(name)
 
 		# Prevent class definitions in runtime
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -32,6 +33,12 @@ class TMeta(type(o.Module)):
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
 		if not name[0].isupper() and not name.startswith('__temp_'):
 			raise NameError(f'Class name must start with uppercase letter: `{name}`')
+
+		# Temp classes can not become public form parents
+		# - - - - - - - - - - - - - - - - - - - - - - - - -
+		for base_cls in bases:
+			if isinstance(base_cls, type) and getattr(base_cls, '__is_temp__', False):
+				raise TypeError(f'Temp class `{base_cls.__proto__}` can not be subclassed')
 
 		# Support annotation definition only for o.T base
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -52,9 +59,16 @@ class TMeta(type(o.Module)):
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
 		proto = 'o.T' if is_root_t else f'{cls.__parent__.__proto__}.{name}'
 
+		# if is_temp: o.services.TempClasses.set(proto)
+
+		with o.services.Memory.read() as memory:
+			version = memory.get(f'{proto}.__version__', 0)
+
 		cls.__module__         = 'o'
 		cls.__has_own_module__ = has_own_module
 		cls.__proto__          = proto
+		cls.__is_temp__        = is_temp
+		cls.__version__        = version
 		cls.id                 = o.proto_to_id(proto)
 		cls._                  = o.Accessor(cls, ['_'])
 
@@ -71,6 +85,10 @@ class TMeta(type(o.Module)):
 		cls.__class__.__publish__(cls)
 
 		o.register_entity(cls)
+
+		if is_temp:
+			o.services.Garbage.on_class_create(cls)
+
 		o.Timer.stop('o.TMeta.__new__')
 		return cls
 
@@ -96,7 +114,7 @@ class TMeta(type(o.Module)):
 			prefix = f'{cls.__proto__}.'
 			names  = set()
 
-			for key, value in o.services.Memory.items(prefix):
+			for key in o.services.Memory.keys(prefix):
 				tail = key[len(prefix):]
 				name = tail.split('.')[0]
 
@@ -253,6 +271,7 @@ class TMeta(type(o.Module)):
 		with o.services.Memory.write() as memory:
 			memory.set(proto, True)
 			memory.set(str(cls_id), proto)
+			memory.set(f'{proto}.__version__', cls.__version__)
 
 			if annotation is not UNDEFINED:
 				memory.set(f'{proto}.__annotation__', str(annotation.annotation))
@@ -284,15 +303,16 @@ class TMeta(type(o.Module)):
 		o.Timer.start('o.TMeta.__publish__')
 		annotations = {}
 
-		for name, field in cls._.items():
-			type_cls   = field.type
-			annotation = getattr(type_cls, '__annotation__', type_cls)
-			default    = getattr(field,    'default',        UNDEFINED)
+		with o.services.Memory.read():
+			for name, field in cls._.items():
+				type_cls   = field.type
+				annotation = getattr(type_cls, '__annotation__', type_cls)
+				default    = getattr(field,    'default',        UNDEFINED)
 
-			annotations[name] = annotation
+				annotations[name] = annotation
 
-			if default is not UNDEFINED:
-				setattr(cls, name, default)
+				if default is not UNDEFINED:
+					setattr(cls, name, default)
 
 		if annotations:
 			cls.__annotations__ = annotations
@@ -334,6 +354,14 @@ class TMeta(type(o.Module)):
 
 		return entity
 	
+	# Increment class version and return issued value
+	# ----------------------------------------------------------------------
+	def __inc_version__(cls, memory):
+		version = cls.__version__
+		cls.__version__ += 1
+		memory.set(f'{cls.__proto__}.__version__', cls.__version__)
+		return version
+
 	# ======================================================================
 	# PUBLIC CLASS METHODS
 	# ======================================================================
@@ -363,15 +391,16 @@ class TMeta(type(o.Module)):
 
 		return new_cls
 
-	# Increment class version and return issued value
+	# Delete class from memory and cache
 	# ----------------------------------------------------------------------
-	@classmethod
-	def __inc_version__(mcls, cls):
-		version_key = f'{cls.__proto__}.__version__'
-		version     = 0
+	def delete(cls):
+		proto = cls.__proto__
+		route = o.services.Memory.get(f'{proto}.__route__', UNDEFINED)
 
 		with o.services.Memory.write() as memory:
-			version = memory.get(version_key, 0)
-			memory.set(version_key, version + 1)
+			memory.unset_all(proto)
+			if route is not UNDEFINED:
+				memory.unset(route)
 
-		return version
+		if cls.id in o.__entities__:
+			o.unregister_entity(cls)

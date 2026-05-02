@@ -33,6 +33,8 @@ class T(o.Module, metaclass=o.TMeta):
 
 			version = sub_cls.__write__(kwargs)
 			self    = sub_cls.__read__(f'_{version}')
+			
+			o.services.Garbage.on_instance_create(self)
 			self.__publish__(kwargs)
 
 		o.Timer.stop('o.T.__new__')
@@ -42,17 +44,23 @@ class T(o.Module, metaclass=o.TMeta):
 	# ----------------------------------------------------------------------
 	def __setattr__(self, name, value):
 		o.Timer.start('o.T.__setattr__')
-		key   = f'{self.__proto__}.{name}'
-		child = None
+		key       = f'{self.__proto__}.{name}'
+		old_id    = o.services.Memory.get(key, UNDEFINED)
 
 		if name.startswith('_'):
 			raise AttributeError(f'Invalid name `{name}`: attribute can not start with "_"')
 
-		with o.services.Memory.write() as memory:
-			child = value if isinstance(value, o.T) else o.T(value)
+		with o.services.Memory.write():
+			child    = value if isinstance(value, o.T) else o.T(value)
 			child_id = child.id
-			value = o.value(child_id)
-			memory.set(key, child_id)
+			value    = o.value(child_id)
+
+			if old_id != child_id:
+				o.services.Garbage.on_instance_link(child)
+				if old_id is not UNDEFINED:
+					o.services.Garbage.on_instance_unlink(o.get(old_id))
+
+			o.services.Memory.set(key, child_id)
 
 		object.__setattr__(self, name, value)
 
@@ -122,7 +130,9 @@ class T(o.Module, metaclass=o.TMeta):
 		if child_id is UNDEFINED:
 			raise AttributeError(name)
 
-		o.services.Memory.unset(key)
+		with o.services.Memory.write():
+			o.services.Garbage.on_instance_unlink(o.get(child_id))
+			o.services.Memory.unset(key)
 
 		if name in self.__dict__:
 			object.__delattr__(self, name)
@@ -136,9 +146,10 @@ class T(o.Module, metaclass=o.TMeta):
 		id             = o.proto_to_id(proto)
 		version_number = int(version[1:])
 
-		object.__setattr__(self, 'id', id)
-		object.__setattr__(self, '__version__', version_number)
-		object.__setattr__(self, '__proto__', proto)
+		object.__setattr__(self, 'id',          id             )
+		object.__setattr__(self, '__version__', version_number )
+		object.__setattr__(self, '__proto__',   proto          )
+		object.__setattr__(self, '__refcount__', 0             )
 
 		o.register_entity(self)
 
@@ -149,17 +160,19 @@ class T(o.Module, metaclass=o.TMeta):
 	@classmethod
 	def __write__(cls, kwargs):
 		o.Timer.start('o.T.__write__')
-		version     = cls.__class__.__inc_version__(cls)
-		proto       = f'{cls.__proto__}._{version}'
-		id          = o.proto_to_id(proto)
 
 		with o.services.Memory.write() as memory:
+			version = cls.__inc_version__(memory)
+			proto   = f'{cls.__proto__}._{version}'
+			id      = o.proto_to_id(proto)
+
 			memory.set(proto, True)
 			memory.set(str(id), proto)
 
-		for name, field in cls._.items():
-			if name not in kwargs and not field.is_optional:
-				raise TypeError(f'Missing required field `{name}` for `{cls.__proto__}`')
+		with o.services.Memory.read():
+			for name, field in cls._.items():
+				if name not in kwargs and not field.is_optional:
+					raise TypeError(f'Missing required field `{name}` for `{cls.__proto__}`')
 
 		o.Timer.stop('o.T.__write__')
 		return version
@@ -167,8 +180,34 @@ class T(o.Module, metaclass=o.TMeta):
 	# Publish instance values
 	# ----------------------------------------------------------------------
 	def __publish__(self, kwargs):
-		for name, value in kwargs.items():
-			setattr(self, name, value)
+		with o.services.Memory.write():
+			for name, value in kwargs.items():
+				setattr(self, name, value)
+
+	# Get retained dependants
+	# ----------------------------------------------------------------------
+	def __dependants__(self):
+		prefix = f'{self.__proto__}.'
+
+		with o.services.Memory.read() as memory:
+			for key, child_id in memory.items(prefix):
+				name  = key[len(prefix):]
+				child = UNDEFINED
+
+				if '.' not in name and not name.startswith('_'):
+					child = o.get(child_id)
+					yield child
+
+	# Delete instance from memory and cache
+	# ----------------------------------------------------------------------
+	def delete(self):
+		with o.services.Memory.write() as memory:
+			o.services.Garbage.on_instance_delete(self)
+			memory.unset_all(f'{self.__proto__}.')
+			memory.unset(self.__proto__)
+			memory.unset(str(self.id))
+
+		o.unregister_entity(self)
 
 	# Cast Python-visible value into entity
 	# ----------------------------------------------------------------------

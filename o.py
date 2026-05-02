@@ -21,6 +21,7 @@ class O(WL, plugins=['Py']):
 				item.load()
 
 		o.services.Memory.initialize()
+		# o.services.TempClasses.clear()
 
 	# Get entity by id or proto
 	# ----------------------------------------------------------------------
@@ -63,6 +64,11 @@ class O(WL, plugins=['Py']):
 	def is_class_name(o, s):
 		return re.fullmatch(r'([A-Z][A-Za-z0-9_]*|__temp_[0-9a-f]+)', s) is not None
 
+	# Check temp class name token
+	# ----------------------------------------------------------------------
+	def is_temp_class_name(o, s):
+		return re.fullmatch(r'__temp_[0-9a-f]+', s) is not None
+
 	# Hash proto into id
 	# ----------------------------------------------------------------------
 	def proto_to_id(o, proto):
@@ -101,6 +107,20 @@ class O(WL, plugins=['Py']):
 						raise TypeError(f'Annotation `{annotation}` is already defined in `{other_proto}`')
 
 			o.__entities__[entity.id] = entity
+
+	# Unregister loaded entity
+	# ----------------------------------------------------------------------
+	def unregister_entity(o, entity):
+		if entity.id in o.__entities__:
+			if isinstance(entity, type):
+				if '__annotation__' in entity.__dict__:
+					annotation = entity.__annotation__.annotation
+
+					if annotation in o.__cast_map__:
+						if o.__cast_map__[annotation].id == entity.id:
+							del o.__cast_map__[annotation]
+
+			del o.__entities__[entity.id]
 
 	# Ensure singleton root value
 	# ----------------------------------------------------------------------

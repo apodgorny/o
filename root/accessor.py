@@ -14,16 +14,18 @@ class Accessor(o.Module):
 
 	# Create accessor
 	# ----------------------------------------------------------------------
-	def __init__(self, target, route=None):
+	def __init__(self, target, route=None, zone=None):
 		self.target = target
 		self.route  = route or []
+		self.zone   = zone or o.services.Memory.zone(f'{target.__proto__}.')
 
 	# Move accessor
 	# ----------------------------------------------------------------------
 	def __getattr__(self, name):
-		key    = f'{self._key()}.{name}'
+		key    = self._key()
 		route  = self.route
 		target = self.target
+		zone   = self.zone
 		value  = UNDEFINED
 
 		if self._is_field():
@@ -32,24 +34,27 @@ class Accessor(o.Module):
 				value      = annotation
 			elif name == 'is_optional':
 				annotation     = getattr(self.type, '__annotation__', UNDEFINED)
-				default        = o.services.Memory.get(f'{self._key()}.default', UNDEFINED)
+				default        = zone.get(f'{key}.default', UNDEFINED)
 				field_nullable = False
 
 				if annotation is not UNDEFINED:
 					field_nullable = o.Annotation(annotation).is_optional
 
 				value = field_nullable or (default is not UNDEFINED)
-			elif o.services.Memory.has(key):
-				value = o.services.Memory.get(key)
+			else:
+				value = zone.get(f'{key}.{name}', UNDEFINED)
+
+				if value is UNDEFINED:
+					raise AttributeError(name)
 
 				if name == 'type':
 					value = o.get(value)
-			else:
-				raise AttributeError(name)
+
 		else:
 			value = o.Accessor(
 				target,
 				route + [name],
+				zone,
 			)
 
 		return value
@@ -59,7 +64,7 @@ class Accessor(o.Module):
 	def __setattr__(self, name, value):
 		has_route    = 'route' in self.__dict__
 		is_dunder    = name.startswith('__') and name.endswith('__')
-		is_internal  = name in ('target', 'route', 'READ_ONLY', 'ATOMIC')
+		is_internal  = name in ('target', 'route', 'zone', 'READ_ONLY', 'ATOMIC')
 		is_internal  = is_internal or is_dunder
 
 		if is_internal:
@@ -71,7 +76,7 @@ class Accessor(o.Module):
 			if not isinstance(value, self.ATOMIC):
 				raise ValueError('Value must be atomic')
 
-			o.services.Memory.set(f'{self._key()}.{name}', value)
+			self.zone.set(f'{self._key()}.{name}', value)
 		else:
 			raise AttributeError(name)
 
@@ -88,7 +93,7 @@ class Accessor(o.Module):
 	# Resolve key
 	# ----------------------------------------------------------------------
 	def _key(self):
-		return f'{self.target.__proto__}.{".".join(self.route)}'
+		return '.'.join(self.route)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -97,27 +102,27 @@ class Accessor(o.Module):
 	# Store value
 	# ----------------------------------------------------------------------
 	def set(self, value):
-		o.services.Memory.set(self._key(), value)
+		self.zone.set(self._key(), value)
 		result = self
 		return result
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
 	def get(self, default=UNDEFINED):
-		value = o.services.Memory.get(self._key(), default)
+		value = self.zone.get(self._key(), default)
 		return value
 
 	# Remove value
 	# ----------------------------------------------------------------------
 	def unset(self):
-		o.services.Memory.unset(self._key())
+		self.zone.unset(self._key())
 		result = self
 		return result
 
 	# Check whether value exists
 	# ----------------------------------------------------------------------
 	def has(self):
-		result = o.services.Memory.has(self._key())
+		result = self.zone.has(self._key())
 		return result
 
 	# Iterate stored items
@@ -131,14 +136,14 @@ class Accessor(o.Module):
 			prefix = f'{self._key()}.'
 			items  = {}
 
-			for key, value in o.services.Memory.items(prefix):
+			for key in self.zone.keys(prefix):
 				name = key[len(prefix):].split('.')[0]
 
 				if name not in items:
-					items[name] = o.Accessor(target, route + [name])
+					items[name] = o.Accessor(target, route + [name], self.zone)
 
 			result = items.items()
 		else:
-			result = o.services.Memory.items(self._key())
+			result = self.zone.items(self._key())
 
 		return result
