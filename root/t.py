@@ -63,6 +63,9 @@ class T(o.Module, metaclass=o.TMeta):
 
 		object.__setattr__(self, name, value)
 
+		if old_id != child_id:
+			self.__class__.__on_change__(self)
+
 		o.Timer.stop('o.T.__setattr__')
 
 	# Get object attribute on cache miss
@@ -132,6 +135,8 @@ class T(o.Module, metaclass=o.TMeta):
 
 		if name in self.__dict__:
 			object.__delattr__(self, name)
+
+		self.__class__.__on_change__(self)
 
 	# Read instance from memory based on class and version
 	# ----------------------------------------------------------------------

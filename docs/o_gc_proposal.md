@@ -96,7 +96,7 @@ Two symmetric registries with different laws:
 
 Preferred separation:
 
-- `wl` = loading / birth substrate
+- `a` = loading / birth substrate
 - `o` = data / schema / persistence / deterministic structure
 - `a` = agents + generation / nondeterministic action
 

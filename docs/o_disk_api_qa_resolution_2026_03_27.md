@@ -54,7 +54,7 @@ Final answer:
 Reason:
 
 - legal Python accessor form
-- direct compatibility with wl/module-style loading
+- direct compatibility with a/module-style loading
 - one naming law across Python access, loading, and disk folders
 
 Important distinction:
@@ -70,7 +70,7 @@ Final answer:
 
 Reason:
 
-- regular wl loading can operate directly on the folder path
+- regular a loading can operate directly on the folder path
 - avoids translation between Python name and disk token
 - makes class/instance discrimination visually obvious
 

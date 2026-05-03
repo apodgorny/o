@@ -540,7 +540,7 @@ So the user never works with instances of the raw source class as public beings.
 
 The intended implementation direction is:
 
-1. add an `o` plugin that intercepts source-backed class loading before WL publishes a raw Python class as the public face
+1. add an `o` plugin that intercepts source-backed class loading before A publishes a raw Python class as the public face
 2. privately load the source class from route
 3. reconcile source field declarations into the public `disk.Class` field room
 4. mark copied source fields with `__is_source__`

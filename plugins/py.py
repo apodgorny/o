@@ -14,14 +14,14 @@ class Py(o.Plugin):
 		class_name = None
 		route      = None
 
-		# bar.py /mypath/foo wl
+		# bar.py /mypath/foo a
 		# - - - - - - - - - - - - - - - - - - - -
 		try_path = os.path.join(parent_path, name)
 		if os.path.isfile(try_path):
 			class_name = self.lib.String.snake_to_camel(os.path.splitext(name)[0])
 			path       = try_path
 
-		# Bar /mypath/foo wl
+		# Bar /mypath/foo a
 		# - - - - - - - - - - - - - - - - - - - -
 		else:
 			module_name = self.lib.String.camel_to_snake(name)

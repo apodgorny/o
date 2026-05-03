@@ -64,6 +64,68 @@ class TestGarbage(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def _patch_runtime(cls):
+		temp_root = os.path.join(o.__path__, '__tmp__')
+		root      = None
+		memory    = o.services.Memory
+		garbage   = o.services.Garbage
+
+		os.makedirs(temp_root, exist_ok=True)
+		root = tempfile.mkdtemp(prefix='o_garbage_', dir=temp_root)
+
+		state = {
+			'root'         : root,
+			'memory'       : memory,
+			'garbage'      : garbage,
+			'data_dir'     : o.DATA_DIR,
+			'entities'     : dict(o.__entities__),
+			'cast_map'     : dict(o.__cast_map__),
+			'value'        : o.__dict__.get('V', UNDEFINED),
+			'old_path'     : getattr(memory, 'path', UNDEFINED),
+			'old_size'     : getattr(memory, 'size', UNDEFINED),
+			'old_size_key' : o.MEMORY_SIZE,
+		}
+
+		o.DATA_DIR = os.path.join('__tmp__', os.path.basename(root))
+		memory.initialize()
+		garbage.initialize()
+
+		if 'V' in o.__dict__:
+			del o.__dict__['V']
+
+		return state
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _restore_runtime(cls, state):
+		memory = state['memory']
+
+		o.DATA_DIR = state['data_dir']
+		o.MEMORY_SIZE = state['old_size_key']
+
+		o.__entities__.clear()
+		o.__entities__.update(state['entities'])
+
+		o.__cast_map__.clear()
+		o.__cast_map__.update(state['cast_map'])
+
+		if state['value'] is UNDEFINED:
+			if 'V' in o.__dict__:
+				del o.__dict__['V']
+		else:
+			o.__dict__['V'] = state['value']
+
+		if state['old_path'] is not UNDEFINED and state['old_size'] is not UNDEFINED:
+			memory.path = state['old_path']
+			memory.size = state['old_size']
+			memory.initialize()
+			state['garbage'].initialize()
+
+		if os.path.isdir(state['root']):
+			shutil.rmtree(state['root'])
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def _instance(cls, id, proto, dependants=None):
 		return GarbageInstance(id, proto, dependants)
 
@@ -274,6 +336,126 @@ class TestGarbage(o.Tester):
 			assert garbage.garbage.has(named_cls.id) == False
 		finally:
 			cls._restore_memory(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_value_accepts_and_deletes_regular_attrs(cls):
+		state = cls._patch_runtime()
+
+		try:
+			value = o.ensure_value()
+
+			value.foo = 1
+
+			assert value.foo == 1
+			assert o.services.Memory.has(f'{value.__proto__}.foo') == True
+
+			del value.foo
+
+			assert o.services.Memory.has(f'{value.__proto__}.foo') == False
+
+			try:
+				value.foo
+				assert False
+			except AttributeError:
+				pass
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_attr_mutation_updates_garbage_refcounts(cls):
+		state = cls._patch_runtime()
+
+		try:
+			garbage   = state['garbage']
+			root      = o.ensure_value()
+			root_name = os.path.basename(state['root'])
+			Node      = o.T.extend(f'GarbageAttrNode_{root_name}')
+			owner     = Node()
+			child     = Node()
+
+			root.owner = owner
+
+			assert garbage.refcounts.get(owner.id, 0) == 1
+
+			owner.child = child
+
+			assert garbage.refcounts.get(child.id, 0) == 1
+			assert garbage.garbage.has(child.id) == False
+
+			del owner.child
+
+			assert garbage.refcounts.get(child.id, 0) == 0
+			assert garbage.garbage.get(child.id) == child.__proto__
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_list_mutation_updates_garbage_refcounts(cls):
+		state = cls._patch_runtime()
+
+		try:
+			garbage   = state['garbage']
+			root      = o.ensure_value()
+			root_name = os.path.basename(state['root'])
+			Node      = o.T.extend(f'GarbageListNode_{root_name}')
+			items     = o.List([])
+			old       = Node()
+			new       = Node()
+
+			root.items = items
+			items.append(old)
+
+			assert garbage.refcounts.get(items.id, 0) == 1
+			assert garbage.refcounts.get(old.id, 0) == 1
+
+			items[0] = new
+
+			assert garbage.refcounts.get(old.id, 0) == 0
+			assert garbage.garbage.get(old.id) == old.__proto__
+			assert garbage.refcounts.get(new.id, 0) == 1
+
+			del items[0]
+
+			assert garbage.refcounts.get(new.id, 0) == 0
+			assert garbage.garbage.get(new.id) == new.__proto__
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_dict_mutation_updates_garbage_refcounts(cls):
+		state = cls._patch_runtime()
+
+		try:
+			garbage   = state['garbage']
+			root      = o.ensure_value()
+			root_name = os.path.basename(state['root'])
+			Node      = o.T.extend(f'GarbageDictNode_{root_name}')
+			items     = o.Dict({})
+			old       = Node()
+			new       = Node()
+
+			root.items = items
+			items['a'] = old
+
+			assert garbage.refcounts.get(items.id, 0) == 1
+			assert garbage.refcounts.get(old.id, 0) == 1
+
+			items['a'] = new
+
+			assert garbage.refcounts.get(old.id, 0) == 0
+			assert garbage.garbage.get(old.id) == old.__proto__
+			assert garbage.refcounts.get(new.id, 0) == 1
+
+			del items['a']
+
+			assert garbage.refcounts.get(new.id, 0) == 0
+			assert garbage.garbage.get(new.id) == new.__proto__
+		finally:
+			cls._restore_runtime(state)
 
 	# ----------------------------------------------------------------------
 	@classmethod

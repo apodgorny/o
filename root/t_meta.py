@@ -60,8 +60,6 @@ class TMeta(type(o.Module)):
 		proto = 'o.T' if is_root_t else f'{cls.__parent__.__proto__}.{name}'
 		zone  = o.services.Memory.zone(f'{proto}.')
 
-		# if is_temp: o.services.TempClasses.set(proto)
-
 		with o.services.Memory.read() as memory:
 			version = zone.get('__version__', 0)
 
@@ -360,6 +358,10 @@ class TMeta(type(o.Module)):
 		cls.__version__ += 1
 		cls.__zone__.set('__version__', cls.__version__)
 		return version
+
+	# Instance change hook
+	# ----------------------------------------------------------------------
+	def __on_change__(cls, instance): pass
 
 	# ======================================================================
 	# PUBLIC CLASS METHODS

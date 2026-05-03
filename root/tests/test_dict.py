@@ -97,9 +97,12 @@ class TestDict(o.Tester):
 			root_name        = os.path.basename(state['root'])
 			DictBasicSurface = o.T.extend(f'DictBasicSurface_{root_name}', dict)
 			x                = DictBasicSurface({'a': 1, 'b': 2})
+			items            = o.services.Memory.get(f'{x.__proto__}.__items__')
 
 			assert x.__zone__.prefix == f'{x.__proto__}.'
-			assert x.__zone__.get('__items__') == o.services.Memory.get(f'{x.__proto__}.__items__')
+			assert x.__zone__.get('__items__') == items
+			assert isinstance(items, bytes)
+			assert len(items) == len(x) * 16
 			assert x['a'] == 1
 			assert x['b'] == 2
 			assert 'a' in x
@@ -183,6 +186,30 @@ class TestDict(o.Tester):
 			assert reopened.__proto__ == proto
 			assert dict(reopened.items()) == {'a': 1, 'b': 2}
 			assert reopened.tag == 'hot'
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_get_reconstructs_old_dict_items_storage(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name                        = os.path.basename(state['root'])
+			ReconstructsOldDictItemsStorage = o.T.extend(f'ReconstructsOldDictItemsStorage_{root_name}', dict)
+			x                                = ReconstructsOldDictItemsStorage({'a': 1, 'b': 2})
+			id                               = x.id
+			old_items                        = dict(x.__items__)
+
+			x.__zone__.set('__items__', old_items)
+
+			del o.__entities__[id]
+
+			reopened = o.get(id)
+
+			assert isinstance(reopened, ReconstructsOldDictItemsStorage)
+			assert reopened.__items__ == old_items
+			assert dict(reopened.items()) == {'a': 1, 'b': 2}
 		finally:
 			cls._restore_runtime(state)
 

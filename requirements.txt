@@ -34,4 +34,4 @@ tqdm==4.67.3
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 wcwidth==0.6.0
--e git+ssh://git@github.com/apodgorny/whitelabel.git@3cf8299c6c57abae1ed9f1f0f65d4898bf39e3a9#egg=wl
+-e git+ssh://git@github.com/apodgorny/almasi.git@3cf8299c6c57abae1ed9f1f0f65d4898bf39e3a9#egg=a

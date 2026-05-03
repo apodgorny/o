@@ -8,13 +8,13 @@ It is a compact description of the surface preserved by the current test layer a
 
 Normative references now are:
 
-- `core/tests/test_class.py`
-- `core/tests/test_instance.py`
-- `core/tests/test_list.py`
-- `core/tests/test_dict.py`
-- `core/tests/test_atomic.py`
-- `core/tests/test_annotation.py`
-- `core/tests/test_gc.py`
+- `root/tests/test_class.py`
+- `root/tests/test_instance.py`
+- `root/tests/test_list.py`
+- `root/tests/test_dict.py`
+- `root/tests/test_atomic.py`
+- `root/tests/test_annotation.py`
+- `root/tests/test_garbage.py`
 
 ## Current public feeling
 

@@ -240,7 +240,7 @@ o.Object.__setattr__ : 1.482 → 1.660 ms      = 1.12x slower
 Итого: после всех откатов и выпрямлений система стала намного лучше, чем сразу после добавления builtins/operators, но всё ещё немного медленнее, чем базовая точка до их поддержки; главный остаточный налог — на dict lookup, metaclass path и в меньшей степени на list/object mutation.
 
 ----------------------------------------------------------------------
-REFACTORED WL TO USE CLASSES
+REFACTORED A TO USE CLASSES
 
 o.T.__new__          : 3.340s    ≈ 8038 x 415.485µs ( 347.958µs - 2.682ms)
 o.List.__getitem__   : 55.182ms  ≈ 2000 x 27.591µs  ( 25.375µs  - 171.875µs)
@@ -261,10 +261,10 @@ o.TMeta.__new__      : 1.656 → 1.771 ms      = 1.07x slower
 o.Object.__setattr__ : 1.707 → 2.190 ms      = 1.28x slower
 
 
-Refactoring WL to use classes made read-path better (List.__getitem__ 1.26x faster, Dict.__getitem__ 1.19x faster), but made mutation/birth path worse (Object.__setattr__ 1.28x slower, list/dict writes 1.24–1.32x slower, T.__new__ 1.13x slower).
+Refactoring A to use classes made read-path better (List.__getitem__ 1.26x faster, Dict.__getitem__ 1.19x faster), but made mutation/birth path worse (Object.__setattr__ 1.28x slower, list/dict writes 1.24–1.32x slower, T.__new__ 1.13x slower).
 
 ----------------------------------------------------------------------
-File cache with hash freshness in WL
+File cache with hash freshness in A
 
 o.T.__new__          : 1.152s   ≈ 8038 x 143.328µs ( 111.667µs - 1.237ms)
 o.List.__getitem__   : 6.745ms  ≈ 2000 x 3.372µs   ( 2.958µs   - 42.459µs)
@@ -285,7 +285,7 @@ o.TMeta.__new__      : 1.771 → 868.619 µs    = 2.04x faster
 o.Object.__setattr__ : 2.190 → 668.042 µs    = 3.28x faster
 
 Huge win.
-Caching is now owned by `File` objects rather than by WL registries: a carrier keeps `data`, compares freshness through `hash`, and reloads only when the source token changes. With the top-level carrier cache wired correctly, hot names such as `o.T`, `o.disk` and `o.services` finally reuse the same `File` objects, so the `File` cache and hash freshness law can actually work. The result is a systemic win across read, write and birth paths.
+Caching is now owned by `File` objects rather than by A registries: a carrier keeps `data`, compares freshness through `hash`, and reloads only when the source token changes. With the top-level carrier cache wired correctly, hot names such as `o.T`, `o.disk` and `o.services` finally reuse the same `File` objects, so the `File` cache and hash freshness law can actually work. The result is a systemic win across read, write and birth paths.
 
 ----------------------------------------------------------------------
 Reusing structural wrappers

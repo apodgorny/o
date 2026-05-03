@@ -98,9 +98,12 @@ class TestList(o.Tester):
 
 		try:
 			x = o.List([1, 'a', None])
+			items = o.services.Memory.get(f'{x.__proto__}.__items__')
 
 			assert x.__zone__.prefix == f'{x.__proto__}.'
-			assert x.__zone__.get('__items__') == o.services.Memory.get(f'{x.__proto__}.__items__')
+			assert x.__zone__.get('__items__') == items
+			assert isinstance(items, bytes)
+			assert len(items) == len(x) * 8
 			assert len(x) == 3
 			assert x[0] == 1
 			assert x[1] == 'a'
@@ -116,17 +119,20 @@ class TestList(o.Tester):
 
 		try:
 			x        = o.List([1, 2])
-			items    = o.services.Memory.get(f'{x.__proto__}.__items__', [])
-			first_id = items[1]
+			first_id = x.__items__[1]
 
 			x[1] = 'b'
 			x.append(3)
 			del x[0]
 
+			items = o.services.Memory.get(f'{x.__proto__}.__items__', b'')
+
+			assert isinstance(items, bytes)
+			assert len(items) == len(x) * 8
 			assert x[0] == 'b'
 			assert x[1] == 3
 			assert len(x) == 2
-			assert o.services.Memory.get(f'{x.__proto__}.__items__', [])[0] != first_id
+			assert x.__items__[0] != first_id
 		finally:
 			cls._restore_runtime(state)
 
@@ -179,6 +185,29 @@ class TestList(o.Tester):
 			assert reopened.__proto__ == proto
 			assert list(reopened) == [1, 2, 3]
 			assert reopened.tag == 'hot'
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_get_reconstructs_old_list_items_storage(cls):
+		state = cls._patch_runtime()
+
+		try:
+			ReconstructsOldListItemsStorage = o.T.extend('ReconstructsOldListItemsStorage', list)
+			x                               = ReconstructsOldListItemsStorage([1, 2, 3])
+			id                              = x.id
+			old_items                       = list(x.__items__)
+
+			x.__zone__.set('__items__', old_items)
+
+			del o.__entities__[id]
+
+			reopened = o.get(id)
+
+			assert isinstance(reopened, ReconstructsOldListItemsStorage)
+			assert reopened.__items__ == old_items
+			assert list(reopened) == [1, 2, 3]
 		finally:
 			cls._restore_runtime(state)
 

@@ -482,6 +482,34 @@ class TestInstance(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def test_class_on_change_receives_attr_transitions(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			events    = []
+			OnChange  = o.T.extend(f'OnChange_{root_name}', foo=str)
+
+			def on_change(instance):
+				events.append(instance)
+
+			OnChange.__on_change__ = on_change
+
+			x = OnChange(foo='a')
+			events.clear()
+
+			x.foo = 'b'
+
+			del x.foo
+
+			assert len(events) == 2
+			assert events[0] is x
+			assert events[1] is x
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def test_non_atomic_child_returns_wrapper_via_entities_registry(cls):
 		state = cls._patch_runtime()
 

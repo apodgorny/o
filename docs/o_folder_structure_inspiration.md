@@ -153,7 +153,7 @@ It may actually be close to the right one.
 - `o.F(...)` is a declaration carrier, not the final resident
 - `__fields__/` gives field-schema a natural home
 - `__methods__/` can later do the same for dynamic methods
-- WL / Python / disk geometry begin to cooperate instead of wrestle
+- A / Python / disk geometry begin to cooperate instead of wrestle
 - exactness becomes easier to feel
 - new entities can arrive without injuring the architecture
 

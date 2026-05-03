@@ -1,11 +1,11 @@
 import re
 
-from wl import WL
+from a import A
 
-UNDEFINED = WL.Undefined
+UNDEFINED = A.Undefined
 
 
-class O(WL, plugins=['Py']):
+class O(A, plugins=['Py']):
 
 	DATA_DIR    = '__memory__'
 	MEMORY_SIZE = 1073741824
@@ -21,7 +21,6 @@ class O(WL, plugins=['Py']):
 				item.load()
 
 		o.services.Memory.initialize()
-		# o.services.TempClasses.clear()
 
 	# Get entity by id or proto
 	# ----------------------------------------------------------------------

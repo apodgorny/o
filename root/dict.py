@@ -1,6 +1,7 @@
 import o
 
 UNDEFINED = o.Undefined
+ENDIAN    = 'little'
 
 
 class Dict(o.T):
@@ -37,17 +38,44 @@ class Dict(o.T):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def __read__(cls, version):
-		self    = super().__read__(version)
-		items   = self.__zone__.get('__items__', {})
+		self = super().__read__(version)
+
+		self.__load_items__()
+
+		return self
+
+	# Save dict ids
+	# ----------------------------------------------------------------------
+	def __save_items__(self, items):
+		buffer = bytearray()
+
+		for key_id, value_id in items.items():
+			buffer.extend(key_id.to_bytes(8, ENDIAN))
+			buffer.extend(value_id.to_bytes(8, ENDIAN))
+
+		object.__setattr__(self, '__items__', dict(items))
+		self.__zone__.set('__items__', bytes(buffer))
+
+	# Load dict ids
+	# ----------------------------------------------------------------------
+	def __load_items__(self):
+		value   = self.__zone__.get('__items__', b'')
+		items   = {}
 		key_ids = {}
+
+		if isinstance(value, dict):
+			items = value
+		else:
+			for i in range(0, len(value), 16):
+				key_id   = int.from_bytes(value[i:i + 8], ENDIAN)
+				value_id = int.from_bytes(value[i + 8:i + 16], ENDIAN)
+				items[key_id] = value_id
 
 		for key_id in items:
 			key_ids[self._key_id(o.get(key_id))] = key_id
 
 		object.__setattr__(self, '__items__', items)
 		object.__setattr__(self, '__key_ids__', key_ids)
-
-		return self
 
 	# Get dict item
 	# ----------------------------------------------------------------------
@@ -76,7 +104,7 @@ class Dict(o.T):
 			value_child = value if isinstance(value, o.T) else o.T(value)
 			key_id      = self._item_key_id(key)
 			old_value_id = UNDEFINED
-			items       = self.__items__
+			items       = dict(self.__items__)
 
 			if key_id is UNDEFINED:
 				key_child = key if isinstance(key, o.T) else o.T(key)
@@ -94,7 +122,7 @@ class Dict(o.T):
 				o.services.Garbage.on_instance_link(value_child)
 
 			items[key_id] = value_child.id
-			self.__zone__.set('__items__', items)
+			self.__save_items__(items)
 
 		o.Timer.stop('o.Dict.__setitem__')
 
@@ -108,8 +136,9 @@ class Dict(o.T):
 				o.services.Garbage.on_instance_unlink(o.get(key_id))
 				o.services.Garbage.on_instance_unlink(o.get(self.__items__[key_id]))
 				del self.__key_ids__[self._key_id(key)]
-				del self.__items__[key_id]
-				self.__zone__.set('__items__', self.__items__)
+				items = dict(self.__items__)
+				del items[key_id]
+				self.__save_items__(items)
 		else:
 			raise KeyError(key)
 
@@ -153,9 +182,8 @@ class Dict(o.T):
 				new_items[key_child.id] = value_child.id
 				key_ids[self._key_id(key_child)] = key_child.id
 
-			self.__zone__.set('__items__', new_items)
+			self.__save_items__(new_items)
 
-		object.__setattr__(self, '__items__', new_items)
 		object.__setattr__(self, '__key_ids__', key_ids)
 
 	# ======================================================================
