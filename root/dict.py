@@ -202,6 +202,5 @@ class Dict(o.T):
 	# Update dict items
 	# ----------------------------------------------------------------------
 	def update(self, items):
-		with o.services.Memory.write():
-			for key, value in items.items():
-				self[key] = value
+		for key, value in items.items():
+			self[key] = value

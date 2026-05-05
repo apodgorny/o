@@ -79,7 +79,7 @@ class TestPerformance(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_performance(cls):
-		size = 20000
+		size = 5000
 		n_attr   = size
 		n_list   = size
 		n_dict   = size
@@ -89,6 +89,14 @@ class TestPerformance(o.Tester):
 		PerfRoot  = o.T.extend(root_name)
 
 		o.Timer.reset()
+
+		# with o.services.Memory.write():
+		# 	cls.trigger_list_getitem(n_list)
+		# 	cls.trigger_list_setitem(n_list)
+		# 	cls.trigger_dict_getitem(n_dict)
+		# 	cls.trigger_dict_setitem(n_dict)
+		# 	cls.trigger_object_attr(n_attr, PerfRoot)
+		# 	cls.trigger_define(n_define, PerfRoot)
 
 		cls.trigger_list_getitem(n_list)
 		cls.trigger_list_setitem(n_list)

@@ -52,7 +52,10 @@ class TMeta(type(o.Module)):
 
 		# Process fields
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
-		fields, namespace = mcls.__define__(namespace)
+		if is_root_t:
+			fields, namespace = mcls.__define_ot__(namespace)
+		else:
+			fields, namespace = mcls.__define__(namespace)
 		cls = super().__new__(mcls, name, bases, namespace)
 
 		# Resolve proto
@@ -81,7 +84,6 @@ class TMeta(type(o.Module)):
 
 		mcls.__bind_annotation__(cls)
 		mcls.__write__(cls, fields)
-
 		cls.__class__.__publish__(cls)
 
 		o.register_entity(cls)
@@ -194,6 +196,45 @@ class TMeta(type(o.Module)):
 
 		return fields, namespace
 
+	# Set Python root class definition from field declarations
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __define_ot__(mcls, namespace):
+		fields   = {}
+		type_map = {
+			int        : 'o.T.Atom.Int',
+			float      : 'o.T.Atom.Float',
+			bool       : 'o.T.Atom.Bool',
+			str        : 'o.T.Atom.Str',
+			type(None) : 'o.T.Atom.Null',
+			list       : 'o.T.List',
+			dict       : 'o.T.Dict',
+		}
+
+		# Collect root fields from namespace
+		# - - - - - - - - - - - - - - - - - - - -
+		for name, field in list(namespace.items()):
+			if not name.startswith('_'):
+
+				# Add root fields declared as o.F
+				# - - - - - - - - - - - - - - - - - - - -
+				if isinstance(field, o.F):
+					annotation = o.Annotation(field.type)
+					proto      = type_map.get(annotation.annotation, UNDEFINED)
+
+					if proto is UNDEFINED:
+						raise TypeError(f'`o.T.{name}` can not use bootstrap annotation `{annotation.annotation}`')
+
+					fields[name] = {
+						'type'    : o.proto_to_id(proto),
+						'default' : field.default,
+						**field.props,
+					}
+
+					del namespace[name]
+
+		return fields, namespace
+
 	# ======================================================================
 	# CLASS METHODS
 	# ======================================================================
@@ -206,10 +247,10 @@ class TMeta(type(o.Module)):
 			cls = annotation
 		else:
 			annotation = o.Annotation(annotation)
-			cls        = o.__cast_map__.get(annotation.annotation)
+			cls        = o.get_by_annotation(annotation.annotation)
 
-			if cls is None:
-				base_cls     = o.__cast_map__[annotation.origin]
+			if cls is UNDEFINED:
+				base_cls     = o.get_by_annotation(annotation.origin)
 				visible_args = []
 
 				if not annotation.args:
@@ -217,11 +258,11 @@ class TMeta(type(o.Module)):
 				else:
 					for arg in annotation.args:
 						arg_cls        = mcls.__embody__(arg)
-						arg_annotation = getattr(arg_cls, '__annotation__', UNDEFINED)
+						own_annotation = arg_cls.__dict__.get('__annotation__', UNDEFINED)
 						visible_arg    = arg_cls
 
-						if arg_annotation is not UNDEFINED and arg_annotation.is_simple:
-							visible_arg = arg_annotation.annotation
+						if own_annotation is not UNDEFINED:
+							visible_arg = own_annotation.annotation
 
 						visible_args.append(visible_arg)
 
@@ -231,8 +272,6 @@ class TMeta(type(o.Module)):
 					}
 
 					cls = mcls.__new__(mcls, f'Generic_{hash(annotation)}', (base_cls,), namespace)
-
-				o.__cast_map__[annotation.annotation] = cls
 
 		return cls
 
@@ -300,17 +339,19 @@ class TMeta(type(o.Module)):
 	def __publish__(cls):
 		o.Timer.start('o.TMeta.__publish__')
 		annotations = {}
+		is_root_t   = getattr(cls, '__proto__', UNDEFINED) == 'o.T'
 
 		with o.services.Memory.read():
 			for name, field in cls._.items():
-				type_cls   = field.type
-				annotation = getattr(type_cls, '__annotation__', type_cls)
 				default    = getattr(field,    'default',        UNDEFINED)
 
-				annotations[name] = annotation
+				if not is_root_t:
+					type_cls   = field.type
+					annotation = getattr(type_cls, '__annotation__', type_cls)
+					annotations[name] = annotation
 
 				if default is not UNDEFINED:
-					setattr(cls, name, default)
+					type.__setattr__(cls, '_' + name, default)
 
 		if annotations:
 			cls.__annotations__ = annotations
@@ -330,26 +371,67 @@ class TMeta(type(o.Module)):
 			annotation = o.Annotation(annotation)
 			cls.__annotation__ = annotation
 
-	# Proto chain lookup
+	# Does class have field defined?
+	# ----------------------------------------------------------------------
+	def __has_field__(cls, name):
+		result = False
+
+		if name.startswith('_'):
+			name = name[1:]
+
+		for base_cls in cls.__mro__:
+			if '__zone__' in base_cls.__dict__:
+				if base_cls.__zone__.has(f'_.{name}.type'):
+					result = True
+					break
+
+		return result
+
+	# Load subclasses or _<num> instances
 	# ----------------------------------------------------------------------
 	def __getattr__(cls, name):
-		entity     = None
-		base_proto = getattr(cls, '__proto__', 'o.T')
-		proto      = f'{base_proto}.{name}'
-		entity_id  = o.proto_to_id(proto)
-		entity     = o.__entities__.get(entity_id, None)
+		entity      = None
+		base_proto  = getattr(cls, '__proto__', 'o.T')
+		proto       = f'{base_proto}.{name}'
+		entity_id   = o.proto_to_id(proto)
+		entity      = o.__entities__.get(entity_id, None)
+		entity_kind = 'Field'
+
+		if cls.__has_field__(name):
+			return getattr(cls, f'_{name}')
+
+		if name.startswith('_') and cls.__has_field__(name):
+			field_name = name[1:]
+			field      = getattr(cls._, field_name)
+			default    = getattr(field, 'default', UNDEFINED)
+
+			if default is UNDEFINED:
+				raise AttributeError(name)
+
+			return default
 
 		if entity is None and o.services.Memory.has(proto):
 			if o.is_class_name(name):
-				entity = cls.__class__.__read__(cls, name)
+				entity_kind = 'Class'
+				entity      = cls.__class__.__read__(cls, name)
 				entity.__class__.__publish__(entity)
+				
 			elif o.is_instance_version(name):
-				entity = cls.__read__(name)
+				entity_kind = 'Instance'
+				entity      = cls.__read__(name)
 
 		if entity is None:
-			raise AttributeError(name)
+			raise AttributeError(f'{entity_kind} `{name}` is not found on `{cls.__proto__}`')
 
 		return entity
+	
+	# Set attr – blocked
+	# ----------------------------------------------------------------------
+	def __setattr__(cls, name, value):
+		if name.startswith('_') or name == 'id':
+			type.__setattr__(cls, name, value)
+		else:
+			raise AttributeError(f'Field `{name}` is not defined on `{cls.__proto__}`')
 	
 	# Increment class version and return issued value
 	# ----------------------------------------------------------------------

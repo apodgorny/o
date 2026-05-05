@@ -1,7 +1,6 @@
 import os
 import shutil
 import sys
-import tempfile
 
 import o
 
@@ -9,80 +8,36 @@ UNDEFINED = o.Undefined
 
 
 class TestClass(o.Tester):
-
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _patch_registry(cls):
-		services = o.services
-		registry = type('RegistryState', (), {})()
-		state    = {
-			'services'      : services,
-			'had_registry'  : 'Registry' in services.__dict__,
-			'registry'      : services.__dict__.get('Registry'),
-			'paths'         : {},
-		}
-
-		def add(id, path):
-			state['paths'][id] = path
-
-		def remove(id):
-			if id in state['paths']:
-				del state['paths'][id]
-
-		def get(id):
-			return state['paths'].get(id, UNDEFINED)
-
-		registry.add    = add
-		registry.remove = remove
-		registry.get    = get
-
-		services.Registry = registry
-
-		return state
-
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _restore_registry(cls, state):
-		services = state['services']
-
-		if state['had_registry']:
-			services.Registry = state['registry']
-		else:
-			del services.Registry
+	RUNTIME_PREFIX = 'o_class_'
 
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _patch_runtime(cls):
-		temp_root      = os.path.join(o.__path__, '__tmp__')
+		runtime_state  = o.Tester._patch_store(cls.RUNTIME_PREFIX)
+		temp_root      = runtime_state['temp_root']
 		source_root    = os.path.join(o.__path__, 'tests_runtime')
-		root           = None
-		registry_state = cls._patch_registry()
+		root           = runtime_state['root']
+		registry_state = o.Tester._patch_registry()
 
-		os.makedirs(temp_root, exist_ok=True)
 		os.makedirs(source_root, exist_ok=True)
-		root = tempfile.mkdtemp(prefix='o_class_', dir=temp_root)
 
 		state          = {
 			'root'          : root,
 			'temp_root'     : temp_root,
 			'source_root'   : source_root,
 			'registry'      : registry_state,
-			'data_dir'      : o.DATA_DIR,
+			'runtime'       : runtime_state,
 			'entities'      : dict(o.__entities__),
 			'cast_map'      : dict(o.__cast_map__),
 			'modules'       : [],
 			'paths'         : [],
 		}
 
-		o.DATA_DIR = os.path.join('__tmp__', os.path.basename(root))
-
 		return state
 
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _restore_runtime(cls, state):
-		o.DATA_DIR = state['data_dir']
-
 		o.__entities__.clear()
 		o.__entities__.update(state['entities'])
 
@@ -97,16 +52,11 @@ class TestClass(o.Tester):
 			if os.path.exists(path):
 				os.remove(path)
 
-		cls._restore_registry(state['registry'])
-
-		if os.path.isdir(state['root']):
-			shutil.rmtree(state['root'])
+		o.Tester._restore_store(state['runtime'])
+		o.Tester._restore_registry(state['registry'])
 
 		if os.path.isdir(state['source_root']):
 			shutil.rmtree(state['source_root'])
-
-		if os.path.isdir(state['temp_root']):
-			shutil.rmtree(state['temp_root'])
 
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -411,8 +361,8 @@ class TestClass(o.Tester):
 			CastMapAndEmbodimentReuseOne = o.T.extend(f'CastMapAndEmbodimentReuseOne_{root_name}', list[dict[str, int]])
 			CastMapAndEmbodimentReuseTwo = o.T.extend(f'CastMapAndEmbodimentReuseTwo_{root_name}', list[dict[str, int]])
 
-			assert o.__cast_map__[int] is o.Int
-			assert o.__cast_map__[str] is o.Str
+			assert o.__cast_map__[int] == o.Int.__proto__
+			assert o.__cast_map__[str] == o.Str.__proto__
 			assert CastMapAndEmbodimentReuseOne.__bases__[0] is CastMapAndEmbodimentReuseTwo.__bases__[0]
 		finally:
 			cls._restore_runtime(state)
@@ -520,12 +470,16 @@ class TestClass(o.Tester):
 					'import o\n\n'
 					f'class {class_name}(o.T):\n'
 					'\tname: str\n'
+					'\titems: list\n'
+					'\tmeta: dict\n'
 				)
 			)
 
-			x       = SourceBackedRestoresFormAndValuesAfterReload(name='alex')
-			x.items = [1, 2]
-			x.meta  = {'lang': 'uk'}
+			x = SourceBackedRestoresFormAndValuesAfterReload(
+				name='alex',
+				items=[1, 2],
+				meta={'lang': 'uk'},
+			)
 
 			class_id = SourceBackedRestoresFormAndValuesAfterReload.id
 			id       = x.id
@@ -558,11 +512,15 @@ class TestClass(o.Tester):
 			RuntimeDefinedRestoresFormAndValuesAfterReload = o.T.extend(
 				class_name,
 				name=str,
+				items=list,
+				meta=dict,
 			)
 
-			x       = RuntimeDefinedRestoresFormAndValuesAfterReload(name='alex')
-			x.items = [1, 2]
-			x.meta  = {'lang': 'uk'}
+			x = RuntimeDefinedRestoresFormAndValuesAfterReload(
+				name='alex',
+				items=[1, 2],
+				meta={'lang': 'uk'},
+			)
 
 			class_id = RuntimeDefinedRestoresFormAndValuesAfterReload.id
 			id       = x.id
@@ -578,6 +536,43 @@ class TestClass(o.Tester):
 			assert reopened.name == 'alex'
 			assert list(reopened.items) == [1, 2]
 			assert dict(reopened.meta.items()) == {'lang': 'uk'}
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_description_is_seen_by_subclass_and_persists_after_reload(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name                          = os.path.basename(state['root'])
+			class_name                         = f'RootDescriptionPersistsAfterReload_{root_name}'
+			RootDescriptionPersistsAfterReload = o.T.extend(class_name)
+			class_value                        = o.T.description
+			x                                  = RootDescriptionPersistsAfterReload()
+			instance_value                     = f'instance:{root_name}'
+			class_id                           = RootDescriptionPersistsAfterReload.id
+			class_proto                        = RootDescriptionPersistsAfterReload.__proto__
+			id                                 = x.id
+			proto                              = x.__proto__
+
+			assert RootDescriptionPersistsAfterReload.description == class_value
+			assert x.description == class_value
+
+			x.description = instance_value
+
+			assert x.description == instance_value
+			assert o.services.Memory.get(f'{proto}.description', UNDEFINED) is not UNDEFINED
+
+			for key in [class_id, class_proto, id, proto]:
+				if key in o.__entities__:
+					del o.__entities__[key]
+
+			reopened = o.get(id)
+
+			assert reopened.__class__.__proto__ == class_proto
+			assert reopened.__class__.description == class_value
+			assert reopened.description == instance_value
 		finally:
 			cls._restore_runtime(state)
 

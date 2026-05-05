@@ -7,6 +7,7 @@ UNDEFINED = o.Undefined
 
 class T(o.Module, metaclass=o.TMeta):
 	__is_atom__ = False
+	description = o.F(str, default='')
 
 	# Create new instance
 	# ----------------------------------------------------------------------
@@ -23,9 +24,9 @@ class T(o.Module, metaclass=o.TMeta):
 				# - - - - - - - - - - - - - - - - - -
 				if cls is o.T:
 					value_type = type(__value__)
-					sub_cls    = o.__cast_map__.get(value_type, None)
+					sub_cls    = o.get_by_annotation(value_type)
 
-					if sub_cls is None:
+					if sub_cls is UNDEFINED:
 						raise TypeError(f'Cannot cast `{value_type}` into `o.T`')
 
 				if not hasattr(sub_cls, '__annotation__'):
@@ -39,17 +40,20 @@ class T(o.Module, metaclass=o.TMeta):
 
 		o.Timer.stop('o.T.__new__')
 		return self
-
+	
 	# Set object attribute
 	# ----------------------------------------------------------------------
 	def __setattr__(self, name, value):
 		o.Timer.start('o.T.__setattr__')
-		old_id = self.__zone__.get(name, UNDEFINED)
 
 		if name.startswith('_'):
 			raise AttributeError(f'Invalid name `{name}`: attribute can not start with "_"')
-
+		
+		if not self.__class__.__has_field__(name):
+			raise AttributeError(f'Field `{name}` is not defined on `{self.__class__.__proto__}`')
+		
 		with o.services.Memory.write():
+			old_id   = self.__zone__.get(name, UNDEFINED)
 			child    = value if isinstance(value, o.T) else o.T(value)
 			child_id = child.id
 			value    = o.value(child_id)
@@ -73,24 +77,27 @@ class T(o.Module, metaclass=o.TMeta):
 	def __getattr__(self, name):
 		o.Timer.start('o.Object.__getattr__')
 
-		value = UNDEFINED
+		if name.startswith('_'):
+			raise AttributeError(name)
+		
+		with o.services.Memory.read():
+			value = UNDEFINED
 
-		try:
-			if name.startswith('_'):
-				raise AttributeError(name)
+			if self.__zone__.has(name):
+				value = o.value(self.__zone__.get(name))
+				object.__setattr__(self, name, value)
+			elif self.__class__.__has_field__(name):
+				value = getattr(self.__class__, name, UNDEFINED)
 
-			with o.services.Memory.read():
-				if self.__zone__.has(name):
-					value = o.value(self.__zone__.get(name))
-					object.__setattr__(self, name, value)
-				else:
-					value = self.__get_builtin_attr__(name)
+				if value is UNDEFINED:
+					raise AttributeError(name)
+			else:
+				value = self.__get_builtin_attr__(name)
 
-					if value is UNDEFINED:
-						raise AttributeError(name)
-		finally:
-			o.Timer.stop('o.Object.__getattr__')
-
+				if value is UNDEFINED:
+					raise AttributeError(name)
+		
+		o.Timer.stop('o.Object.__getattr__')
 		return value
 	
 	# Get builtin-facing attribute
@@ -121,15 +128,16 @@ class T(o.Module, metaclass=o.TMeta):
 	# Delete object attribute
 	# ----------------------------------------------------------------------
 	def __delattr__(self, name):
-		child_id = self.__zone__.get(name, UNDEFINED)
-
 		if name.startswith('_'):
 			raise AttributeError(name)
 
-		if child_id is UNDEFINED:
-			raise AttributeError(name)
+		if not self.__class__.__has_field__(name):
+			raise AttributeError(f'Field `{name}` is not defined on `{self.__class__.__proto__}`')
 
 		with o.services.Memory.write():
+			child_id = self.__zone__.get(name, UNDEFINED)
+			if child_id is UNDEFINED:
+				raise AttributeError(name)
 			o.services.Garbage.on_instance_unlink(o.get(child_id))
 			self.__zone__.unset(name)
 
@@ -182,14 +190,13 @@ class T(o.Module, metaclass=o.TMeta):
 	# Publish instance values
 	# ----------------------------------------------------------------------
 	def __publish__(self, kwargs):
-		with o.services.Memory.write():
-			for name, value in kwargs.items():
-				setattr(self, name, value)
+		for name, value in kwargs.items():
+			setattr(self, name, value)
 
 	# Get retained dependants
 	# ----------------------------------------------------------------------
 	def __dependants__(self):
-		with o.services.Memory.read() as memory:
+		with o.services.Memory.read():
 			for name, child_id in self.__zone__.items():
 				child = UNDEFINED
 

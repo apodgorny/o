@@ -10,8 +10,8 @@ class O(A, plugins=['Py']):
 	DATA_DIR    = '__memory__'
 	MEMORY_SIZE = 1073741824
 
-	__entities__ = {}  # id => entity strong reference
-	__cast_map__ = {}  # Annotation => o.T subclass
+	__entities__ = {}  # id         => entity
+	__cast_map__ = {}  # Annotation => proto
 
 	# Initialize library
 	# ----------------------------------------------------------------------
@@ -25,22 +25,29 @@ class O(A, plugins=['Py']):
 	# Get entity by id or proto
 	# ----------------------------------------------------------------------
 	def get(o, id_or_proto):
-		entity = UNDEFINED
+		entity = o.__entities__.get(id_or_proto, UNDEFINED)
 		proto  = UNDEFINED
 
-		if isinstance(id_or_proto, int):
-			entity = o.__entities__.get(id_or_proto, UNDEFINED)
-			if entity is UNDEFINED:
-				proto = o.id_to_proto(id_or_proto)
-
-		elif isinstance(id_or_proto, str):
-			proto = id_or_proto
+		if entity is UNDEFINED:
+			if   isinstance(id_or_proto, int) : proto = o.id_to_proto(id_or_proto)
+			elif isinstance(id_or_proto, str) : proto = id_or_proto
 
 		if proto is not UNDEFINED:
 			entity = eval(proto)
 
 		return entity
+	
+	# Get entity by annotation from __cast_map__
+	# ----------------------------------------------------------------------
+	def get_by_annotation(o, annotation):
+		entity = UNDEFINED
+		proto  = o.__cast_map__.get(annotation, UNDEFINED)
+		
+		if proto is not UNDEFINED:
+			entity = o.get(proto)
 
+		return entity
+		
 	# Get Python-visible value by id
 	# ----------------------------------------------------------------------
 	def value(o, id):
@@ -100,12 +107,13 @@ class O(A, plugins=['Py']):
 				if '__annotation__' in entity.__dict__:
 					annotation = entity.__annotation__.annotation
 					if annotation not in o.__cast_map__:
-						o.__cast_map__[annotation] = entity
+						o.__cast_map__[annotation] = entity.__proto__
 					else:
-						other_proto = o.__cast_map__[annotation].__proto__
+						other_proto = o.__cast_map__[annotation]
 						raise TypeError(f'Annotation `{annotation}` is already defined in `{other_proto}`')
 
-			o.__entities__[entity.id] = entity
+			o.__entities__[entity.id]        = entity
+			o.__entities__[entity.__proto__] = entity
 
 	# Unregister loaded entity
 	# ----------------------------------------------------------------------
@@ -116,10 +124,11 @@ class O(A, plugins=['Py']):
 					annotation = entity.__annotation__.annotation
 
 					if annotation in o.__cast_map__:
-						if o.__cast_map__[annotation].id == entity.id:
+						if o.__cast_map__[annotation] == entity.__proto__:
 							del o.__cast_map__[annotation]
 
 			del o.__entities__[entity.id]
+			del o.__entities__[entity.__proto__]
 
 	# Ensure singleton root value
 	# ----------------------------------------------------------------------

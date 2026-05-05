@@ -1,6 +1,4 @@
 import os
-import shutil
-import tempfile
 
 import o
 
@@ -8,88 +6,7 @@ UNDEFINED = o.Undefined
 
 
 class TestInstance(o.Tester):
-
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _patch_registry(cls):
-		services = o.services
-		registry = type('RegistryState', (), {})()
-		state    = {
-			'services'      : services,
-			'had_registry'  : 'Registry' in services.__dict__,
-			'registry'      : services.__dict__.get('Registry'),
-			'paths'         : {},
-		}
-
-		def add(id, path):
-			state['paths'][id] = path
-
-		def remove(id):
-			if id in state['paths']:
-				del state['paths'][id]
-
-		def get(id):
-			return state['paths'].get(id, UNDEFINED)
-
-		registry.add    = add
-		registry.remove = remove
-		registry.get    = get
-
-		services.Registry = registry
-
-		return state
-
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _restore_registry(cls, state):
-		services = state['services']
-
-		if state['had_registry']:
-			services.Registry = state['registry']
-		else:
-			del services.Registry
-
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _patch_runtime(cls):
-		temp_root      = os.path.join(o.__path__, '__tmp__')
-		root           = None
-		registry_state = cls._patch_registry()
-
-		os.makedirs(temp_root, exist_ok=True)
-		root = tempfile.mkdtemp(prefix='o_instance_', dir=temp_root)
-
-		state = {
-			'root'          : root,
-			'temp_root'     : temp_root,
-			'registry'      : registry_state,
-			'data_dir'      : o.DATA_DIR,
-			'entities'      : dict(o.__entities__),
-			'cast_map'      : dict(o.__cast_map__),
-		}
-
-		o.DATA_DIR = os.path.join('__tmp__', os.path.basename(root))
-
-		return state
-
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _restore_runtime(cls, state):
-		o.DATA_DIR = state['data_dir']
-
-		o.__entities__.clear()
-		o.__entities__.update(state['entities'])
-
-		o.__cast_map__.clear()
-		o.__cast_map__.update(state['cast_map'])
-
-		cls._restore_registry(state['registry'])
-
-		if os.path.isdir(state['root']):
-			shutil.rmtree(state['root'])
-
-		if os.path.isdir(state['temp_root']):
-			shutil.rmtree(state['temp_root'])
+	RUNTIME_PREFIX = 'o_instance_'
 
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -211,13 +128,11 @@ class TestInstance(o.Tester):
 			except TypeError:
 				pass
 
-			t3 = ObjectInit(foo='x', baz=1)
-
-			assert isinstance(t3.foo, str)
-			assert t3.foo == 'x'
-			assert isinstance(t3.baz, int)
-			assert t3.baz == 1
-			assert o.services.Memory.get(f'{t3.__proto__}.baz', UNDEFINED) is not UNDEFINED
+			try:
+				ObjectInit(foo='x', baz=1)
+				assert False
+			except AttributeError as e:
+				assert 'Field `baz` is not defined' in str(e)
 		finally:
 			cls._restore_runtime(state)
 
@@ -374,55 +289,57 @@ class TestInstance(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_root_plain_object_with_attrs(cls):
+	def test_root_plain_object_rejects_undeclared_attrs(cls):
 		state = cls._patch_runtime()
 
 		try:
-			t1 = o.T(name='alex')
-
-			assert t1.name == 'alex'
+			try:
+				o.T(name='alex')
+				assert False
+			except AttributeError as e:
+				assert 'Field `name` is not defined' in str(e)
 		finally:
 			cls._restore_runtime(state)
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_root_value_with_attrs(cls):
+	def test_root_value_rejects_undeclared_attrs(cls):
 		state = cls._patch_runtime()
 
 		try:
-			t1 = o.T('alex', lang='en')
-
-			assert isinstance(t1, o.Str)
-			assert t1.__value__ == 'alex'
-			assert t1.lang == 'en'
+			try:
+				o.T('alex', lang='en')
+				assert False
+			except AttributeError as e:
+				assert 'Field `lang` is not defined' in str(e)
 		finally:
 			cls._restore_runtime(state)
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_root_list_with_attrs(cls):
+	def test_root_list_rejects_undeclared_attrs(cls):
 		state = cls._patch_runtime()
 
 		try:
-			t1 = o.T([1, 2, 3], title='numbers')
-
-			assert isinstance(t1, o.List)
-			assert list(t1) == [1, 2, 3]
-			assert t1.title == 'numbers'
+			try:
+				o.T([1, 2, 3], title='numbers')
+				assert False
+			except AttributeError as e:
+				assert 'Field `title` is not defined' in str(e)
 		finally:
 			cls._restore_runtime(state)
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_root_dict_with_attrs(cls):
+	def test_root_dict_rejects_undeclared_attrs(cls):
 		state = cls._patch_runtime()
 
 		try:
-			t1 = o.T({'a': 1, 'b': 2}, title='scores')
-
-			assert isinstance(t1, o.Dict)
-			assert dict(t1.items()) == {'a': 1, 'b': 2}
-			assert t1.title == 'scores'
+			try:
+				o.T({'a': 1, 'b': 2}, title='scores')
+				assert False
+			except AttributeError as e:
+				assert 'Field `title` is not defined' in str(e)
 		finally:
 			cls._restore_runtime(state)
 

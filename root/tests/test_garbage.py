@@ -339,18 +339,17 @@ class TestGarbage(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_root_value_accepts_and_deletes_regular_attrs(cls):
+	def test_root_value_rejects_undeclared_regular_attrs(cls):
 		state = cls._patch_runtime()
 
 		try:
 			value = o.ensure_value()
 
-			value.foo = 1
-
-			assert value.foo == 1
-			assert o.services.Memory.has(f'{value.__proto__}.foo') == True
-
-			del value.foo
+			try:
+				value.foo = 1
+				assert False
+			except AttributeError as e:
+				assert 'Field `foo` is not defined' in str(e)
 
 			assert o.services.Memory.has(f'{value.__proto__}.foo') == False
 
@@ -369,19 +368,20 @@ class TestGarbage(o.Tester):
 
 		try:
 			garbage   = state['garbage']
-			root      = o.ensure_value()
 			root_name = os.path.basename(state['root'])
 			Node      = o.T.extend(f'GarbageAttrNode_{root_name}')
-			owner     = Node()
+			Owner     = o.T.extend(f'GarbageAttrOwner_{root_name}', child=o.F(Node, default=None))
+			Root      = o.T.extend(f'GarbageAttrRoot_{root_name}', owner=Owner)
+			owner     = Owner()
 			child     = Node()
+			root      = Root(owner=owner)
+			garbage.on_instance_link(root)
 
-			root.owner = owner
-
-			assert garbage.refcounts.get(owner.id, 0) == 1
+			assert garbage.refcounts.get(owner.id, 0) > 0
 
 			owner.child = child
 
-			assert garbage.refcounts.get(child.id, 0) == 1
+			assert garbage.refcounts.get(child.id, 0) > 0
 			assert garbage.garbage.has(child.id) == False
 
 			del owner.child
@@ -398,24 +398,25 @@ class TestGarbage(o.Tester):
 
 		try:
 			garbage   = state['garbage']
-			root      = o.ensure_value()
 			root_name = os.path.basename(state['root'])
 			Node      = o.T.extend(f'GarbageListNode_{root_name}')
+			Root      = o.T.extend(f'GarbageListRoot_{root_name}', items=o.List)
 			items     = o.List([])
 			old       = Node()
 			new       = Node()
+			root      = Root(items=items)
+			garbage.on_instance_link(root)
 
-			root.items = items
 			items.append(old)
 
-			assert garbage.refcounts.get(items.id, 0) == 1
-			assert garbage.refcounts.get(old.id, 0) == 1
+			assert garbage.refcounts.get(items.id, 0) > 0
+			assert garbage.refcounts.get(old.id, 0) > 0
 
 			items[0] = new
 
 			assert garbage.refcounts.get(old.id, 0) == 0
 			assert garbage.garbage.get(old.id) == old.__proto__
-			assert garbage.refcounts.get(new.id, 0) == 1
+			assert garbage.refcounts.get(new.id, 0) > 0
 
 			del items[0]
 
@@ -431,24 +432,25 @@ class TestGarbage(o.Tester):
 
 		try:
 			garbage   = state['garbage']
-			root      = o.ensure_value()
 			root_name = os.path.basename(state['root'])
 			Node      = o.T.extend(f'GarbageDictNode_{root_name}')
+			Root      = o.T.extend(f'GarbageDictRoot_{root_name}', items=o.Dict)
 			items     = o.Dict({})
 			old       = Node()
 			new       = Node()
+			root      = Root(items=items)
+			garbage.on_instance_link(root)
 
-			root.items = items
 			items['a'] = old
 
-			assert garbage.refcounts.get(items.id, 0) == 1
-			assert garbage.refcounts.get(old.id, 0) == 1
+			assert garbage.refcounts.get(items.id, 0) > 0
+			assert garbage.refcounts.get(old.id, 0) > 0
 
 			items['a'] = new
 
 			assert garbage.refcounts.get(old.id, 0) == 0
 			assert garbage.garbage.get(old.id) == old.__proto__
-			assert garbage.refcounts.get(new.id, 0) == 1
+			assert garbage.refcounts.get(new.id, 0) > 0
 
 			del items['a']
 

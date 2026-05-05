@@ -7,4 +7,5 @@ if os.path.isdir(almasi_root) and almasi_root not in sys.path:
 	sys.path.insert(0, almasi_root)
 
 import o
+import tester
 o.tester.run()
