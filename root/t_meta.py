@@ -307,7 +307,7 @@ class TMeta(type(o.Module)):
 
 		with o.services.Memory.write() as memory:
 			memory.set(proto, True)
-			memory.set(str(cls_id), proto)
+			o.services.Ids.set(proto)
 			cls.__zone__.set('__version__', cls.__version__)
 
 			if annotation is not UNDEFINED:
@@ -315,7 +315,7 @@ class TMeta(type(o.Module)):
 
 			if cls.__has_own_module__ and proto != 'o.T':
 				route = cls.__route__
-				memory.set(route, {
+				o.services.Routes.set(route, {
 					'id'    : cls_id,
 					'proto' : proto,
 					'mtime' : cls.__mtime__,
@@ -483,8 +483,9 @@ class TMeta(type(o.Module)):
 		with o.services.Memory.write() as memory:
 			cls.__zone__.clear()
 			memory.unset(proto)
+			o.services.Ids.unset(cls.id)
 			if route is not UNDEFINED:
-				memory.unset(route)
+				o.services.Routes.unset(route)
 
 		if cls.id in o.__entities__:
 			o.unregister_entity(cls)

@@ -174,10 +174,9 @@ class T(o.Module, metaclass=o.TMeta):
 		with o.services.Memory.write() as memory:
 			version = cls.__inc_version__()
 			proto   = f'{cls.__proto__}._{version}'
-			id      = o.proto_to_id(proto)
+			id      = o.services.Ids.set(proto)
 
 			memory.set(proto, True)
-			memory.set(str(id), proto)
 
 		with o.services.Memory.read():
 			for name, field in cls._.items():
@@ -211,7 +210,7 @@ class T(o.Module, metaclass=o.TMeta):
 			o.services.Garbage.on_instance_delete(self)
 			self.__zone__.clear()
 			memory.unset(self.__proto__)
-			memory.unset(str(self.id))
+			o.services.Ids.unset(self.id)
 
 		o.unregister_entity(self)
 

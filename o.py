@@ -78,12 +78,12 @@ class O(A, plugins=['Py']):
 	# Hash proto into id
 	# ----------------------------------------------------------------------
 	def proto_to_id(o, proto):
-		return o.String.hash(proto, 15)
+		return o.services.Ids.set(proto)
 
 	# Resolve proto by id
 	# ----------------------------------------------------------------------
 	def id_to_proto(o, id):
-		return o.services.Memory.get(str(id), UNDEFINED)
+		return o.services.Ids.get(id, UNDEFINED)
 
 	# Check whether proto exists in memory
 	# ----------------------------------------------------------------------
@@ -144,7 +144,7 @@ class O(A, plugins=['Py']):
 	# Resolve source route metadata
 	# ----------------------------------------------------------------------
 	def get_route(o, route, default=None):
-		return o.services.Memory.get(route, default)
+		return o.services.Routes.get(route, default)
 
 	# Resolve source route by proto
 	# ----------------------------------------------------------------------
@@ -156,7 +156,7 @@ class O(A, plugins=['Py']):
 	# Check source route metadata
 	# ----------------------------------------------------------------------
 	def has_route(o, route):
-		return o.services.Memory.has(route)
+		return o.services.Routes.has(route)
 
 
 o.initialize()
