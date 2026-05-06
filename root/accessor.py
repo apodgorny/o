@@ -1,12 +1,11 @@
 import o
 
-UNDEFINED = o.Undefined
+UNDEFINED       = o.Undefined
+READ_ONLY_PROPS = ('type', 'annotation', 'is_optional')
+ATOMIC          = (int, bool, float, str, type(None))
 
 
 class Accessor(o.Module):
-
-	READ_ONLY = ('type', 'annotation', 'is_optional')
-	ATOMIC    = (int, bool, float, str, type(None))
 
 	# ======================================================================
 	# FRAMEWORK METHODS
@@ -30,26 +29,15 @@ class Accessor(o.Module):
 
 		if self._is_field():
 			if name == 'annotation':
-				annotation = getattr(self.type, '__annotation__', UNDEFINED)
-				value      = annotation
+				value = getattr(self.type, '__annotation__', UNDEFINED)
 			elif name == 'is_optional':
-				annotation     = getattr(self.type, '__annotation__', UNDEFINED)
-				default        = zone.get(f'{key}.default', UNDEFINED)
-				field_nullable = False
-
-				if annotation is not UNDEFINED:
-					field_nullable = o.Annotation(annotation).is_optional
-
-				value = field_nullable or (default is not UNDEFINED)
+				value = self._is_optional(key)
 			else:
 				value = zone.get(f'{key}.{name}', UNDEFINED)
-
 				if value is UNDEFINED:
 					raise AttributeError(name)
-
 				if name == 'type':
 					value = o.get(value)
-
 		else:
 			value = o.Accessor(
 				target,
@@ -64,25 +52,47 @@ class Accessor(o.Module):
 	def __setattr__(self, name, value):
 		has_route    = 'route' in self.__dict__
 		is_dunder    = name.startswith('__') and name.endswith('__')
-		is_internal  = name in ('target', 'route', 'zone', 'READ_ONLY', 'ATOMIC')
-		is_internal  = is_internal or is_dunder
+		is_internal  = name in ('target', 'route', 'zone') or is_dunder
 
 		if is_internal:
 			object.__setattr__(self, name, value)
 		elif has_route and self._is_field():
-			if name in self.READ_ONLY:
-				raise AttributeError(f'Field prop `{name}` is read-only')
-
-			if not isinstance(value, self.ATOMIC):
-				raise ValueError('Value must be atomic')
-
-			self.zone.set(f'{self._key()}.{name}', value)
+			if self._can_set_prop(name, value):
+				self.zone.set(f'{self._key()}.{name}', value)
 		else:
 			raise AttributeError(name)
 
 	# ======================================================================
 	# PRIVATE METHODS
 	# ======================================================================
+
+	# Get field default?
+	# ----------------------------------------------------------------------
+	def _get_default(self, key):
+		return self.zone.get(f'{key}.default', UNDEFINED)
+
+	# Is field optional?
+	# ----------------------------------------------------------------------
+	def _is_optional(self, key):
+		annotation     = getattr(self.type, '__annotation__', UNDEFINED)
+		has_default    = self._get_default(key) is not UNDEFINED
+		field_nullable = False
+
+		if annotation is not UNDEFINED:
+			field_nullable = o.Annotation(annotation).is_optional
+
+		return field_nullable or has_default
+
+	# Can set field property?
+	# ----------------------------------------------------------------------
+	def _can_set_prop(self, name, value):
+		if name in READ_ONLY_PROPS:
+			raise AttributeError(f'Field prop `{name}` is read-only')
+
+		if not isinstance(value, ATOMIC):
+			raise ValueError('Value must be atomic')
+		
+		return True
 
 	# Is accessor on field surface
 	# ----------------------------------------------------------------------
@@ -103,32 +113,27 @@ class Accessor(o.Module):
 	# ----------------------------------------------------------------------
 	def set(self, value):
 		self.zone.set(self._key(), value)
-		result = self
-		return result
+		return self
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
 	def get(self, default=UNDEFINED):
-		value = self.zone.get(self._key(), default)
-		return value
+		return self.zone.get(self._key(), default)
 
 	# Remove value
 	# ----------------------------------------------------------------------
 	def unset(self):
 		self.zone.unset(self._key())
-		result = self
-		return result
+		return self
 
 	# Check whether value exists
 	# ----------------------------------------------------------------------
 	def has(self):
-		result = self.zone.has(self._key())
-		return result
+		return self.zone.has(self._key())
 
 	# Iterate stored items
 	# ----------------------------------------------------------------------
 	def items(self):
-		result = None
 		route  = self.route
 		target = self.target
 
@@ -138,12 +143,9 @@ class Accessor(o.Module):
 
 			for key in self.zone.keys(prefix):
 				name = key[len(prefix):].split('.')[0]
-
 				if name not in items:
 					items[name] = o.Accessor(target, route + [name], self.zone)
 
-			result = items.items()
-		else:
-			result = self.zone.items(self._key())
-
-		return result
+			return items.items()
+		
+		return self.zone.items(self._key())

@@ -131,6 +131,57 @@ class TestDict(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_get_resolves_dict_n_proto_to_entity(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name                = os.path.basename(state['root'])
+			Child                    = o.T.extend(f'DictNProtoChild_{root_name}', name=str)
+			DictNProtoResolvesEntity = o.T.extend(f'DictNProtoResolvesEntity_{root_name}', dict)
+			alex                     = Child(name='alex')
+			bob                      = Child(name='bob')
+			x                        = DictNProtoResolvesEntity({'a': alex, 'b': bob})
+			key_id                   = x._item_key_id('b')
+			child                    = o.get(x.__items__[key_id])
+			resolved                 = o.get(f'{x.__proto__}[\'b\']')
+
+			assert resolved is child
+			assert isinstance(resolved, Child)
+			assert resolved.name == 'bob'
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_dependants_yield_key_n_proto_and_child(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Child     = o.T.extend(f'DictDependantsChild_{root_name}', name=str)
+			ChildDict = o.T.extend(f'DictDependants_{root_name}', dict)
+			alex      = Child(name='alex')
+			bob       = Child(name='bob')
+			x         = ChildDict({'a': alex, 'b': bob})
+			items     = list(x.__dependants__())
+
+			assert items[0][0] == 'a'
+			assert items[0][1] == f'{x.__proto__}[a]'
+			assert items[0][2].__value__ == 'a'
+			assert items[1][0] == 'a'
+			assert items[1][1] == f'{x.__proto__}[a]'
+			assert items[1][2] is alex
+			assert items[2][0] == 'b'
+			assert items[2][1] == f'{x.__proto__}[b]'
+			assert items[2][2].__value__ == 'b'
+			assert items[3][0] == 'b'
+			assert items[3][1] == f'{x.__proto__}[b]'
+			assert items[3][2] is bob
+		finally:
+			cls._restore_runtime(state)
+
 
 if __name__ == '__main__':
 	TestDict.run()

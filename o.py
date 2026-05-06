@@ -11,7 +11,15 @@ class O(A, plugins=['Py']):
 	MEMORY_SIZE = 1073741824
 
 	__entities__ = {}  # id         => entity
-	__cast_map__ = {}  # Annotation => proto
+	__cast_map__ = {   # Annotation => proto
+		int        : 'o.T.Atom.Int',
+		float      : 'o.T.Atom.Float',
+		bool       : 'o.T.Atom.Bool',
+		str        : 'o.T.Atom.Str',
+		type(None) : 'o.T.Atom.Null',
+		list       : 'o.T.List',
+		dict       : 'o.T.Dict',
+	}
 
 	# Initialize library
 	# ----------------------------------------------------------------------
@@ -110,7 +118,9 @@ class O(A, plugins=['Py']):
 						o.__cast_map__[annotation] = entity.__proto__
 					else:
 						other_proto = o.__cast_map__[annotation]
-						raise TypeError(f'Annotation `{annotation}` is already defined in `{other_proto}`')
+
+						if other_proto != entity.__proto__:
+							raise TypeError(f'Annotation `{annotation}` is already defined in `{other_proto}`')
 
 			o.__entities__[entity.id]        = entity
 			o.__entities__[entity.__proto__] = entity
@@ -157,6 +167,3 @@ class O(A, plugins=['Py']):
 	# ----------------------------------------------------------------------
 	def has_route(o, route):
 		return o.services.Routes.has(route)
-
-
-o.initialize()

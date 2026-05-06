@@ -124,6 +124,50 @@ class TestList(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_get_resolves_list_n_proto_to_entity(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name                = state['root'].split('/')[-1]
+			Child                    = o.T.extend(f'ListNProtoChild_{root_name}', name=str)
+			ListNProtoResolvesEntity = o.T.extend(f'ListNProtoResolvesEntity_{root_name}', list)
+			alex                     = Child(name='alex')
+			bob                      = Child(name='bob')
+			x                        = ListNProtoResolvesEntity([alex, bob])
+			child                    = o.get(x.__items__[1])
+			resolved                 = o.get(f'{x.__proto__}[1]')
+
+			assert resolved is child
+			assert isinstance(resolved, Child)
+			assert resolved.name == 'bob'
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_dependants_yield_key_n_proto_and_child(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = state['root'].split('/')[-1]
+			Child     = o.T.extend(f'ListDependantsChild_{root_name}', name=str)
+			ChildList = o.T.extend(f'ListDependants_{root_name}', list)
+			alex      = Child(name='alex')
+			bob       = Child(name='bob')
+			x         = ChildList([alex, bob])
+			items     = list(x.__dependants__())
+
+			assert items[0][0] == 0
+			assert items[0][1] == f'{x.__proto__}[0]'
+			assert items[0][2] is alex
+			assert items[1][0] == 1
+			assert items[1][1] == f'{x.__proto__}[1]'
+			assert items[1][2] is bob
+		finally:
+			cls._restore_runtime(state)
+
 
 if __name__ == '__main__':
 	TestList.run()

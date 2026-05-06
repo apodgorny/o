@@ -16,7 +16,10 @@ class GarbageInstance:
 
 	def __dependants__(self):
 		for dependant in self.dependants:
-			yield dependant
+			if isinstance(dependant, tuple):
+				yield dependant
+			else:
+				yield dependant.__proto__, dependant.__proto__, dependant
 
 
 class TestGarbage(o.Tester):

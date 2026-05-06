@@ -30,8 +30,8 @@ class Garbage(o.Service):
 		self.garbage.unset(instance.id)
 
 		if old_count == 0:
-			for dependant in instance.__dependants__():
-				self._on_instance_link(dependant)
+			for key, n_proto, child in instance.__dependants__():
+				self._on_instance_link(child)
 
 	# Unlink holding edge
 	# ----------------------------------------------------------------------
@@ -50,8 +50,8 @@ class Garbage(o.Service):
 			self.garbage.set(instance.id, instance.__proto__)
 
 			if old_count == 1:
-				for dependant in instance.__dependants__():
-					self._on_instance_unlink(dependant)
+				for key, n_proto, child in instance.__dependants__():
+					self._on_instance_unlink(child)
 		else:
 			self.refcounts.set(instance.id, count)
 

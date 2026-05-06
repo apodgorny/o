@@ -578,6 +578,61 @@ class TestClass(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def test_field_added_later_persists_across_reload_for_class_and_instances(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name    = os.path.basename(state['root'])
+			class_name   = f'FieldAddedLaterPersists_{root_name}'
+			field_name   = 'tag'
+			field_value  = 'late default'
+			before_value = 'before reload'
+			after_value  = 'after reload'
+
+			FieldAddedLaterPersists = o.T.extend(class_name)
+			FieldAddedLaterPersists.tag = o.F(str, default=field_value)
+			x_before                     = FieldAddedLaterPersists()
+			x_before_id                  = x_before.id
+			x_before_proto               = x_before.__proto__
+
+			x_before.tag = before_value
+
+			assert FieldAddedLaterPersists.tag == field_value
+			assert x_before.tag == before_value
+
+			class_id    = FieldAddedLaterPersists.id
+			class_proto = FieldAddedLaterPersists.__proto__
+
+			for key in [class_id, class_proto, x_before_id, x_before_proto]:
+				if key in o.__entities__:
+					del o.__entities__[key]
+
+			ReloadedClass = o.get(class_id)
+			x_before      = o.get(x_before_id)
+
+			assert ReloadedClass.tag == field_value
+			assert x_before.tag == before_value
+
+			x_after       = ReloadedClass()
+			x_after_id    = x_after.id
+			x_after_proto = x_after.__proto__
+
+			x_after.tag = after_value
+
+			assert x_after.tag == after_value
+
+			for key in [x_after_id, x_after_proto]:
+				if key in o.__entities__:
+					del o.__entities__[key]
+
+			x_after = o.get(x_after_id)
+
+			assert x_after.tag == after_value
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def test_source_parent_runtime_child_chain(cls):
 		state = cls._patch_runtime()
 

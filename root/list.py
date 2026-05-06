@@ -73,11 +73,11 @@ class List(o.T):
 	# Get retained dependants
 	# ----------------------------------------------------------------------
 	def __dependants__(self):
-		for item in super().__dependants__():
-			yield item
+		for key, n_proto, child in super().__dependants__():
+			yield key, n_proto, child
 
-		for item_id in self.__items__:
-			yield o.get(item_id)
+		for index, item_id in enumerate(self.__items__):
+			yield index, f'{self.__proto__}[{index}]', o.get(item_id)
 
 	# Cast to list
 	# ----------------------------------------------------------------------

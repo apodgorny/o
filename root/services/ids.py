@@ -14,9 +14,7 @@ class Ids(o.Service):
 	# ----------------------------------------------------------------------
 	def set(self, proto):
 		id = o.String.hash(proto, 15)
-
 		self.zone.set(id, proto)
-
 		return id
 
 	# Resolve proto by id

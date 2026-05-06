@@ -201,7 +201,7 @@ class T(o.Module, metaclass=o.TMeta):
 
 				if '.' not in name and not name.startswith('_'):
 					child = o.get(child_id)
-					yield child
+					yield name, f'{self.__proto__}.{name}', child
 
 	# Delete instance from memory and cache
 	# ----------------------------------------------------------------------

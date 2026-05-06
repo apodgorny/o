@@ -37,6 +37,91 @@ class TestInstance(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def test_root_rejects_unknown_python_object(cls):
+		state = cls._patch_runtime()
+
+		try:
+			class UnknownObject:
+				pass
+
+			try:
+				o.T(UnknownObject())
+				assert False
+			except TypeError as e:
+				assert 'Cannot cast' in str(e)
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_rejects_unknown_python_class(cls):
+		state = cls._patch_runtime()
+
+		try:
+			class UnknownClass:
+				pass
+
+			try:
+				o.T(UnknownClass)
+				assert False
+			except TypeError as e:
+				assert 'Cannot cast' in str(e)
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_rejects_nested_unknown_object_in_list(cls):
+		state = cls._patch_runtime()
+
+		try:
+			class UnknownObject:
+				pass
+
+			try:
+				o.T([1, UnknownObject()])
+				assert False
+			except TypeError as e:
+				assert 'Cannot cast' in str(e)
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_rejects_nested_unknown_object_in_dict(cls):
+		state = cls._patch_runtime()
+
+		try:
+			class UnknownObject:
+				pass
+
+			try:
+				o.T({'a': UnknownObject()})
+				assert False
+			except TypeError as e:
+				assert 'Cannot cast' in str(e)
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_rejects_builtin_subclass_without_annotation(cls):
+		state = cls._patch_runtime()
+
+		try:
+			class CustomList(list):
+				pass
+
+			try:
+				o.T(CustomList([1, 2]))
+				assert False
+			except TypeError as e:
+				assert 'Cannot cast' in str(e)
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def test_root_atomic_disk_payloads(cls):
 		state = cls._patch_runtime()
 
@@ -444,6 +529,23 @@ class TestInstance(o.Tester):
 			assert parent.child is child
 			assert isinstance(parent.child, Child)
 			assert parent.child.name == 'alex'
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_dependants_yield_field_key_n_proto_and_child(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Child     = o.T.extend(f'DependantsFieldChild_{root_name}', name=str)
+			Parent    = o.T.extend(f'DependantsFieldParent_{root_name}', child=Child)
+			child     = Child(name='alex')
+			parent    = Parent(child=child)
+			items     = list(parent.__dependants__())
+
+			assert items == [('child', f'{parent.__proto__}.child', child)]
 		finally:
 			cls._restore_runtime(state)
 
