@@ -1,8 +1,10 @@
--e git+ssh://git@github.com/apodgorny/ww.git@c96d239d6a8e57f462dd86c02d230483d0dd3fa3#egg=a
+-e git+ssh://git@github.com/apodgorny/almasi.git@d4d5cdb77c60774f6fba58c0209e06e16d188393#egg=a
 annotated-types==0.7.0
 anyio==4.13.0
+attrs==26.1.0
 certifi==2026.2.25
 dirtyjson==1.0.8
+-e git+ssh://git@github.com/apodgorny/do.git@75c10937596b55e087ca9845f9f5bc5ce972e3c1#egg=do
 filelock==3.20.3
 fsspec==2026.2.0
 h11==0.16.0
@@ -10,6 +12,8 @@ httpcore==1.0.9
 httpx==0.28.1
 idna==3.11
 Jinja2==3.1.6
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
 # Editable install with no version control (llm==0.1.0)
 -e /Users/alexander/dev/llm
 lmdb==2.2.0
@@ -18,7 +22,7 @@ mpmath==1.3.0
 msgpack==1.1.2
 networkx==3.6.1
 numpy==2.4.2
-o==0.1.0
+-e git+ssh://git@github.com/apodgorny/o.git@e6882015a8d12495ea795d880256f9907221af44#egg=o
 # Editable install with no version control (o3==0.1.0)
 -e /Users/alexander/dev/o3
 ollama==0.6.1
@@ -27,6 +31,8 @@ pydantic==2.12.5
 pydantic_core==2.41.5
 PyYAML==6.0.3
 questionary==2.1.1
+referencing==0.37.0
+rpds-py==0.30.0
 SQLAlchemy==2.0.46
 sympy==1.14.0
 torch==2.10.0
@@ -34,4 +40,6 @@ tqdm==4.67.3
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 wcwidth==0.6.0
--e git+ssh://git@github.com/apodgorny/almasi.git@3cf8299c6c57abae1ed9f1f0f65d4898bf39e3a9#egg=a
+# Editable install with no version control (wl==0.1.0)
+-e /Users/alexander/dev/whitelabel
+-e git+ssh://git@github.com/apodgorny/yo.git@22ab9711491e92fb2cf417db295a47daf4adc40d#egg=yo

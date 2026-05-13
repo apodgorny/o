@@ -5,7 +5,7 @@ from a import A
 UNDEFINED = A.Undefined
 
 
-class O(A, plugins=['Py']):
+class O(A):
 
 	DATA_DIR    = '__memory__'
 	MEMORY_SIZE = 1073741824
@@ -24,11 +24,16 @@ class O(A, plugins=['Py']):
 	# Initialize library
 	# ----------------------------------------------------------------------
 	def initialize(o):
+		o.services.Memory.initialize()
+		o.services.Ids.initialize()
+		o.services.Routes.initialize()
+		o.services.Garbage.initialize()
+
 		for item in o:
 			if not item.is_directory:
 				item.load()
 
-		o.services.Memory.initialize()
+		o.ensure_value()
 
 	# Get entity by id or proto
 	# ----------------------------------------------------------------------
@@ -95,17 +100,21 @@ class O(A, plugins=['Py']):
 
 	# Check whether proto exists in memory
 	# ----------------------------------------------------------------------
-	def exists(o, proto_or_id):
-		result = False
-		proto  = proto_or_id
+	def exists(o, proto_or_route_or_id):
+		does_exist = False
+		proto  = proto_or_route_or_id
 
-		if isinstance(proto_or_id, int):
-			proto = o.id_to_proto(proto_or_id)
+		if isinstance(proto_or_route_or_id, str):
+			does_exist = o.services.Routes.has(proto_or_route_or_id)
 
-		if proto is not UNDEFINED:
-			result = o.services.Memory.has(proto)
+		if not does_exist:
+			if isinstance(proto_or_route_or_id, int):
+				proto = o.id_to_proto(proto_or_route_or_id)
 
-		return result
+			if proto is not UNDEFINED:
+				does_exist = o.services.Memory.has(proto)
+
+		return does_exist
 
 	# Register loaded entity
 	# ----------------------------------------------------------------------
@@ -146,7 +155,8 @@ class O(A, plugins=['Py']):
 		value = o.__dict__.get('V', UNDEFINED)
 
 		if not isinstance(value, o.T.V):
-			value = o.T.V()
+			proto = f'{o.T.V.__proto__}._0'
+			value = o.get(proto) if o.exists(proto) else o.T.V()
 			o.__dict__['V'] = value
 
 		return value

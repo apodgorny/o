@@ -12,6 +12,16 @@ class TMeta(type(o.Module)):
 	# METACLASS METHODS
 	# ======================================================================
 
+	# String representation
+	# ----------------------------------------------------------------------
+	def __repr__(cls):
+		text = cls.__name__
+
+		if '__proto__' in cls.__dict__:
+			text = cls.__proto__
+
+		return f'<class \'{text}\'>'
+
 	# Create new type
 	# ----------------------------------------------------------------------
 	def __new__(mcls, name, bases, namespace, **kwargs):
@@ -414,7 +424,6 @@ class TMeta(type(o.Module)):
 		proto       = f'{base_proto}.{name}'
 		entity_id   = o.proto_to_id(proto)
 		entity      = o.__entities__.get(entity_id, None)
-		entity_kind = 'Field'
 
 		if cls.__has_field__(name):
 			return getattr(cls, f'_{name}')
@@ -429,17 +438,22 @@ class TMeta(type(o.Module)):
 
 			return default
 
-		if entity is None and o.services.Memory.has(proto):
-			if o.is_class_name(name):
-				entity_kind = 'Class'
-				entity      = cls.__class__.__load__(cls, name)
-				
-			elif o.is_instance_version(name):
-				entity_kind = 'Instance'
-				entity      = cls.__read__(name)
+		if o.is_class_name(name):
+			if entity is None and o.services.Memory.has(proto):
+				entity = cls.__class__.__load__(cls, name)
+			if entity is None:
+				raise AttributeError(f'Subclass `{name}` is not found on `{cls.__proto__}`')
+			return entity
+
+		if o.is_instance_version(name):
+			if entity is None and o.services.Memory.has(proto):
+				entity = cls.__read__(name)
+			if entity is None:
+				raise AttributeError(f'Instance `{name}` is not found on `{cls.__proto__}`')
+			return entity
 
 		if entity is None:
-			raise AttributeError(f'{entity_kind} `{name}` is not found on `{cls.__proto__}`')
+			raise AttributeError(f'Field `{name}` is not found on `{cls.__proto__}`')
 
 		return entity
 	
@@ -458,6 +472,27 @@ class TMeta(type(o.Module)):
 				})
 			else:
 				cls.__set_field__(name, value)
+
+	# Delete field
+	# ----------------------------------------------------------------------
+	def __delattr__(cls, name):
+		if name.startswith('_') or name == 'id':
+			type.__delattr__(cls, name)
+		elif cls.__zone__.has(f'_.{name}.type'):
+			prefix = f'_.{name}.'
+
+			for key in list(cls.__zone__.keys(prefix)):
+				cls.__zone__.unset(key)
+
+			if name in cls.__annotations__:
+				del cls.__annotations__[name]
+
+			default_name = '_' + name
+
+			if default_name in cls.__dict__:
+				type.__delattr__(cls, default_name)
+		else:
+			raise AttributeError(f'Field `{name}` is not defined on `{cls.__proto__}`')
 			
 	# Increment class version and return issued value
 	# ----------------------------------------------------------------------

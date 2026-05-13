@@ -1,5 +1,6 @@
 import o
 
+UNDEFINED = o.Undefined
 ENDIAN = 'little'
 
 
@@ -8,7 +9,10 @@ class List(o.T):
 
 	# Initialize list
 	# ----------------------------------------------------------------------
-	def __init__(self, value):
+	def __init__(self, value=UNDEFINED):
+		if value is UNDEFINED:
+			value = []
+
 		self.__cast_in__(value)
 
 	# Read list instance
@@ -72,12 +76,14 @@ class List(o.T):
 
 	# Get retained dependants
 	# ----------------------------------------------------------------------
-	def __dependants__(self):
-		for key, n_proto, child in super().__dependants__():
-			yield key, n_proto, child
+	def __dependants__(self, path=None):
+		path = self.__proto__ if path is None else path
+
+		for key, child_path, child in super().__dependants__(path):
+			yield key, child_path, child
 
 		for index, item_id in enumerate(self.__items__):
-			yield index, f'{self.__proto__}[{index}]', o.get(item_id)
+			yield index, f'{path}[{index}]', o.get(item_id)
 
 	# Cast to list
 	# ----------------------------------------------------------------------

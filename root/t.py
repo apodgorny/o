@@ -1,4 +1,5 @@
 import os
+import json
 
 import o
 
@@ -7,7 +8,21 @@ UNDEFINED = o.Undefined
 
 class T(o.Module, metaclass=o.TMeta):
 	__is_atom__ = False
-	description = o.F(str, default='')
+	description = o.F(
+		str,
+		'Semantic search description of the situation this node represents',
+		default = '',
+	)
+
+	# String representation
+	# ----------------------------------------------------------------------
+	def __repr__(self):
+		text = self.__class__.__name__
+
+		if '__proto__' in self.__dict__:
+			text = self.__proto__
+
+		return f'<Module \'{text}\'>'
 
 	# Create new instance
 	# ----------------------------------------------------------------------
@@ -194,14 +209,30 @@ class T(o.Module, metaclass=o.TMeta):
 
 	# Get retained dependants
 	# ----------------------------------------------------------------------
-	def __dependants__(self):
+	def __dependants__(self, path=None):
+		path = self.__proto__ if path is None else path
+
 		with o.services.Memory.read():
 			for name, child_id in self.__zone__.items():
 				child = UNDEFINED
 
 				if '.' not in name and not name.startswith('_'):
 					child = o.get(child_id)
-					yield name, f'{self.__proto__}.{name}', child
+					yield name, f'{path}.{name}', child
+
+	# Cast Python-visible value into entity
+	# ----------------------------------------------------------------------
+	def __cast_in__(self, value):
+		raise TypeError(f'`{self.__class__.__proto__}` must implement `__cast_in__()`')
+
+	# Cast out into Python-visible value
+	# ----------------------------------------------------------------------
+	def __cast_out__(self):
+		raise TypeError(f'`{self.__class__.__proto__}` must implement `__cast_out__()`')
+	
+	# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
 
 	# Delete instance from memory and cache
 	# ----------------------------------------------------------------------
@@ -214,15 +245,59 @@ class T(o.Module, metaclass=o.TMeta):
 
 		o.unregister_entity(self)
 
-	# Cast Python-visible value into entity
+	# Serialize class or instance into spec
 	# ----------------------------------------------------------------------
-	def __cast_in__(self, value):
-		raise TypeError(f'`{self.__class__.__proto__}` must implement `__cast_in__()`')
+	def serialize(self):
+		return o.Serializer.serialize(self)
 
-	# Cast out into Python-visible value
+	# Deserialize spec into class or instance
 	# ----------------------------------------------------------------------
-	def __cast_out__(self):
-		raise TypeError(f'`{self.__class__.__proto__}` must implement `__cast_out__()`')
+	@classmethod
+	def deserialize(cls, spec):
+		return o.Deserializer.deserialize(spec)
+
+	# Convert object tree into visible Python data
+	# ----------------------------------------------------------------------
+	def to_data(self):
+		data = None
+
+		if self.__class__.__is_atom__:
+			data = self.__cast_out__()
+		elif isinstance(self, o.List):
+			data = []
+
+			for item in self:
+				value = item.to_data() if isinstance(item, o.T) else item
+				data.append(value)
+		elif isinstance(self, o.Dict):
+			data = {}
+
+			for key, value in self.items():
+				item = value.to_data() if isinstance(value, o.T) else value
+				data[key] = item
+		else:
+			data = {}
+
+			for name, child_path, child in self.__dependants__():
+				if isinstance(name, str):
+					data[name] = child.to_data()
+
+		return data
+
+	# Convert object tree into readable JSON
+	# ----------------------------------------------------------------------
+	def to_json(self):
+		data = self.to_data()
+		text = json.dumps(data, indent=4, ensure_ascii=False)
+
+		return text
+
+	# Convert object tree into renderable tree
+	# ----------------------------------------------------------------------
+	def to_tree(self):
+		tree = o.Tree(self)
+
+		return tree
 
 
 o.TOperators.bind(T)

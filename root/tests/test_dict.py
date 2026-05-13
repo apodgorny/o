@@ -8,6 +8,22 @@ class TestDict(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def test_dict_without_value_implies_empty_dict(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name  = os.path.basename(state['root'])
+			EmptyDict  = o.T.extend(f'EmptyDict_{root_name}', dict)
+			x          = EmptyDict()
+
+			assert isinstance(x, EmptyDict)
+			assert len(x) == 0
+			assert dict(x.items()) == {}
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def test_dict_basic_surface(cls):
 		state = cls._patch_runtime()
 
@@ -168,17 +184,11 @@ class TestDict(o.Tester):
 			items     = list(x.__dependants__())
 
 			assert items[0][0] == 'a'
-			assert items[0][1] == f'{x.__proto__}[a]'
-			assert items[0][2].__value__ == 'a'
-			assert items[1][0] == 'a'
-			assert items[1][1] == f'{x.__proto__}[a]'
-			assert items[1][2] is alex
-			assert items[2][0] == 'b'
-			assert items[2][1] == f'{x.__proto__}[b]'
-			assert items[2][2].__value__ == 'b'
-			assert items[3][0] == 'b'
-			assert items[3][1] == f'{x.__proto__}[b]'
-			assert items[3][2] is bob
+			assert items[0][1] == f'{x.__proto__}[\'a\']'
+			assert items[0][2] is alex
+			assert items[1][0] == 'b'
+			assert items[1][1] == f'{x.__proto__}[\'b\']'
+			assert items[1][2] is bob
 		finally:
 			cls._restore_runtime(state)
 

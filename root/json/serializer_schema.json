@@ -1,0 +1,136 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://o.local/schemas/o-serialization-v1.schema.json",
+
+	"type": "object",
+	"required": ["classes", "instance"],
+	"additionalProperties": false,
+
+	"properties": {
+		"classes": {
+			"type": "object",
+			"additionalProperties": {
+				"$ref": "#/$defs/class"
+			}
+		},
+
+		"instance": {
+			"$ref": "#/$defs/explicit_instance"
+		}
+	},
+
+	"$defs": {
+		"class": {
+			"type": "object",
+			"additionalProperties": {
+				"$ref": "#/$defs/field"
+			}
+		},
+
+		"field": {
+			"type": "object",
+			"required": ["type"],
+			"additionalProperties": true,
+			"properties": {
+				"type": {
+					"type": "string"
+				},
+
+				"default": {
+					"$ref": "#/$defs/value"
+				},
+
+				"description": {
+					"type": "string"
+				}
+			}
+		},
+
+		"explicit_instance": {
+			"type": "object",
+			"required": ["__class__"],
+			"properties": {
+				"__class__": {
+					"$ref": "#/$defs/proto"
+				},
+
+				"__items__": {
+					"$ref": "#/$defs/value"
+				},
+
+				"__value__": {
+					"$ref": "#/$defs/scalar"
+				}
+			},
+			"additionalProperties": {
+				"$ref": "#/$defs/value"
+			}
+		},
+
+		"dict": {
+			"type": "object",
+			"not": {
+				"required": ["__class__"]
+			},
+			"additionalProperties": {
+				"$ref": "#/$defs/value"
+			}
+		},
+
+		"list": {
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/value"
+			}
+		},
+
+		"value": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/scalar"
+				},
+
+				{
+					"$ref": "#/$defs/list"
+				},
+
+				{
+					"$ref": "#/$defs/explicit_instance"
+				},
+
+				{
+					"$ref": "#/$defs/dict"
+				}
+			]
+		},
+
+		"scalar": {
+			"anyOf": [
+				{
+					"type": "null"
+				},
+
+				{
+					"type": "boolean"
+				},
+
+				{
+					"type": "integer"
+				},
+
+				{
+					"type": "number"
+				},
+
+				{
+					"type": "string"
+				}
+			]
+		},
+
+		"proto": {
+			"type": "string",
+			"minLength": 1
+		}
+	}
+}

@@ -12,37 +12,32 @@ class TestMemory(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _patch_memory(cls):
-		root   = tempfile.mkdtemp(prefix='o_memory_')
-		path   = os.path.join(root, '__memory__')
-		memory = o.services.Memory
-		state  = {
-			'root'         : root,
-			'memory'       : memory,
-			'old_path'     : getattr(memory, 'path', UNDEFINED),
-			'old_size'     : getattr(memory, 'size', UNDEFINED),
+		temp_root = os.path.join(o.__path__, '__tmp__')
+		root      = None
+		state     = {
+			'root'         : UNDEFINED,
 			'old_data_dir' : o.DATA_DIR,
 			'old_size_key' : o.MEMORY_SIZE,
 		}
 
-		o.DATA_DIR    = os.path.relpath(path, o.__path__)
+		os.makedirs(temp_root, exist_ok=True)
+		root = tempfile.mkdtemp(prefix='o_memory_', dir=temp_root)
+
+		state['root'] = root
+
+		o.DATA_DIR    = os.path.join('__tmp__', os.path.basename(root))
 		o.MEMORY_SIZE = 10485760
-		memory.initialize()
+		cls._switch_store(o.DATA_DIR)
+		state['memory'] = o.services.Memory
 
 		return state
 
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _restore_memory(cls, state):
-		memory   = state['memory']
-		old_path = state['old_path']
-		old_size = state['old_size']
 		o.DATA_DIR    = state['old_data_dir']
 		o.MEMORY_SIZE = state['old_size_key']
-
-		if old_path is not UNDEFINED and old_size is not UNDEFINED:
-			memory.path = old_path
-			memory.size = old_size
-			memory.initialize()
+		cls._switch_store(o.DATA_DIR)
 
 		if os.path.isdir(state['root']):
 			shutil.rmtree(state['root'])
@@ -53,7 +48,9 @@ class TestMemory(o.Tester):
 		state = cls._patch_memory()
 
 		try:
-			assert state['memory'].path == os.path.realpath(os.path.join(state['root'], '__memory__'))
+			expected_path = os.path.realpath(os.path.join(o.__path__, o.DATA_DIR))
+
+			assert state['memory'].path == expected_path
 			assert state['memory'].size == 10485760
 			assert os.path.isdir(state['memory'].path)
 		finally:

@@ -61,7 +61,7 @@ class TestJsonPrompt(o.Tester):
 
 			assert User.to_prompt() == (
 				'{\n'
-				'    \'description\' : str,\n'
+				'    \'description\' : str,         # Semantic search description of the situation this node represents\n'
 				'    \'age\'         : int | null,  # Age\n'
 				'    \'name\'        : str          # Human readable full name\n'
 				'}'
@@ -87,10 +87,10 @@ class TestJsonPrompt(o.Tester):
 
 			assert Parent.to_prompt() == (
 				'{\n'
-				'    \'description\' : str,\n'
-				'    \'child\'       : {       # Nested child\n'
-				'        \'description\' : str,\n'
-				'        \'name\'        : str # Child name\n'
+				'    \'description\' : str,     # Semantic search description of the situation this node represents\n'
+				'    \'child\'       : {        # Nested child\n'
+				'        \'description\' : str, # Semantic search description of the situation this node represents\n'
+				'        \'name\'        : str  # Child name\n'
 				'    }\n'
 				'}'
 			)
@@ -111,9 +111,9 @@ class TestJsonPrompt(o.Tester):
 
 			assert User.to_prompt() == (
 				'{\n'
-				'    \'description\' : str,\n'
-				'    \'scores\'      : {  # Score by subject\n'
-				'        \'key\' : int    # str key\n'
+				'    \'description\' : str,  # Semantic search description of the situation this node represents\n'
+				'    \'scores\'      : {     # Score by subject\n'
+				'        \'key\' : int       # str key\n'
 				'    }\n'
 				'}'
 			)
@@ -138,11 +138,11 @@ class TestJsonPrompt(o.Tester):
 
 			assert User.to_prompt() == (
 				'{\n'
-				'    \'description\' : str,\n'
-				'    \'contacts\'    : [            # Previous contacts\n'
+				'    \'description\' : str,          # Semantic search description of the situation this node represents\n'
+				'    \'contacts\'    : [             # Previous contacts\n'
 				'        {\n'
-				'            \'description\' : str,\n'
-				'            \'email\'       : str  # Primary email\n'
+				'            \'description\' : str,  # Semantic search description of the situation this node represents\n'
+				'            \'email\'       : str   # Primary email\n'
 				'        }\n'
 				'    ]\n'
 				'}'

@@ -652,6 +652,64 @@ class TestInstance(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_initialize_establishes_root_value_and_preserves_it_over_reload(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			field     = f'query_{root_name}'
+
+			o.initialize()
+
+			assert isinstance(o.V, o.T.V)
+
+			setattr(o.V, field, 'hello')
+			del o.__dict__['V']
+
+			o.initialize()
+
+			assert isinstance(o.V, o.T.V)
+			assert getattr(o.V, field) == 'hello'
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_value_ad_hoc_attr_creates_and_deletes_field(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			field     = f'root_attr_{root_name}'
+
+			o.initialize()
+			o.V.__setattr__(field, 'hello')
+
+			assert getattr(o.V, field) == 'hello'
+			assert o.T.V._.__getattr__(field).type is o.Str
+
+			delattr(o.V, field)
+
+			assert o.T.V.__has_field__(field) == False
+			assert o.services.Memory.has(f'{o.V.__proto__}.{field}') == False
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_runtime_instance_repr_uses_proto(cls):
+		state = cls._patch_runtime()
+
+		try:
+			RuntimeInstanceReprUsesProto = o.T.extend('RuntimeInstanceReprUsesProto')
+			instance                     = RuntimeInstanceReprUsesProto()
+
+			assert repr(instance) == '<Module \'o.T.RuntimeInstanceReprUsesProto._0\'>'
+		finally:
+			cls._restore_runtime(state)
+
 
 if __name__ == '__main__':
 	TestInstance.run()

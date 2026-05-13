@@ -23,44 +23,37 @@ class GarbageInstance:
 
 
 class TestGarbage(o.Tester):
-	__route__ = __file__
 
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _patch_memory(cls):
-		root    = tempfile.mkdtemp(prefix='o_garbage_')
-		path    = os.path.join(root, '__memory__')
-		memory  = o.services.Memory
-		garbage = o.services.Garbage
-		state   = {
+		temp_root = os.path.join(o.__path__, '__tmp__')
+		root      = None
+		state     = {
 			'root'         : root,
-			'memory'       : memory,
-			'garbage'      : garbage,
-			'old_path'     : getattr(memory, 'path', UNDEFINED),
-			'old_size'     : getattr(memory, 'size', UNDEFINED),
 			'old_data_dir' : o.DATA_DIR,
 			'old_size_key' : o.MEMORY_SIZE,
 		}
 
-		o.DATA_DIR    = os.path.relpath(path, o.__path__)
+		os.makedirs(temp_root, exist_ok=True)
+		root = tempfile.mkdtemp(prefix='o_garbage_', dir=temp_root)
+
+		state['root'] = root
+
+		o.DATA_DIR    = os.path.join('__tmp__', os.path.basename(root))
 		o.MEMORY_SIZE = 10485760
-		memory.initialize()
-		garbage.initialize()
+		cls._switch_store(o.DATA_DIR)
+		state['memory']  = o.services.Memory
+		state['garbage'] = o.services.Garbage
 
 		return state
 
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _restore_memory(cls, state):
-		memory = state['memory']
 		o.DATA_DIR = state['old_data_dir']
 		o.MEMORY_SIZE = state['old_size_key']
-
-		if state['old_path'] is not UNDEFINED and state['old_size'] is not UNDEFINED:
-			memory.path = state['old_path']
-			memory.size = state['old_size']
-			memory.initialize()
-			state['garbage'].initialize()
+		cls._switch_store(o.DATA_DIR)
 
 		if os.path.isdir(state['root']):
 			shutil.rmtree(state['root'])
@@ -70,28 +63,23 @@ class TestGarbage(o.Tester):
 	def _patch_runtime(cls):
 		temp_root = os.path.join(o.__path__, '__tmp__')
 		root      = None
-		memory    = o.services.Memory
-		garbage   = o.services.Garbage
 
 		os.makedirs(temp_root, exist_ok=True)
 		root = tempfile.mkdtemp(prefix='o_garbage_', dir=temp_root)
 
 		state = {
 			'root'         : root,
-			'memory'       : memory,
-			'garbage'      : garbage,
 			'data_dir'     : o.DATA_DIR,
 			'entities'     : dict(o.__entities__),
 			'cast_map'     : dict(o.__cast_map__),
 			'value'        : o.__dict__.get('V', UNDEFINED),
-			'old_path'     : getattr(memory, 'path', UNDEFINED),
-			'old_size'     : getattr(memory, 'size', UNDEFINED),
 			'old_size_key' : o.MEMORY_SIZE,
 		}
 
 		o.DATA_DIR = os.path.join('__tmp__', os.path.basename(root))
-		memory.initialize()
-		garbage.initialize()
+		cls._switch_store(o.DATA_DIR)
+		state['memory']  = o.services.Memory
+		state['garbage'] = o.services.Garbage
 
 		if 'V' in o.__dict__:
 			del o.__dict__['V']
@@ -101,8 +89,6 @@ class TestGarbage(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _restore_runtime(cls, state):
-		memory = state['memory']
-
 		o.DATA_DIR = state['data_dir']
 		o.MEMORY_SIZE = state['old_size_key']
 
@@ -118,11 +104,7 @@ class TestGarbage(o.Tester):
 		else:
 			o.__dict__['V'] = state['value']
 
-		if state['old_path'] is not UNDEFINED and state['old_size'] is not UNDEFINED:
-			memory.path = state['old_path']
-			memory.size = state['old_size']
-			memory.initialize()
-			state['garbage'].initialize()
+		cls._switch_store(o.DATA_DIR)
 
 		if os.path.isdir(state['root']):
 			shutil.rmtree(state['root'])
@@ -342,25 +324,21 @@ class TestGarbage(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_root_value_rejects_undeclared_regular_attrs(cls):
+	def test_root_value_allows_ad_hoc_regular_attrs(cls):
 		state = cls._patch_runtime()
 
 		try:
 			value = o.ensure_value()
+			value.foo = 1
 
-			try:
-				value.foo = 1
-				assert False
-			except AttributeError as e:
-				assert 'Field `foo` is not defined' in str(e)
+			assert value.foo == 1
+			assert value.__class__._.foo.type is o.Int
+			assert o.services.Memory.has(f'{value.__proto__}.foo') == True
+
+			del value.foo
 
 			assert o.services.Memory.has(f'{value.__proto__}.foo') == False
-
-			try:
-				value.foo
-				assert False
-			except AttributeError:
-				pass
+			assert value.__class__.__has_field__('foo') == False
 		finally:
 			cls._restore_runtime(state)
 
@@ -494,7 +472,7 @@ class TestGarbage(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_initialize_collects_existing_garbage(cls):
+	def test_collect_removes_existing_garbage(cls):
 		state = cls._patch_memory()
 
 		try:
@@ -507,7 +485,7 @@ class TestGarbage(o.Tester):
 			memory.set(f'{proto}.name', 7)
 			garbage.garbage.set(id, proto)
 
-			garbage.initialize()
+			garbage.collect()
 
 			assert memory.has(proto) == False
 			assert memory.has(f'{proto}.name') == False

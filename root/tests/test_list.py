@@ -6,6 +6,20 @@ class TestList(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def test_list_without_value_implies_empty_list(cls):
+		state = cls._patch_runtime()
+
+		try:
+			x = o.List()
+
+			assert isinstance(x, o.List)
+			assert len(x) == 0
+			assert list(x) == []
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def test_list_basic_surface(cls):
 		state = cls._patch_runtime()
 

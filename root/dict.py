@@ -31,7 +31,10 @@ class Dict(o.T):
 
 	# Initialize dict
 	# ----------------------------------------------------------------------
-	def __init__(self, value):
+	def __init__(self, value=UNDEFINED):
+		if value is UNDEFINED:
+			value = {}
+
 		self.__cast_in__(value)
 
 	# Read dict instance
@@ -154,15 +157,16 @@ class Dict(o.T):
 	
 	# Get retained dependants
 	# ----------------------------------------------------------------------
-	def __dependants__(self):
-		for key, n_proto, child in super().__dependants__():
-			yield key, n_proto, child
+	def __dependants__(self, path=None):
+		path = self.__proto__ if path is None else path
+
+		for key, child_path, child in super().__dependants__(path):
+			yield key, child_path, child
 
 		for key_id, value_id in self.__items__.items():
-			key     = o.value(key_id)
-			n_proto = f'{self.__proto__}[{str(key)}]'
-			yield key, n_proto, o.get(key_id)
-			yield key, n_proto, o.get(value_id)
+			key        = o.value(key_id)
+			child_path = f'{path}[{repr(key)}]'
+			yield key, child_path, o.get(value_id)
 
 	# Cast to dict
 	# ----------------------------------------------------------------------

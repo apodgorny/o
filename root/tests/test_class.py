@@ -184,6 +184,51 @@ class TestClass(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
+	def test_delattr_removes_runtime_field_from_class(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name          = os.path.basename(state['root'])
+			FieldDeleteOnClass = o.T.extend(
+				f'FieldDeleteOnClass_{root_name}',
+				name=o.F(str, description='Name', default=None)
+			)
+
+			assert FieldDeleteOnClass.__has_field__('name') == True
+			assert FieldDeleteOnClass._.name.description == 'Name'
+
+			delattr(FieldDeleteOnClass, 'name')
+
+			assert FieldDeleteOnClass.__has_field__('name') == False
+			assert 'name' not in FieldDeleteOnClass.__annotations__
+			assert o.services.Memory.has(f'{FieldDeleteOnClass.__proto__}._.name.type') == False
+			assert o.services.Memory.has(f'{FieldDeleteOnClass.__proto__}._.name.description') == False
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_delattr_removes_root_value_ad_hoc_field_from_class(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			field     = f'query_{root_name}'
+
+			o.initialize()
+			setattr(o.V, field, 'hello')
+
+			assert o.T.V.__has_field__(field) == True
+
+			delattr(o.T.V, field)
+
+			assert o.T.V.__has_field__(field) == False
+			assert o.services.Memory.has(f'{o.T.V.__proto__}._.{field}.type') == False
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
 	def test_source_definition_is_authoritative(cls):
 		state = cls._patch_runtime()
 
@@ -712,6 +757,18 @@ class TestClass(o.Tester):
 
 		try:
 			assert o.T.__parent__ is None
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_runtime_class_repr_uses_proto(cls):
+		state = cls._patch_runtime()
+
+		try:
+			RuntimeClassReprUsesProto = o.T.extend('RuntimeClassReprUsesProto')
+
+			assert repr(RuntimeClassReprUsesProto) == '<class \'o.T.RuntimeClassReprUsesProto\'>'
 		finally:
 			cls._restore_runtime(state)
 
