@@ -73,6 +73,34 @@ class O(A):
 
 		return value
 
+	# Cast value into declared type
+	# ----------------------------------------------------------------------
+	def cast(o, type_cls, value):
+		annotation = getattr(type_cls, '__annotation__', UNDEFINED)
+		result     = value
+
+		if not isinstance(value, type_cls):
+			if isinstance(value, o.T):
+				value = value.to_data()
+
+			if type_cls is o.T:
+				result = o.T(value)
+			elif annotation is UNDEFINED:
+				if not isinstance(value, dict):
+					raise TypeError(f'Cannot cast `{type(value)}` into `{type_cls.__proto__}`')
+
+				result = type_cls(**value)
+			else:
+				if not isinstance(annotation, o.Annotation):
+					annotation = o.Annotation(annotation)
+
+				if annotation.is_atomic:
+					value = annotation.cast(value)
+
+				result = type_cls(value)
+
+		return result
+
 	# Check instance version token
 	# ----------------------------------------------------------------------
 	def is_instance_version(o, s):

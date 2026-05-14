@@ -356,11 +356,10 @@ class TMeta(type(o.Module)):
 		if default is not UNDEFINED:
 			type.__setattr__(cls, '_' + name, default)
 
-
-	# Does class have field defined?
+	# Resolve field owner through MRO
 	# ----------------------------------------------------------------------
-	def __has_field__(cls, name):
-		result = False
+	def __field_owner__(cls, name):
+		owner = UNDEFINED
 
 		if name.startswith('_'):
 			name = name[1:]
@@ -368,10 +367,15 @@ class TMeta(type(o.Module)):
 		for base_cls in cls.__mro__:
 			if '__zone__' in base_cls.__dict__:
 				if base_cls.__zone__.has(f'_.{name}.type'):
-					result = True
+					owner = base_cls
 					break
 
-		return result
+		return owner
+
+	# Does class have field defined?
+	# ----------------------------------------------------------------------
+	def __has_field__(cls, name):
+		return cls.__class__.__field_owner__(cls, name) is not UNDEFINED
 	
 	# Set field
 	# ----------------------------------------------------------------------

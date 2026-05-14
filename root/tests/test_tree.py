@@ -30,7 +30,7 @@ class TestTree(o.Tester):
 					Step(description='Bake the assembled pizza.'),
 				],
 			)
-			text = root.to_tree().render(lambda node: node.description)
+			text = root.to_tree(show_index=True, render_text=lambda node, node_index: node.description)
 
 			assert text == '\n'.join((
 				'(1) Make homemade pizza from scratch.',
@@ -62,13 +62,48 @@ class TestTree(o.Tester):
 					Node(description='Right'),
 				],
 			)
-			text = root.to_tree().render(lambda node: node.description, index=False)
+			text = root.to_tree(render_text=lambda node, node_index: node.description)
 
 			assert text == '\n'.join((
 				'Root',
 				'├── Left',
 				'└── Right',
 			))
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_get_index_returns_rendered_node_index(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = state['root'].split('/')[-1]
+			Node = o.T.extend(
+				f'TreeGetIndexNode_{root_name}',
+				children=o.F(list, default=None),
+			)
+			target = Node(description='Target')
+			root   = Node(
+				description='Root',
+				children=[
+					Node(description='Left'),
+					Node(
+						description='Right',
+						children=[target],
+					),
+				],
+			)
+			tree = o.Tree(root)
+			text = tree.render(show_index=True, render_text=lambda node, node_index: node.description)
+
+			assert text == '\n'.join((
+				'(1) Root',
+				'├── (1.1) Left',
+				'└── (1.2) Right',
+				'    └── (1.2.1) Target',
+			))
+			assert tree.get_index(target) == '1.2.1'
 		finally:
 			cls._restore_runtime(state)
 

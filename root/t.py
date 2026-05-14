@@ -30,10 +30,15 @@ class T(o.Module, metaclass=o.TMeta):
 		o.Timer.start('o.T.__new__')
 		
 		sub_cls = cls
+		self    = UNDEFINED
 
-		if isinstance(__value__, o.T):
+		if isinstance(__value__, o.T) and (cls is o.T or isinstance(__value__, cls)):
 			self = __value__
-		else:
+
+		if self is UNDEFINED:
+			if isinstance(__value__, o.T):
+				__value__ = __value__.to_data()
+
 			if __value__ is not UNDEFINED:
 				# o.T
 				# - - - - - - - - - - - - - - - - - -
@@ -68,8 +73,9 @@ class T(o.Module, metaclass=o.TMeta):
 			raise AttributeError(f'Field `{name}` is not defined on `{self.__class__.__proto__}`')
 		
 		with o.services.Memory.write():
+			field    = self.__class__._.__getattr__(name)
 			old_id   = self.__zone__.get(name, UNDEFINED)
-			child    = value if isinstance(value, o.T) else o.T(value)
+			child    = o.cast(field.type, value)
 			child_id = child.id
 			value    = o.value(child_id)
 
@@ -105,12 +111,12 @@ class T(o.Module, metaclass=o.TMeta):
 				value = getattr(self.__class__, name, UNDEFINED)
 
 				if value is UNDEFINED:
-					raise AttributeError(name)
+					raise AttributeError(f'Field `{name}` is not defined on `{self.__class__.__proto__}`')
 			else:
 				value = self.__get_builtin_attr__(name)
 
 				if value is UNDEFINED:
-					raise AttributeError(name)
+					raise AttributeError(f'Field `{name}` is not defined on `{self.__class__.__proto__}`')
 		
 		o.Timer.stop('o.Object.__getattr__')
 		return value
@@ -288,16 +294,18 @@ class T(o.Module, metaclass=o.TMeta):
 	# ----------------------------------------------------------------------
 	def to_json(self):
 		data = self.to_data()
-		text = json.dumps(data, indent=4, ensure_ascii=False)
-
-		return text
+		return json.dumps(data, indent=4, ensure_ascii=False)
 
 	# Convert object tree into renderable tree
 	# ----------------------------------------------------------------------
-	def to_tree(self):
-		tree = o.Tree(self)
+	def to_tree(self, show_index=False, render_text=None, index=False, render_node=None):
+		if render_text is None:
+			render_text = render_node
 
-		return tree
+		if index:
+			show_index = index
+
+		return o.Tree(self).render(show_index, render_text)
 
 
 o.TOperators.bind(T)

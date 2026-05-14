@@ -103,14 +103,17 @@ class Dict(o.T):
 	def __setitem__(self, key, value):
 		o.Timer.start('o.Dict.__setitem__')
 
+		key_type   = o.T if self.__class__.__annotation__.key is None else o.TMeta.__embody__(self.__class__.__annotation__.key.annotation)
+		value_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
+
 		with o.services.Memory.write():
-			value_child = value if isinstance(value, o.T) else o.T(value)
-			key_id      = self._item_key_id(key)
+			key_child   = o.cast(key_type, key)
+			value_child = o.cast(value_type, value)
+			key_id      = self._item_key_id(key_child)
 			old_value_id = UNDEFINED
 			items       = dict(self.__items__)
 
 			if key_id is UNDEFINED:
-				key_child = key if isinstance(key, o.T) else o.T(key)
 				o.services.Garbage.on_instance_link(key_child)
 
 				key_id    = key_child.id
@@ -178,11 +181,13 @@ class Dict(o.T):
 	def __cast_in__(self, value):
 		new_items = {}
 		key_ids   = {}
+		key_type   = o.T if self.__class__.__annotation__.key is None else o.TMeta.__embody__(self.__class__.__annotation__.key.annotation)
+		value_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
 
 		with o.services.Memory.write():
 			for key, item in value.items():
-				key_child   = key  if isinstance(key, o.T)  else o.T(key)
-				value_child = item if isinstance(item, o.T) else o.T(item)
+				key_child   = o.cast(key_type, key)
+				value_child = o.cast(value_type, item)
 				o.services.Garbage.on_instance_link(key_child)
 				o.services.Garbage.on_instance_link(value_child)
 				new_items[key_child.id] = value_child.id

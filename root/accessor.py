@@ -33,7 +33,7 @@ class Accessor(o.Module):
 			elif name == 'is_optional':
 				value = self._is_optional(key)
 			else:
-				value = zone.get(f'{key}.{name}', UNDEFINED)
+				value = self._field_zone(name).get(f'{key}.{name}', UNDEFINED)
 				if value is UNDEFINED:
 					raise AttributeError(name)
 				if name == 'type':
@@ -69,7 +69,24 @@ class Accessor(o.Module):
 	# Get field default?
 	# ----------------------------------------------------------------------
 	def _get_default(self, key):
-		return self.zone.get(f'{key}.default', UNDEFINED)
+		return self._field_zone('default').get(f'{key}.default', UNDEFINED)
+
+	# Resolve field owner
+	# ----------------------------------------------------------------------
+	def _field_owner(self):
+		target_cls = self.target if isinstance(self.target, type) else self.target.__class__
+		return target_cls.__class__.__field_owner__(target_cls, self.route[1])
+
+	# Resolve field zone
+	# ----------------------------------------------------------------------
+	def _field_zone(self, prop='type'):
+		owner = self._field_owner()
+		zone  = self.zone
+
+		if owner is not UNDEFINED and owner.__zone__.has(f'{self._key()}.{prop}'):
+			zone = owner.__zone__
+
+		return zone
 
 	# Is field optional?
 	# ----------------------------------------------------------------------

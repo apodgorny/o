@@ -40,9 +40,11 @@ class List(o.T):
 	def __setitem__(self, index, value):
 		o.Timer.start('o.List.__setitem__')
 
+		item_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
+
 		with o.services.Memory.write():
 			old_id = self.__items__[index]
-			child  = value if isinstance(value, o.T) else o.T(value)
+			child  = o.cast(item_type, value)
 
 			if old_id != child.id:
 				o.services.Garbage.on_instance_unlink(o.get(old_id))
@@ -94,10 +96,11 @@ class List(o.T):
 	# ----------------------------------------------------------------------
 	def __cast_in__(self, value):
 		new_ids = []
+		item_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
 
 		with o.services.Memory.write():
 			for item in value:
-				child = item if isinstance(item, o.T) else o.T(item)
+				child = o.cast(item_type, item)
 				o.services.Garbage.on_instance_link(child)
 				new_ids.append(child.id)
 
@@ -135,8 +138,10 @@ class List(o.T):
 	# Append list item
 	# ----------------------------------------------------------------------
 	def append(self, value):
+		item_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
+
 		with o.services.Memory.write():
-			child = value if isinstance(value, o.T) else o.T(value)
+			child = o.cast(item_type, value)
 			o.services.Garbage.on_instance_link(child)
 			items = list(self.__items__)
 			items.append(child.id)

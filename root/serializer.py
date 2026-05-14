@@ -48,6 +48,13 @@ class Serializer(o.Module):
 
 		if isinstance(value, o.T):
 			result = cls._serialize_instance(value, context)
+			annotation = getattr(value.__class__, '__annotation__', UNDEFINED)
+
+			if annotation is not UNDEFINED and value.__class__.__name__.startswith('Generic_'):
+				annotation = o.Annotation(annotation)
+
+				if annotation.is_list or annotation.is_dict:
+					result['__class__'] = o.get_by_annotation(annotation.origin).__proto__
 
 		elif isinstance(value, dict):
 			result = {}
