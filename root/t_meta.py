@@ -526,16 +526,17 @@ class TMeta(type(o.Module)):
 
 	# Extend
 	# ----------------------------------------------------------------------
-	def extend(cls, __class_name__=None, __annotation__=None, **fields):
-		if __class_name__ is None:
-			__class_name__ = f'__temp_{uuid.uuid4().hex}'
-		elif hasattr(cls, __class_name__):
-			raise TypeError(f'`{cls.__proto__}.{__class_name__}` already exists')
+	def extend(cls, __name__=None, __annotation__=None, **fields):
+		if __name__ is None:
+			__name__ = f'__temp_{uuid.uuid4().hex}'
+
+		elif hasattr(cls, __name__):
+			raise TypeError(f'`{cls.__proto__}.{__name__}` already exists')
 
 		has_annotation = __annotation__ is not None
 		namespace      = { **fields, '__is_runtime_defined__' : True }
 		bases          = (cls, __annotation__) if has_annotation else (cls, )
-		new_cls        = cls.__class__.__new__(cls.__class__, __class_name__, bases, namespace)
+		new_cls        = cls.__class__.__new__(cls.__class__, __name__, bases, namespace)
 
 		return new_cls
 
