@@ -909,19 +909,380 @@ class TestClass(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_temp_class_can_not_be_subclassed(cls):
+	def test_drop_removes_class_subclasses_and_instances(cls):
 		state = cls._patch_runtime()
 
 		try:
-			Temp   = o.T.extend()
-			raised = False
+			root_name   = os.path.basename(state['root'])
+			Parent      = o.T.extend(f'DropParent_{root_name}', name=str)
+			Child       = Parent.extend(f'DropChild_{root_name}', age=int)
+			parent_inst = Parent(name='alex')
+			child_inst  = Child(name='bob', age=7)
 
+			parent_proto    = Parent.__proto__
+			child_proto     = Child.__proto__
+			parent_inst_proto = parent_inst.__proto__
+			child_inst_proto  = child_inst.__proto__
+			parent_id       = Parent.id
+			child_id        = Child.id
+			parent_inst_id  = parent_inst.id
+			child_inst_id   = child_inst.id
+
+			assert o.services.Memory.has(parent_proto) == True
+			assert o.services.Memory.has(child_proto) == True
+			assert o.services.Memory.has(parent_inst_proto) == True
+			assert o.services.Memory.has(child_inst_proto) == True
+
+			Parent.drop()
+
+			assert o.services.Memory.has(parent_proto) == False
+			assert o.services.Memory.has(child_proto) == False
+			assert o.services.Memory.has(parent_inst_proto) == False
+			assert o.services.Memory.has(child_inst_proto) == False
+
+			assert o.services.Memory.has(f'{parent_proto}._.name.type') == False
+			assert o.services.Memory.has(f'{child_proto}._.age.type') == False
+			assert o.services.Memory.has(f'{parent_inst_proto}.name') == False
+			assert o.services.Memory.has(f'{child_inst_proto}.age') == False
+
+			assert parent_id not in o.__entities__
+			assert child_id not in o.__entities__
+			assert parent_inst_id not in o.__entities__
+			assert child_inst_id not in o.__entities__
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_drop_single_instance_leaves_class_and_siblings(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Owner     = o.T.extend(f'DropOneOwner_{root_name}', name=str)
+			one       = Owner(name='one')
+			two       = Owner(name='two')
+
+			one_proto = one.__proto__
+			two_proto = two.__proto__
+			one_id    = one.id
+
+			one.drop()
+
+			assert o.services.Memory.has(one_proto) == False
+			assert o.services.Memory.has(f'{one_proto}.name') == False
+			assert one_id not in o.__entities__
+
+			assert o.services.Memory.has(Owner.__proto__) == True
+			assert o.services.Memory.has(two_proto) == True
+			assert o.services.Memory.has(f'{two_proto}.name') == True
+			assert two.id in o.__entities__
+		finally:
+			cls._restore_runtime(state)
+
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_instances_iterator_yields_persisted_instances(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Owner     = o.T.extend(f'InstancesIterOwner_{root_name}', name=str)
+
+			assert list(Owner.__instances__()) == []
+
+			a = Owner(name='a')
+			b = Owner(name='b')
+			c = Owner(name='c')
+
+			ids = {inst.id for inst in Owner.__instances__()}
+
+			assert ids == {a.id, b.id, c.id}
+
+			for inst in Owner.__instances__():
+				assert inst.__class__ is Owner
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_instances_iterator_excludes_subclass_instances(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Parent    = o.T.extend(f'InstancesIterParent_{root_name}', name=str)
+			Child     = Parent.extend(f'InstancesIterChild_{root_name}', age=int)
+
+			parent_inst = Parent(name='p')
+			child_inst  = Child(name='c', age=1)
+
+			parent_ids = {inst.id for inst in Parent.__instances__()}
+			child_ids  = {inst.id for inst in Child.__instances__()}
+
+			assert parent_ids == {parent_inst.id}
+			assert child_ids == {child_inst.id}
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_drop_cascades_through_grandchild(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name  = os.path.basename(state['root'])
+			Grand      = o.T.extend(f'DropGrand_{root_name}', name=str)
+			Parent     = Grand.extend(f'DropParent_{root_name}', age=int)
+			Child      = Parent.extend(f'DropChild_{root_name}', tag=str)
+
+			g_inst = Grand(name='g')
+			p_inst = Parent(name='p', age=1)
+			c_inst = Child(name='c', age=2, tag='leaf')
+
+			protos = [
+				Grand.__proto__, Parent.__proto__, Child.__proto__,
+				g_inst.__proto__, p_inst.__proto__, c_inst.__proto__,
+			]
+			ids    = [Grand.id, Parent.id, Child.id, g_inst.id, p_inst.id, c_inst.id]
+
+			for proto in protos:
+				assert o.services.Memory.has(proto) == True
+
+			Grand.drop()
+
+			for proto in protos:
+				assert o.services.Memory.has(proto) == False
+			for entity_id in ids:
+				assert entity_id not in o.__entities__
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_extend_without_name_raises(cls):
+		state = cls._patch_runtime()
+
+		try:
+			raised = False
 			try:
-				Temp.extend('TempClassCanNotBeSubclassed')
+				o.T.extend()
 			except TypeError:
 				raised = True
-
 			assert raised == True
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_extend_with_drop_is_noop_when_class_absent(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name  = os.path.basename(state['root'])
+			class_name = f'ExtendDropAbsent_{root_name}'
+
+			Made = o.T.extend(class_name, __drop__=True, name=str)
+
+			assert Made.__proto__ == f'o.T.{class_name}'
+			assert Made.__has_field__('name') == True
+			assert o.services.Memory.has(Made.__proto__) == True
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_extend_with_drop_cascades_through_existing_subclasses(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name   = os.path.basename(state['root'])
+			parent_name = f'ExtendDropCascadeParent_{root_name}'
+			child_name  = f'ExtendDropCascadeChild_{root_name}'
+
+			First      = o.T.extend(parent_name, name=str)
+			OldChild   = First.extend(child_name, tag=str)
+			first_inst = First(name='one')
+			old_child_inst = OldChild(name='two', tag='x')
+
+			old_child_proto      = OldChild.__proto__
+			first_inst_proto     = first_inst.__proto__
+			old_child_inst_proto = old_child_inst.__proto__
+
+			Second = o.T.extend(parent_name, __drop__=True, age=int)
+
+			assert Second.__has_field__('age') == True
+			assert Second.__has_field__('name') == False
+			assert o.services.Memory.has(old_child_proto) == False
+			assert o.services.Memory.has(first_inst_proto) == False
+			assert o.services.Memory.has(old_child_inst_proto) == False
+			assert OldChild.id not in o.__entities__
+			assert first_inst.id not in o.__entities__
+			assert old_child_inst.id not in o.__entities__
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_get_shape_hash_is_stable_for_same_inputs(cls):
+		state = cls._patch_runtime()
+
+		try:
+			h1 = o.TMeta.__get_shape_hash__({'name': str, 'age': int})
+			h2 = o.TMeta.__get_shape_hash__({'age': int, 'name': str})
+			h3 = o.TMeta.__get_shape_hash__({'name': str})
+			h4 = o.TMeta.__get_shape_hash__({'name': o.F(str)})
+
+			assert h1 == h2
+			assert h1 != h3
+			assert h3 == h4
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_get_shape_hash_differs_when_field_props_differ(cls):
+		state = cls._patch_runtime()
+
+		try:
+			h_plain  = o.TMeta.__get_shape_hash__({'name': o.F(str)})
+			h_desc_a = o.TMeta.__get_shape_hash__({'name': o.F(str, description='alpha')})
+			h_desc_b = o.TMeta.__get_shape_hash__({'name': o.F(str, description='beta')})
+			h_default = o.TMeta.__get_shape_hash__({'name': o.F(str, default='x')})
+
+			assert h_plain != h_desc_a
+			assert h_desc_a != h_desc_b
+			assert h_plain != h_default
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_shape_hash_is_persisted_on_class(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Made      = o.T.extend(f'ShapeHashPersisted_{root_name}', name=str)
+
+			assert Made.__shape_hash__ is not None
+			assert Made.__zone__.get('__shape_hash__') == Made.__shape_hash__
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_extend_same_shape_reuses_existing_class(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name  = os.path.basename(state['root'])
+			class_name = f'ExtendSameShapeReuse_{root_name}'
+
+			First  = o.T.extend(class_name, name=str, age=int)
+			Second = o.T.extend(class_name, name=str, age=int)
+
+			assert Second is First
+			assert Second.__shape_hash__ == First.__shape_hash__
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_extend_different_shape_raises(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name  = os.path.basename(state['root'])
+			class_name = f'ExtendDifferentShape_{root_name}'
+
+			o.T.extend(class_name, name=str)
+
+			raised = False
+			try:
+				o.T.extend(class_name, age=int)
+			except TypeError as e:
+				raised = True
+				assert 'different shape' in str(e)
+			assert raised == True
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_extend_different_props_raises(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name  = os.path.basename(state['root'])
+			class_name = f'ExtendDifferentProps_{root_name}'
+
+			o.T.extend(class_name, name=o.F(str, description='alpha'))
+
+			raised = False
+			try:
+				o.T.extend(class_name, name=o.F(str, description='beta'))
+			except TypeError:
+				raised = True
+			assert raised == True
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_shape_hash_survives_reload(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name  = os.path.basename(state['root'])
+			class_name = f'ShapeHashReload_{root_name}'
+
+			Original   = o.T.extend(class_name, name=str, age=o.F(int, description='Age'))
+			entity_id  = Original.id
+			original_h = Original.__shape_hash__
+
+			del o.__entities__[entity_id]
+
+			Reopened = getattr(o.T, class_name)
+
+			assert Reopened.id == entity_id
+			assert Reopened.__shape_hash__ == original_h
+
+			Same = o.T.extend(class_name, name=str, age=o.F(int, description='Age'))
+			assert Same is Reopened
+		finally:
+			cls._restore_runtime(state)
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_extend_with_drop_replaces_existing_class(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			class_name = f'ExtendWithDrop_{root_name}'
+
+			First      = o.T.extend(class_name, name=str)
+			first_inst = First(name='first')
+			first_id   = First.id
+
+			raised = False
+			try:
+				o.T.extend(class_name, age=int)
+			except TypeError:
+				raised = True
+			assert raised == True
+
+			Second = o.T.extend(class_name, __drop__=True, age=int)
+
+			assert Second is not First
+			assert Second.id == first_id
+			assert Second._.age.type is o.Int
+			assert Second.__has_field__('age') == True
+			assert Second.__has_field__('name') == False
+			assert o.__entities__[first_id] is Second
+			assert o.services.Memory.has(first_inst.__proto__) == False
 		finally:
 			cls._restore_runtime(state)
 

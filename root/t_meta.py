@@ -1,4 +1,4 @@
-import uuid
+import hashlib
 
 import o
 
@@ -31,7 +31,6 @@ class TMeta(type(o.Module)):
 		has_own_module       = False if is_runtime_defined else mcls.has_own_module(namespace)
 		is_root_t            = name == 'T' and len(bases) == 1 and bases[0] is o.Module
 		is_runtime_class_def = not is_runtime_defined and not has_own_module
-		is_temp              = o.is_temp_class_name(name)
 
 		# Prevent class definitions in runtime
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -42,14 +41,8 @@ class TMeta(type(o.Module)):
 
 		# Class naming convention
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
-		if not name[0].isupper() and not name.startswith('__temp_'):
+		if not name[0].isupper():
 			raise NameError(f'Class name must start with uppercase letter: `{name}`')
-
-		# Temp classes can not become public form parents
-		# - - - - - - - - - - - - - - - - - - - - - - - - -
-		for base_cls in bases:
-			if isinstance(base_cls, type) and getattr(base_cls, '__is_temp__', False):
-				raise TypeError(f'Temp class `{base_cls.__proto__}` can not be subclassed')
 
 		# Support annotation definition only for o.T base
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -72,12 +65,12 @@ class TMeta(type(o.Module)):
 		zone  = o.services.Memory.zone(f'{proto}.')
 
 		with o.services.Memory.read():
-			version = zone.get('__version__', 0)
+			version     = zone.get('__version__', 0)
+			stored_hash = zone.get('__shape_hash__', UNDEFINED)
 
 		cls.__module__         = 'o'
 		cls.__has_own_module__ = has_own_module
 		cls.__proto__          = proto
-		cls.__is_temp__        = is_temp
 		cls.__version__        = version
 		cls.id                 = o.proto_to_id(proto)
 		cls.__zone__           = zone
@@ -94,6 +87,15 @@ class TMeta(type(o.Module)):
 		# - - - - - - - - - - - - - - - - - - - - - - - - -
 
 		mcls.__bind_annotation__(cls)
+
+		if fields:
+			annotation_for_hash = cls.__dict__.get('__annotation__', UNDEFINED)
+			if annotation_for_hash is UNDEFINED:
+				annotation_for_hash = None
+			cls.__shape_hash__ = mcls.__get_shape_hash__(fields, annotation_for_hash)
+		else:
+			cls.__shape_hash__ = stored_hash if stored_hash is not UNDEFINED else None
+
 		written_fields = mcls.__write__(cls, fields)
 
 		if fields:
@@ -105,9 +107,6 @@ class TMeta(type(o.Module)):
 
 		o.register_entity(cls)
 
-		if is_temp:
-			o.services.Garbage.on_class_create(cls)
-
 		o.Timer.stop('o.TMeta.__new__')
 		return cls
 
@@ -118,7 +117,7 @@ class TMeta(type(o.Module)):
 
 		if self is not __value__:
 			if __value__ is UNDEFINED:
-				super().__call__(**kwargs)
+				self.__init__(**kwargs)
 			else:
 				self.__init__(__value__)
 
@@ -145,6 +144,23 @@ class TMeta(type(o.Module)):
 
 		return result
 
+	# Iterate persisted instances of this exact class
+	# ----------------------------------------------------------------------
+	def __instances__(cls):
+		names = set()
+
+		for key in cls.__zone__.keys():
+			name = key.split('.')[0]
+
+			if o.is_instance_version(name):
+				names.add(name)
+
+		for name in names:
+			instance = cls.__read__(name)
+
+			if instance is not None:
+				yield instance
+
 	# Resolve nearest public parent
 	# ----------------------------------------------------------------------
 	@property
@@ -157,6 +173,33 @@ class TMeta(type(o.Module)):
 				break
 
 		return parent
+
+	# Compute stable shape hash from raw field declarations
+	# ----------------------------------------------------------------------
+	@classmethod
+	def __get_shape_hash__(mcls, fields, annotation=None):
+		parts = []
+
+		if annotation is not None:
+			parts.append(f'@={o.Annotation(annotation)}')
+
+		for name in sorted(fields):
+			field = fields[name]
+
+			if not isinstance(field, o.F):
+				field = o.F(field)
+
+			type_key    = str(o.Annotation(field.type))
+			default_key = '<undefined>' if field.default is UNDEFINED else repr(field.default)
+			props_key   = ';'.join(
+				f'{k}={v!r}' for k, v in sorted(field.props.items()) if v is not None
+			)
+
+			parts.append(f'{name}|{type_key}|{default_key}|{props_key}')
+
+		canonical = '\n'.join(parts)
+
+		return hashlib.sha256(canonical.encode()).hexdigest()
 
 	# Set Python class definition from field declarations
 	# ----------------------------------------------------------------------
@@ -291,6 +334,9 @@ class TMeta(type(o.Module)):
 			memory.set(proto, True)
 			o.services.Ids.set(proto)
 			cls.__zone__.set('__version__', cls.__version__)
+
+			if cls.__shape_hash__ is not None:
+				cls.__zone__.set('__shape_hash__', cls.__shape_hash__)
 
 			if annotation is not UNDEFINED:
 				cls.__zone__.set('__annotation__', str(annotation.annotation))
@@ -526,12 +572,22 @@ class TMeta(type(o.Module)):
 
 	# Extend
 	# ----------------------------------------------------------------------
-	def extend(cls, __name__=None, __annotation__=None, **fields):
-		if __name__ is None:
-			__name__ = f'__temp_{uuid.uuid4().hex}'
+	def extend(cls, __name__, __annotation__=None, __drop__=False, **fields):
+		if hasattr(cls, __name__):
+			existing = getattr(cls, __name__)
 
-		elif hasattr(cls, __name__):
-			raise TypeError(f'`{cls.__proto__}.{__name__}` already exists')
+			if __drop__:
+				existing.drop()
+			else:
+				new_hash = cls.__class__.__get_shape_hash__(fields, __annotation__)
+
+				if existing.__shape_hash__ == new_hash:
+					return existing
+
+				raise TypeError(
+					f'`{cls.__proto__}.{__name__}` already exists with a different shape; '
+					f'pass __drop__=True to replace it'
+				)
 
 		has_annotation = __annotation__ is not None
 		namespace      = { **fields, '__is_runtime_defined__' : True }
@@ -540,18 +596,3 @@ class TMeta(type(o.Module)):
 
 		return new_cls
 
-	# Delete class from memory and cache
-	# ----------------------------------------------------------------------
-	def delete(cls):
-		proto = cls.__proto__
-		route = cls.__zone__.get('__route__', UNDEFINED)
-
-		with o.services.Memory.write() as memory:
-			cls.__zone__.clear()
-			memory.unset(proto)
-			o.services.Ids.unset(cls.id)
-			if route is not UNDEFINED:
-				o.services.Routes.unset(route)
-
-		if cls.id in o.__entities__:
-			o.unregister_entity(cls)

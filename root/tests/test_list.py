@@ -69,7 +69,7 @@ class TestList(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			Child = o.T.extend(name=str)
+			Child = o.T.extend('ListNonAtomicChild', name=str)
 			x     = o.List([Child(name='alex')])
 
 			assert isinstance(x[0], Child)

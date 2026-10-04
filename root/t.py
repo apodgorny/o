@@ -54,8 +54,6 @@ class T(o.Module, metaclass=o.TMeta):
 
 			version = sub_cls.__write__(kwargs)
 			self    = sub_cls.__read__(f'_{version}')
-			
-			o.services.Garbage.on_instance_create(self)
 			self.__publish__(kwargs)
 
 		o.Timer.stop('o.T.__new__')
@@ -240,16 +238,31 @@ class T(o.Module, metaclass=o.TMeta):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Delete instance from memory and cache
+	# Drop class (with subclasses and instances) or single instance
 	# ----------------------------------------------------------------------
-	def delete(self):
-		with o.services.Memory.write() as memory:
-			o.services.Garbage.on_instance_delete(self)
-			self.__zone__.clear()
-			memory.unset(self.__proto__)
-			o.services.Ids.unset(self.id)
+	@o.dual_method
+	def drop(cls, self=None):
+		entity = cls if self is None else self
 
-		o.unregister_entity(self)
+		if self is None:
+			for subclass in list(cls.__subclasses__()):
+				subclass.drop()
+
+			for instance in list(cls.__instances__()):
+				instance.drop()
+
+			route = cls.__zone__.get('__route__', UNDEFINED)
+		else:
+			route = UNDEFINED
+
+		with o.services.Memory.write() as memory:
+			entity.__zone__.clear()
+			memory.unset(entity.__proto__)
+			o.services.Ids.unset(entity.id)
+			if route is not UNDEFINED:
+				o.services.Routes.unset(route)
+
+		o.unregister_entity(entity)
 
 	# Serialize class or instance into spec
 	# ----------------------------------------------------------------------

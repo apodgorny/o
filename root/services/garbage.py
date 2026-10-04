@@ -8,9 +8,8 @@ class Garbage(o.Service):
 	def initialize(self):
 		memory = o.services.Memory
 
-		self.refcounts      = memory.zone('garbage/refcounts/')
-		self.instancecounts = memory.zone('garbage/instancecounts/')
-		self.garbage        = memory.zone('garbage/items/')
+		self.refcounts = memory.zone('garbage/refcounts/')
+		self.garbage   = memory.zone('garbage/items/')
 
 		self.collect()
 
@@ -54,45 +53,6 @@ class Garbage(o.Service):
 					self._on_instance_unlink(child)
 		else:
 			self.refcounts.set(instance.id, count)
-
-	# Register class birth
-	# ----------------------------------------------------------------------
-	def on_class_create(self, cls):
-		if cls.__is_temp__:
-			with o.services.Memory.write():
-				self.garbage.set(cls.id, cls.__proto__)
-
-	# Register instance birth
-	# ----------------------------------------------------------------------
-	def on_instance_create(self, instance):
-		cls = instance.__class__
-
-		if cls.__is_temp__:
-			with o.services.Memory.write():
-				cls_id = cls.id
-				count  = self.instancecounts.get(cls_id, 0) + 1
-
-				if count == 1:
-					self.garbage.unset(cls_id)
-
-				self.instancecounts.set(cls_id, count)
-
-	# Register instance death
-	# ----------------------------------------------------------------------
-	def on_instance_delete(self, instance):
-		cls = instance.__class__
-
-		if cls.__is_temp__:
-			with o.services.Memory.write():
-				cls_id = cls.id
-				count  = self.instancecounts.get(cls_id, 0) - 1
-				count  = max(count, 0)
-
-				if count == 0:
-					self.instancecounts.unset(cls_id)
-					self.garbage.set(cls_id, cls.__proto__)
-				else:
-					self.instancecounts.set(cls_id, count)
 
 	# Collect garbage storage
 	# ----------------------------------------------------------------------

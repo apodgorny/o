@@ -109,12 +109,7 @@ class O(A):
 	# Check class name token
 	# ----------------------------------------------------------------------
 	def is_class_name(o, s):
-		return re.fullmatch(r'([A-Z][A-Za-z0-9_]*|__temp_[0-9a-f]+)', s) is not None
-
-	# Check temp class name token
-	# ----------------------------------------------------------------------
-	def is_temp_class_name(o, s):
-		return re.fullmatch(r'__temp_[0-9a-f]+', s) is not None
+		return re.fullmatch(r'[A-Z][A-Za-z0-9_]*', s) is not None
 
 	# Hash proto into id
 	# ----------------------------------------------------------------------

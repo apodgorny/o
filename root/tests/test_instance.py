@@ -711,5 +711,34 @@ class TestInstance(o.Tester):
 			cls._restore_runtime(state)
 
 
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_constructor_writes_instance_once(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Owner     = o.T.extend(f'ConstructorWritesOnce_{root_name}', name=str)
+
+			start_version = Owner.__version__
+
+			a = Owner(name='a')
+			b = Owner(name='b')
+			c = Owner(name='c')
+
+			assert Owner.__version__ == start_version + 3
+
+			instance_names = set()
+			for key in Owner.__zone__.keys():
+				name = key.split('.')[0]
+				if o.is_instance_version(name):
+					instance_names.add(name)
+
+			assert len(instance_names) == 3
+			assert {inst.id for inst in Owner.__instances__()} == {a.id, b.id, c.id}
+		finally:
+			cls._restore_runtime(state)
+
+
 if __name__ == '__main__':
 	TestInstance.run()
