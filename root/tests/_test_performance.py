@@ -48,18 +48,50 @@ class TestPerformance(o.Tester):
 			k    = keys[i % 5]
 			x[k] = i
 
-	# Trigger object getattr and setattr
+		# Trigger object attr get
 	# ----------------------------------------------------------------------
 	@classmethod
-	def trigger_object_attr(cls, n, root_cls):
-		APerfAttr = root_cls.extend('APerfAttr', x=int, y=int)
+	def trigger_object_attr_get(cls, n, root_cls):
+		APerfAttr = root_cls.extend('APerfAttrGet', x=int, y=int)
 		x         = APerfAttr(x=1, y=2)
 
-		for i in tqdm(range(n), desc='object_attr'):
+		for i in tqdm(range(n), desc='object_attr_get'):
 			x.x
 			x.y
+
+	# Trigger object attr set
+	# ----------------------------------------------------------------------
+	@classmethod
+	def trigger_object_attr_set(cls, n, root_cls):
+		APerfAttr = root_cls.extend('APerfAttrSet', x=int, y=int)
+		x         = APerfAttr(x=1, y=2)
+
+		for i in tqdm(range(n), desc='object_attr_set'):
 			x.x = i
 			x.y = i + 1
+
+	# Trigger object creation
+	# ----------------------------------------------------------------------
+	@classmethod
+	def trigger_object_create(cls, n, root_cls):
+		APerfCreate = root_cls.extend('APerfCreate', x=int, y=int)
+
+		for i in tqdm(range(n), desc='object_create'):
+			APerfCreate(x=i, y=i + 1)
+
+
+	# # Trigger object getattr and setattr
+	# # ----------------------------------------------------------------------
+	# @classmethod
+	# def trigger_object_attr(cls, n, root_cls):
+	# 	APerfAttr = root_cls.extend('APerfAttr', x=int, y=int)
+	# 	x         = APerfAttr(x=1, y=2)
+
+	# 	for i in tqdm(range(n), desc='object_attr'):
+	# 		x.x
+	# 		x.y
+	# 		x.x = i
+	# 		x.y = i + 1
 
 	# Trigger define
 	# ----------------------------------------------------------------------
@@ -90,20 +122,24 @@ class TestPerformance(o.Tester):
 
 		o.Timer.reset()
 
-		# with o.services.Memory.write():
-		# 	cls.trigger_list_getitem(n_list)
-		# 	cls.trigger_list_setitem(n_list)
-		# 	cls.trigger_dict_getitem(n_dict)
-		# 	cls.trigger_dict_setitem(n_dict)
-		# 	cls.trigger_object_attr(n_attr, PerfRoot)
-		# 	cls.trigger_define(n_define, PerfRoot)
+		with o.services.Memory.write():
+			cls.trigger_list_getitem(n_list)
+			cls.trigger_list_setitem(n_list)
+			cls.trigger_dict_getitem(n_dict)
+			cls.trigger_dict_setitem(n_dict)
+			cls.trigger_object_attr_get(n_attr, PerfRoot)
+			cls.trigger_object_attr_set(n_attr, PerfRoot)
+			cls.trigger_object_create(n_attr, PerfRoot)
+			cls.trigger_define(n_define, PerfRoot)
 
-		cls.trigger_list_getitem(n_list)
-		cls.trigger_list_setitem(n_list)
-		cls.trigger_dict_getitem(n_dict)
-		cls.trigger_dict_setitem(n_dict)
-		cls.trigger_object_attr(n_attr, PerfRoot)
-		cls.trigger_define(n_define, PerfRoot)
+		# cls.trigger_list_getitem(n_list)
+		# cls.trigger_list_setitem(n_list)
+		# cls.trigger_dict_getitem(n_dict)
+		# cls.trigger_dict_setitem(n_dict)
+		# cls.trigger_object_attr_get(n_attr, PerfRoot)
+		# cls.trigger_object_attr_set(n_attr, PerfRoot)
+		# cls.trigger_object_create(n_attr, PerfRoot)
+		# cls.trigger_define(n_define, PerfRoot)
 
 		print()
 		print(f'n_list   = {n_list}')
