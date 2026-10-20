@@ -560,6 +560,32 @@ class TMeta(type(o.Module)):
 	# PUBLIC CLASS METHODS
 	# ======================================================================
 
+	# Check persistent instances reachable from o.V
+	# ----------------------------------------------------------------------
+	def has_persistent_instances(cls):
+		target = cls.__proto__
+		visited = set()
+		stack = [o.ensure_value()]
+
+		while stack:
+			instance = stack.pop()
+
+			if instance.id in visited:
+				continue
+
+			visited.add(instance.id)
+			proto = type(instance).__proto__
+
+			if proto == target or proto.startswith(target + '.'):
+				return True
+
+			stack.extend(child for _, _, child in instance.__dependants__())
+
+			if isinstance(instance, o.Dict):
+				stack.extend(o.get(key_id) for key_id in instance.__items__)
+
+		return False
+
 	# Export strict JSON schema
 	# ----------------------------------------------------------------------
 	def to_json_schema(cls):
@@ -573,6 +599,8 @@ class TMeta(type(o.Module)):
 	# Extend
 	# ----------------------------------------------------------------------
 	def extend(cls, __name__, __annotation__=None, __drop__=False, **fields):
+		replaced = False
+
 		if hasattr(cls, __name__):
 			existing = getattr(cls, __name__)
 
@@ -584,15 +612,21 @@ class TMeta(type(o.Module)):
 				if existing.__shape_hash__ == new_hash:
 					return existing
 
-				raise TypeError(
-					f'`{cls.__proto__}.{__name__}` already exists with a different shape; '
-					f'pass __drop__=True to replace it'
-				)
+				if existing.has_persistent_instances():
+					raise TypeError(
+						f'Cannot redefine `{existing.__proto__}`: migration required'
+					)
+
+				existing.drop()
+				replaced = True
 
 		has_annotation = __annotation__ is not None
-		namespace      = { **fields, '__is_runtime_defined__' : True }
+		namespace      = {**fields, '__is_runtime_defined__': True}
 		bases          = (cls, __annotation__) if has_annotation else (cls, )
 		new_cls        = cls.__class__.__new__(cls.__class__, __name__, bases, namespace)
+
+		if replaced:
+			print(f'ℹ️ Schema changed: `{new_cls.__proto__}`; automatically replaced')
 
 		return new_cls
 

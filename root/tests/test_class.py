@@ -2,6 +2,10 @@ import os
 import shutil
 import sys
 
+from contextlib import redirect_stdout
+from io         import StringIO
+from unittest   import TestCase
+
 import o
 
 UNDEFINED = o.Undefined
@@ -227,13 +231,15 @@ class TestClass(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Replace unused declarations and remove fields absent from the new shape.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_source_definition_is_authoritative(cls):
+	def test_unused_definition_is_replaced(cls):
 		state = cls._patch_runtime()
 
 		try:
-			class_name = f'SourceDefinitionIsAuthoritative_{os.path.basename(state["root"])}'
+			root_name  = os.path.basename(state['root'])
+			class_name = f'UnusedDefinitionIsReplaced_{root_name}'
 
 			SourceDefinitionIsAuthoritative = o.T.extend(
 				class_name,
@@ -244,11 +250,11 @@ class TestClass(o.Tester):
 			assert SourceDefinitionIsAuthoritative._.name.type is o.Str
 			assert SourceDefinitionIsAuthoritative._.age.type is o.Int
 
-			try:
-				o.T.extend(class_name, name=o.F(str, description='Name'))
-				assert False
-			except TypeError as e:
-				assert 'already exists' in str(e)
+			Replaced = o.T.extend(class_name, name=o.F(str, description='Name'))
+
+			assert Replaced is not SourceDefinitionIsAuthoritative
+			assert Replaced._.name.description == 'Name'
+			assert Replaced.__has_field__('age') is False
 		finally:
 			cls._restore_runtime(state)
 
@@ -379,8 +385,9 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			fields_name     = f'ExtendedFieldsPath_{os.path.basename(state["root"])}'
-			list_name       = f'ExtendedListPath_{os.path.basename(state["root"])}'
+			root_name       = os.path.basename(state['root'])
+			fields_name     = f'ExtendedFieldsPath_{root_name}'
+			list_name       = f'ExtendedListPath_{root_name}'
 			extended_fields = o.T.extend(fields_name, name=str)
 			extended_list   = o.T.extend(list_name, list[str])
 
@@ -388,11 +395,12 @@ class TestClass(o.Tester):
 			assert extended_fields._.name.type is o.Str
 			assert extended_list.__annotation__ == o.Annotation(list[str])
 
-			try:
-				o.T.extend(fields_name, age=int)
-				assert False
-			except TypeError as e:
-				assert 'already exists' in str(e)
+			Replaced = o.T.extend(fields_name, age=int)
+
+			assert Replaced is not extended_fields
+			assert Replaced.__proto__ == extended_fields.__proto__
+			assert Replaced._.age.type is o.Int
+			assert Replaced.__has_field__('name') is False
 		finally:
 			cls._restore_runtime(state)
 
@@ -1188,44 +1196,41 @@ class TestClass(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Replace unused schemas when field names or types change.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_extend_different_shape_raises(cls):
+	def test_extend_different_shape_replaces_unused_class(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name  = os.path.basename(state['root'])
 			class_name = f'ExtendDifferentShape_{root_name}'
 
-			o.T.extend(class_name, name=str)
+			First  = o.T.extend(class_name, name=str)
+			Second = o.T.extend(class_name, age=int)
 
-			raised = False
-			try:
-				o.T.extend(class_name, age=int)
-			except TypeError as e:
-				raised = True
-				assert 'different shape' in str(e)
-			assert raised == True
+			assert Second is not First
+			assert Second._.age.type is o.Int
+			assert Second.__has_field__('name') is False
 		finally:
 			cls._restore_runtime(state)
 
+	# Replace unused schemas when field descriptions change.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_extend_different_props_raises(cls):
+	def test_extend_different_props_replaces_unused_class(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name  = os.path.basename(state['root'])
 			class_name = f'ExtendDifferentProps_{root_name}'
 
-			o.T.extend(class_name, name=o.F(str, description='alpha'))
+			First  = o.T.extend(class_name, name=o.F(str, description='alpha'))
+			Second = o.T.extend(class_name, name=o.F(str, description='beta'))
 
-			raised = False
-			try:
-				o.T.extend(class_name, name=o.F(str, description='beta'))
-			except TypeError:
-				raised = True
-			assert raised == True
+			assert Second is not First
+			assert Second._.name.description == 'beta'
+			assert Second.__shape_hash__ != First.__shape_hash__
 		finally:
 			cls._restore_runtime(state)
 
@@ -1260,19 +1265,12 @@ class TestClass(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			root_name = os.path.basename(state['root'])
+			root_name  = os.path.basename(state['root'])
 			class_name = f'ExtendWithDrop_{root_name}'
 
 			First      = o.T.extend(class_name, name=str)
 			first_inst = First(name='first')
 			first_id   = First.id
-
-			raised = False
-			try:
-				o.T.extend(class_name, age=int)
-			except TypeError:
-				raised = True
-			assert raised == True
 
 			Second = o.T.extend(class_name, __drop__=True, age=int)
 
@@ -1283,6 +1281,76 @@ class TestClass(o.Tester):
 			assert Second.__has_field__('name') == False
 			assert o.__entities__[first_id] is Second
 			assert o.services.Memory.has(first_inst.__proto__) == False
+		finally:
+			cls._restore_runtime(state)
+
+	# Replace only schemas without root-reachable instances, including descendants.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_auto_redefine_respects_persistent_instances(cls):
+		state = cls._patch_runtime()
+
+		try:
+			suffix = os.path.basename(state['root'])
+			name   = f'RedefineParent_{suffix}'
+			output = StringIO()
+
+			with redirect_stdout(output):
+				Parent = o.T.extend(name, value=int)
+				Child  = Parent.extend('Child', extra=str)
+
+				temporary_parent = Parent(value=1)
+				temporary_child  = Child(value=2, extra='temp')
+
+				assert Parent.has_persistent_instances() is False
+				assert Child.has_persistent_instances() is False
+				assert o.T.extend(name, value=int) is Parent
+				assert output.getvalue() == ''
+
+				Replaced = o.T.extend(name, value=str)
+
+				assert Replaced is not Parent
+				assert Replaced._.value.type is o.Str
+				assert o.services.Memory.has(temporary_parent.__proto__) is False
+				assert o.services.Memory.has(temporary_child.__proto__) is False
+				assert output.getvalue().count('Schema changed:') == 1
+
+				Child = Replaced.extend('Child', extra=str)
+
+				for container in ('direct', 'list', 'dict'):
+					child = Child(value='saved', extra='child')
+					value = child
+
+					if container == 'list':
+						value = o.List([child])
+					elif container == 'dict':
+						value = o.Dict({'child': child})
+
+					expected = value.to_data()
+					o.V.redefine_test_value = value
+
+					try:
+						assert Replaced.has_persistent_instances() is True
+						assert Child.has_persistent_instances() is True
+
+						with TestCase().assertRaisesRegex(TypeError, 'migration required'):
+							o.T.extend(name, value=float)
+
+						assert o.V.redefine_test_value.to_data() == expected
+						assert Replaced._.value.type is o.Str
+						assert o.T.extend(name, value=str) is Replaced
+						assert output.getvalue().count('Schema changed:') == 1
+					finally:
+						del o.V.redefine_test_value
+
+					assert Replaced.has_persistent_instances() is False
+
+				Again = o.T.extend(name, value=float)
+
+				assert Again._.value.type is o.Float
+				assert o.T.extend(name, value=float) is Again
+				assert output.getvalue().count('Schema changed:') == 2
+				assert len(output.getvalue().splitlines()) == 2
 		finally:
 			cls._restore_runtime(state)
 

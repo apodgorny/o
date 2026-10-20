@@ -17,13 +17,13 @@ class Py(o.Plugin):
 		# bar.py /mypath/foo a
 		# - - - - - - - - - - - - - - - - - - - -
 		try_path = os.path.join(parent_path, name)
-		if os.path.isfile(try_path):
+		if os.path.isfile(try_path) and os.path.splitext(name)[1].lstrip('.') in self.EXTENSIONS:
 			class_name = self.lib.String.snake_to_camel(os.path.splitext(name)[0])
 			path       = try_path
 
 		# Bar /mypath/foo a
 		# - - - - - - - - - - - - - - - - - - - -
-		else:
+		elif not os.path.splitext(name)[1]:
 			module_name = self.lib.String.camel_to_snake(name)
 			for ext in self.EXTENSIONS:
 				try_path = os.path.join(parent_path, f'{module_name}.{ext}')

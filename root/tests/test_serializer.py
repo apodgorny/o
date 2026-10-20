@@ -169,15 +169,15 @@ class TestSerializer(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			tree_dict = do.tests.fixtures.Tree1
+			tree_dict = do.tests.fixtures.tree_small
 			root_spec = tree_dict['instance']
 			tree      = o.T.deserialize(tree_dict)
 
 			assert isinstance(tree, o.T)
 			assert tree.__class__.__proto__ == root_spec['__class__']
-			assert tree.civilization_browser.overview.description == root_spec['civilization_browser']['overview']['description']
-			assert tree.resonance_lab.experiments[1].description == root_spec['resonance_lab']['experiments']['__items__'][1]['description']
-			assert tree.vector_architecture.proto.description == root_spec['vector_architecture']['proto']['description']
+			assert tree.description == root_spec['description']
+			assert tree.food.a.description == root_spec['food']['a']['description']
+			assert tree.machines.b.description == root_spec['machines']['b']['description']
 		finally:
 			cls._restore_runtime(state)
 
@@ -187,13 +187,13 @@ class TestSerializer(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			tree  = o.T.deserialize(do.tests.fixtures.Tree1)
+			tree  = o.T.deserialize(do.tests.fixtures.tree_small)
 			spec  = tree.serialize()
 			tree2 = o.T.deserialize(spec)
 
-			assert tree2.civilization_browser.overview.description == tree.civilization_browser.overview.description
-			assert tree2.resonance_lab.experiments[1].description == tree.resonance_lab.experiments[1].description
-			assert tree2.vector_architecture.proto.description == tree.vector_architecture.proto.description
+			assert tree2.description == tree.description
+			assert tree2.food.a.description == tree.food.a.description
+			assert tree2.machines.b.description == tree.machines.b.description
 		finally:
 			cls._restore_runtime(state)
 

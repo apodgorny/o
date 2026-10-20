@@ -30,7 +30,7 @@ class O(A):
 		o.services.Garbage.initialize()
 
 		for item in o:
-			if not item.is_directory:
+			if not item.is_directory():
 				item.load()
 
 		o.ensure_value()
