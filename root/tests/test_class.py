@@ -1179,6 +1179,40 @@ class TestClass(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Empty declarations retain identity and inherited fields across repeated loading.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_empty_shape_hash_survives_reload(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Parent    = o.T.extend(f'EmptyShapeParent_{root_name}', value=str)
+			Empty     = Parent.extend('Empty')
+			expected  = o.TMeta.__get_shape_hash__({})
+
+			assert Empty.__shape_hash__ == expected
+			assert Empty.__zone__.get('__shape_hash__') == expected
+
+			output = StringIO()
+			with redirect_stdout(output):
+				assert Parent.extend('Empty') is Empty
+				for legacy in (False, True):
+					Current = Parent.Empty
+					if legacy:
+						Current.__zone__.unset('__shape_hash__')
+					del o.__entities__[Current.id]
+
+					Reopened = Parent.Empty
+					assert Reopened.__shape_hash__ == expected
+					assert Reopened.__zone__.get('__shape_hash__') == expected
+					assert Reopened._.value.type is o.Str
+					assert not Reopened.__zone__.has('_.value.type')
+					assert Parent.extend('Empty') is Reopened
+			assert output.getvalue() == ''
+		finally:
+			cls._restore_runtime(state)
+
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_extend_same_shape_reuses_existing_class(cls):

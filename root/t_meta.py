@@ -88,13 +88,13 @@ class TMeta(type(o.Module)):
 
 		mcls.__bind_annotation__(cls)
 
-		if fields:
+		if fields or stored_hash is UNDEFINED:
 			annotation_for_hash = cls.__dict__.get('__annotation__', UNDEFINED)
 			if annotation_for_hash is UNDEFINED:
 				annotation_for_hash = None
 			cls.__shape_hash__ = mcls.__get_shape_hash__(fields, annotation_for_hash)
 		else:
-			cls.__shape_hash__ = stored_hash if stored_hash is not UNDEFINED else None
+			cls.__shape_hash__ = stored_hash
 
 		written_fields = mcls.__write__(cls, fields)
 
