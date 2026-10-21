@@ -38,8 +38,9 @@ class Py(o.Plugin):
 		return path, class_name, route
 
 	# Resolve python carrier
+	# source_lib owns the file being loaded; self.lib owns this loader.
 	# ----------------------------------------------------------------------
-	def __call__(self, name, parent_path, parent_route):
+	def __call__(self, name, parent_path, parent_route, source_lib):
 		file = None
 		lib  = self.lib
 
@@ -51,7 +52,7 @@ class Py(o.Plugin):
 			# Load method
 			# - - - - - - - - - - - - - - - - - - - -
 			def load_method():
-				cls = lib.Imports.get_class(lib, class_name, path, route)
+				cls = lib.Imports.get_class(source_lib, class_name, path, route)
 				if not issubclass(cls, (lib.Module, lib.ModuleMeta)):
 					raise Exception(f'Class `{path}` does not extend from `Module`')
 				elif issubclass(cls, lib.Service):
@@ -65,6 +66,6 @@ class Py(o.Plugin):
 				return os.path.getmtime(path)
 			# - - - - - - - - - - - - - - - - - - - -
 
-			file = self.lib.File(self.lib, path, route, load_method, hash_method)
+			file = self.lib.File(source_lib, path, route, load_method, hash_method)
 
 		return file
