@@ -204,6 +204,34 @@ class Annotation(o.Module):
 	# PUBLIC METHODS
 	# ======================================================================
 
+	# Render a persistent expression without changing display or identity.
+	# ----------------------------------------------------------------------
+	def to_source(self):
+		if self.annotation is None:
+			result = 'None'
+		elif self.is_none:
+			result = 'type(None)'
+		elif self.is_union:
+			result = '(' + ' | '.join(sorted(o.Annotation(arg).to_source() for arg in self.args)) + ')'
+		elif self.args:
+			args   = ', '.join(o.Annotation(arg).to_source() for arg in self.args)
+			result = f'{self.origin.__name__}[{args}]'
+		elif isinstance(self.annotation, type) and hasattr(self.annotation, '__proto__'):
+			result = self.annotation.__proto__
+		elif self.annotation is Ellipsis:
+			result = '...'
+		elif self.annotation is t.Any:
+			result = 't.Any'
+		elif self.is_function:
+			result = next(
+				'types.' + name
+				for name in ('FunctionType', 'BuiltinFunctionType', 'MethodType', 'BuiltinMethodType')
+				if getattr(types, name) is self.annotation
+			)
+		else:
+			result = self.annotation.__name__
+		return result
+
 	@classmethod
 	@classmethod
 	def is_annotation(cls, notation):

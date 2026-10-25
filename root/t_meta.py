@@ -339,7 +339,7 @@ class TMeta(type(o.Module)):
 				cls.__zone__.set('__shape_hash__', cls.__shape_hash__)
 
 			if annotation is not UNDEFINED:
-				cls.__zone__.set('__annotation__', str(annotation.annotation))
+				cls.__zone__.set('__annotation__', annotation.to_source())
 
 			if cls.__has_own_module__ and proto != ROOT_PROTO:
 				route = cls.__route__

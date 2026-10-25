@@ -1,4 +1,6 @@
 import math
+import types
+import typing as t
 
 import o
 
@@ -94,6 +96,68 @@ class TestAnnotation(o.Tester):
 		assert o.Annotation(bool).cast('0') == False
 		assert o.Annotation(list[int]).cast(['1', 2]) == [1, 2]
 		assert o.Annotation(dict[str, int]).cast({'a': '1'}) == {'a': 1}
+
+
+	# Preserve supported annotation forms through their persistent expressions.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_to_source_round_trip(cls):
+		annotations = (
+			None, type(None), int, float, bool, str, bytes,
+			list, dict, set, tuple, Ellipsis, t.Any,
+			list[int], dict[str, list[int | None]], set[str],
+			tuple[int, str], tuple[int, ...], int | str | None,
+			t.List[int], t.Dict[str, int], t.Optional[int], t.Union[int, str],
+			types.FunctionType, types.BuiltinFunctionType,
+			types.MethodType, types.BuiltinMethodType,
+		)
+		for declaration in annotations:
+			annotation = o.Annotation(declaration)
+			before     = (str(annotation), annotation.id, hash(annotation))
+			restored   = o.Annotation(annotation.to_source())
+			assert restored.annotation == annotation.annotation
+			assert restored == annotation
+			assert hash(restored) == hash(annotation)
+			assert (str(annotation), annotation.id, hash(annotation)) == before
+
+	# Reopen stored containers of native classes using their canonical addresses.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_to_source_native_types_and_persistent_reload(cls):
+		state = cls._patch_runtime()
+		try:
+			Person = o.T.extend('AnnotationSourcePerson')
+			Child  = Person.extend('Child')
+
+			annotations = (
+				Person, Child, list[Person], dict[str, Child],
+				list[dict[str, Child]], Person | None,
+				list[Person | Child | None], tuple[Child, ...],
+			)
+			for declaration in annotations:
+				annotation = o.Annotation(declaration)
+				before     = (str(annotation), annotation.id, hash(annotation))
+				restored   = o.Annotation(annotation.to_source())
+				assert restored.annotation == declaration
+				assert (str(annotation), annotation.id, hash(annotation)) == before
+			assert o.Annotation(list[Person]).to_source() == 'list[o.T.AnnotationSourcePerson]'
+			assert o.Annotation(dict[str, Child]).to_source() == 'dict[str, o.T.AnnotationSourcePerson.Child]'
+
+			Collection = o.T.extend('AnnotationSourceCollection', people=o.F(list[Person]))
+			container  = Collection._.people.type
+			proto      = container.__proto__
+			identity   = container.id
+
+			assert o.services.Memory.get(proto + '.__annotation__') == 'list[o.T.AnnotationSourcePerson]'
+			o.unregister_entity(container)
+			o.unregister_entity(Person)
+			reopened = o.get(identity)
+			assert reopened.id == identity
+			assert reopened.__proto__ == proto
+			assert reopened.__annotation__.annotation == list[o.T.AnnotationSourcePerson]
+			assert Collection._.people.type is reopened
+		finally:
+			cls._restore_runtime(state)
 
 
 if __name__ == '__main__':
