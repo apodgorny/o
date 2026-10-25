@@ -201,6 +201,12 @@ class Dict(o.T):
 	# PUBLIC METHODS
 	# ======================================================================
 
+	# Iterate keys without realizing the corresponding values.
+	# ----------------------------------------------------------------------
+	def keys(self):
+		for key_id in self.__items__:
+			yield o.value(key_id)
+
 	# Iterate dict items
 	# ----------------------------------------------------------------------
 	def items(self):
