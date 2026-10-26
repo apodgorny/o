@@ -1,3 +1,5 @@
+import inspect
+import os
 import re
 
 from a import A
@@ -21,9 +23,18 @@ class O(A):
 		dict       : 'o.T.Dict',
 	}
 
-	# Initialize library
+	# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
+
+	# Configure storage before loading the ontology.
 	# ----------------------------------------------------------------------
-	def initialize(o):
+	def start(o, path: str | None = None):
+		if path is None:
+			path = os.path.join(os.path.dirname(inspect.currentframe().f_back.f_globals['__file__']), 'ontology')
+
+		o.DATA_DIR = path
+
 		o.services.Memory.initialize()
 		o.services.Ids.initialize()
 		o.services.Routes.initialize()
