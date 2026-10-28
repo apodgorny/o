@@ -19,6 +19,98 @@ class Job(a.Logger):
 	_instances = weakref.WeakValueDictionary()
 
 	# ======================================================================
+	# FRAMEWORK METHODS
+	# ======================================================================
+
+	# Keep one live instance for each job and subclass.
+	# ----------------------------------------------------------------------
+	def __new__(cls, job_id=None):
+		lib  = cls._library()
+		jobs = cls._jobs(create=job_id is None)
+
+		if job_id is None:
+			with o.services.Memory.write():
+				counter = int(getattr(o.V, 'job_counter', 0))
+				while True:
+					counter += 1
+					job_id   = f'{counter:03d}'
+					path     = lib.join('jobs', job_id)
+					if job_id not in jobs and not os.path.lexists(path):
+						break
+
+				lib.mkdir('jobs', job_id)
+				o.V.job_counter = counter
+				jobs[job_id] = {
+					'status'    : 'created',
+					'completed' : {},
+					'data'      : {},
+				}
+
+		if jobs is not None and job_id in jobs:
+			key      = (cls, lib.__path__, job_id)
+			instance = Job._instances.get(key)
+
+			if instance is None:
+				instance = super().__new__(cls)
+				object.__setattr__(instance, '_id', job_id)
+				object.__setattr__(instance, '_lib', lib)
+				object.__setattr__(instance, '_key', key)
+				object.__setattr__(instance, '_running', False)
+				Job._instances[key] = instance
+		else:
+			raise KeyError(f'Unknown job: {job_id}')
+
+		return instance
+
+	# Register the workflow once for each live instance.
+	# ----------------------------------------------------------------------
+	def __init__(self, job_id=None):
+		if not self.__dict__.get('_initialized', False):
+			object.__setattr__(self, '_checkpoints', {})
+			try:
+				if self.safeguard():
+					result = self.define()
+					if not inspect.isawaitable(result):
+						object.__setattr__(self, '_initialized', True)
+					else:
+						raise TypeError('Job.define() must be synchronous')
+			finally:
+				if sys.exception() is not None:
+					Job._instances.pop(self._key, None)
+
+	# Store application fields directly in the persistent data dictionary.
+	# ----------------------------------------------------------------------
+	def __setattr__(self, name, value):
+		if name.startswith('_'):
+			object.__setattr__(self, name, value)
+		elif not hasattr(type(self), name):
+			self._node()['data'][name] = value
+		else:
+			raise AttributeError(f'Reserved Job attribute: {name}')
+
+	# Remove an application field through the ontology lifecycle.
+	# ----------------------------------------------------------------------
+	def __delattr__(self, name):
+		data = self._node()['data']
+
+		if not name.startswith('_') and not hasattr(type(self), name) and name in data:
+			del data[name]
+		else:
+			raise AttributeError(name)
+
+	# Read application fields from the persistent data dictionary.
+	# ----------------------------------------------------------------------
+	def __getattr__(self, name):
+		data = self._node()['data']
+
+		if not name.startswith('_') and name in data:
+			result = data[name]
+		else:
+			raise AttributeError(name)
+
+		return result
+
+	# ======================================================================
 	# PRIVATE METHODS
 	# ======================================================================
 
@@ -133,93 +225,10 @@ class Job(a.Logger):
 					self._progress_spinner = None
 					self._agents           = {}
 
-	# Keep one live instance for each job and subclass.
-	# ----------------------------------------------------------------------
-	def __new__(cls, job_id=None):
-		lib  = cls._library()
-		jobs = cls._jobs(create=job_id is None)
 
-		if job_id is None:
-			with o.services.Memory.write():
-				counter = int(getattr(o.V, 'job_counter', 0))
-				while True:
-					counter += 1
-					job_id   = f'{counter:03d}'
-					path     = lib.join('jobs', job_id)
-					if job_id not in jobs and not os.path.lexists(path):
-						break
 
-				lib.mkdir('jobs', job_id)
-				o.V.job_counter = counter
-				jobs[job_id] = {
-					'status'    : 'created',
-					'completed' : {},
-					'data'      : {},
-				}
 
-		if jobs is not None and job_id in jobs:
-			key      = (cls, lib.__path__, job_id)
-			instance = Job._instances.get(key)
 
-			if instance is None:
-				instance = super().__new__(cls)
-				object.__setattr__(instance, '_id', job_id)
-				object.__setattr__(instance, '_lib', lib)
-				object.__setattr__(instance, '_key', key)
-				object.__setattr__(instance, '_running', False)
-				Job._instances[key] = instance
-		else:
-			raise KeyError(f'Unknown job: {job_id}')
-
-		return instance
-
-	# Register the workflow once for each live instance.
-	# ----------------------------------------------------------------------
-	def __init__(self, job_id=None):
-		if not self.__dict__.get('_initialized', False):
-			object.__setattr__(self, '_checkpoints', {})
-			try:
-				if self.safeguard():
-					result = self.define()
-					if not inspect.isawaitable(result):
-						object.__setattr__(self, '_initialized', True)
-					else:
-						raise TypeError('Job.define() must be synchronous')
-			finally:
-				if sys.exception() is not None:
-					Job._instances.pop(self._key, None)
-
-	# Read application fields from the persistent data dictionary.
-	# ----------------------------------------------------------------------
-	def __getattr__(self, name):
-		data = self._node()['data']
-
-		if not name.startswith('_') and name in data:
-			result = data[name]
-		else:
-			raise AttributeError(name)
-
-		return result
-
-	# Store application fields directly in the persistent data dictionary.
-	# ----------------------------------------------------------------------
-	def __setattr__(self, name, value):
-		if name.startswith('_'):
-			object.__setattr__(self, name, value)
-		elif not hasattr(type(self), name):
-			self._node()['data'][name] = value
-		else:
-			raise AttributeError(f'Reserved Job attribute: {name}')
-
-	# Remove an application field through the ontology lifecycle.
-	# ----------------------------------------------------------------------
-	def __delattr__(self, name):
-		data = self._node()['data']
-
-		if not name.startswith('_') and not hasattr(type(self), name) and name in data:
-			del data[name]
-		else:
-			raise AttributeError(name)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -290,12 +299,16 @@ class Job(a.Logger):
 			self._running = True
 			try:
 				with self.logging(self.directory):
-					self._node()['status'] = 'running'
-					logging.info('Job %s started', self.id)
-					for index, (name, method) in enumerate(self._checkpoints.items(), 1):
-						await self._run_checkpoint(index, name, method)
-					self._node()['status'] = 'complete'
-					logging.info('Job %s complete', self.id)
+					try:
+						self._node()['status'] = 'running'
+						logging.info('Job %s started', self.id)
+						for index, (name, method) in enumerate(self._checkpoints.items(), 1):
+							await self._run_checkpoint(index, name, method)
+						self._node()['status'] = 'complete'
+						logging.info('Job %s complete', self.id)
+					finally:
+						if sys.exception() is not None:
+							logging.exception('Job %s failed', self.id)
 			finally:
 				self._running = False
 				if sys.exception() is not None:

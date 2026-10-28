@@ -47,6 +47,8 @@ class Trial(o.Job):
 
 	async def _second(self):
 		logging.info('second %s', self.id)
+		if getattr(self, 'artifact', False):
+			logging.info('output', extra={'artifact_name': 'output_Trial.json', 'artifact_data': {'result': 1}})
 		logging.info('older started', extra={'event': 'agent_start', 'activity': 1, 'agent_name': 'Older'})
 		logging.info('model started', extra={'event': 'model_start', 'activity': 1, 'model': 'Local'})
 		logging.info('newer started', extra={'event': 'agent_start', 'activity': 2, 'agent_name': 'Newer'})
@@ -60,7 +62,9 @@ class Trial(o.Job):
 			source = '''import asyncio
 import os
 import sys
+from unittest.mock import patch
 import a, o
+from lib.logger import LogRoute
 
 updates = []
 original_update = a.Spinner.update
@@ -105,6 +109,45 @@ async def first():
 	assert other.id == '002'
 	assert 'first 002' not in job.directory.read('log.txt')
 	assert 'first 001' not in other.directory.read('log.txt')
+	with patch.object(Trial, '_checkpoint_directory', side_effect=OSError('directory failure')):
+		try:
+			await other.run()
+		except OSError:
+			pass
+	assert other.status == 'failed'
+	with open(other.directory.join('log.txt')) as stream:
+		job_log = stream.read()
+	assert 'directory failure' in job_log and 'Traceback' in job_log
+	third = Trial()
+	third.fail = True
+	original_emit = LogRoute.emit
+
+	def fail_log(handler, record):
+		if record.getMessage().startswith('Checkpoint second failed'):
+			raise OSError('log failure')
+		else:
+			original_emit(handler, record)
+
+	with patch.object(LogRoute, 'emit', fail_log):
+		try:
+			await third.run()
+		except OSError as error:
+			assert isinstance(error.__context__, ValueError)
+			assert str(error.__context__) == 'recoverable'
+		else:
+			raise AssertionError('Log failure was swallowed')
+	assert third.status == 'failed' and third.completed == ('first',)
+	third.fail = False
+	third.artifact = True
+	with patch.object(a.Logger, '_artifact', side_effect=OSError('artifact failure')):
+		try:
+			await third.run()
+		except OSError:
+			pass
+		else:
+			raise AssertionError('Artifact failure was swallowed')
+	assert third.status == 'failed' and third.completed == ('first',)
+	third.erase()
 
 async def reopened():
 	job = Trial('001')
@@ -116,7 +159,7 @@ async def reopened():
 	assert os.path.isdir(job.directory.join('checkpoints', '002_second'))
 	assert job.completed == ('first', 'second', 'added')
 	last = Trial()
-	assert last.id == '003'
+	assert last.id == '004'
 	last.erase()
 	job.erase()
 	try:
