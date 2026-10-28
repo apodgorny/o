@@ -3,16 +3,18 @@
 # ======================================================================
 
 import inspect
+import logging
 import os
 import shutil
 import sys
+import time
 import warnings
 import weakref
 
-import o
+import a, o
 
 
-class Job(o.Module):
+class Job(a.Logger):
 
 	_instances = weakref.WeakValueDictionary()
 
@@ -56,6 +58,81 @@ class Job(o.Module):
 
 		return result
 
+	# Reflect agent activity in the active checkpoint's existing spinner.
+	# ----------------------------------------------------------------------
+	def _log_event(self, record):
+		spinner = self.__dict__.get('_progress_spinner')
+		if spinner is not None:
+			event    = getattr(record, 'event', None)
+			activity = getattr(record, 'activity', None)
+			if event == 'agent_start':
+				self._agents[activity] = (record.agent_name, getattr(record, 'model', None))
+			elif event == 'agent_end':
+				self._agents.pop(activity, None)
+			elif event == 'model_start':
+				agent = self._agents.get(activity, (None, None))[0]
+				self._agents[activity] = (agent, record.model)
+			elif event == 'model_end':
+				if activity in self._agents:
+					agent = self._agents[activity][0]
+					if agent is None:
+						self._agents.pop(activity)
+					else:
+						self._agents[activity] = (agent, None)
+
+			labels = [self._progress_label]
+			if self._agents:
+				labels.extend(value for value in next(reversed(self._agents.values())) if value)
+			spinner.update(' → '.join(labels))
+
+	# Checkpoint names must also be safe directory components.
+	# ----------------------------------------------------------------------
+	@staticmethod
+	def _is_checkpoint_name(name):
+		result = isinstance(name, str) and bool(name) and os.path.basename(name) == name and name not in ('.', '..')
+		return result
+
+	# Reuse a checkpoint directory by name when workflow positions change.
+	# ----------------------------------------------------------------------
+	def _checkpoint_directory(self, index, name):
+		directory = self.directory.mkdir('checkpoints')
+		matches   = [child.get_name() for child in directory if child.is_directory() and child.get_name().partition('_')[2] == name]
+		folder    = matches[0] if matches else f'{index:03d}_{name}'
+		result    = directory.mkdir(folder)
+		return result
+
+	# Record timing and failures without changing checkpoint identity.
+	# ----------------------------------------------------------------------
+	async def _run_checkpoint(self, index, name, method):
+		label = f'Job_{self.id}::{name}'
+		with self.logging(self._checkpoint_directory(index, name)):
+			if name in self._node()['completed']:
+				logging.info('Checkpoint %s skipped', name)
+				a.Spinner.skipped(label)
+			else:
+				self._agents           = {}
+				self._progress_label   = label
+				self._progress_spinner = a.Spinner(
+					text          = label,
+					done_label    = f'✔ {label} — complete',
+					failure_label = f'✘ {label} — failed',
+				)
+				started = time.monotonic()
+				logging.info('Checkpoint %s started', name)
+				try:
+					async with self._progress_spinner:
+						try:
+							await method()
+							self._node()['completed'][name] = True
+						finally:
+							if sys.exception() is None:
+								logging.info('Checkpoint %s complete; seconds=%.3f', name, time.monotonic() - started)
+							else:
+								logging.exception('Checkpoint %s failed; seconds=%.3f', name, time.monotonic() - started)
+				finally:
+					self._progress_spinner = None
+					self._agents           = {}
+
 	# Keep one live instance for each job and subclass.
 	# ----------------------------------------------------------------------
 	def __new__(cls, job_id=None):
@@ -72,7 +149,7 @@ class Job(o.Module):
 					if job_id not in jobs and not os.path.lexists(path):
 						break
 
-				os.makedirs(path)
+				lib.mkdir('jobs', job_id)
 				o.V.job_counter = counter
 				jobs[job_id] = {
 					'status'    : 'created',
@@ -166,10 +243,7 @@ class Job(o.Module):
 	@property
 	def directory(self):
 		self._node()
-		path = self._lib.join('jobs', self._id)
-		os.makedirs(path, exist_ok=True)
-
-		result = self._lib.Directory(self._lib, path, f'{self._lib.__name__}.jobs.{self._id}')
+		result = self._lib.mkdir('jobs', self._id)
 		return result
 
 	# Read the persisted execution status.
@@ -198,7 +272,7 @@ class Job(o.Module):
 	# ----------------------------------------------------------------------
 	def checkpoint(self, name, method):
 		if self.safeguard():
-			if isinstance(name, str) and name:
+			if self._is_checkpoint_name(name):
 				if name not in self._checkpoints:
 					if callable(method):
 						self._checkpoints[name] = method
@@ -209,18 +283,19 @@ class Job(o.Module):
 			else:
 				raise ValueError('Checkpoint name must be a nonempty string')
 
-	# Resume incomplete checkpoints and retain successful progress.
+	# Resume checkpoints with scoped file logs and one progress display.
 	# ----------------------------------------------------------------------
 	async def run(self):
 		if self.safeguard():
 			self._running = True
 			try:
-				self._node()['status'] = 'running'
-				for name, method in self._checkpoints.items():
-					if name not in self._node()['completed']:
-						await method()
-						self._node()['completed'][name] = True
-				self._node()['status'] = 'complete'
+				with self.logging(self.directory):
+					self._node()['status'] = 'running'
+					logging.info('Job %s started', self.id)
+					for index, (name, method) in enumerate(self._checkpoints.items(), 1):
+						await self._run_checkpoint(index, name, method)
+					self._node()['status'] = 'complete'
+					logging.info('Job %s complete', self.id)
 			finally:
 				self._running = False
 				if sys.exception() is not None:
