@@ -91,11 +91,14 @@ async def first():
 		pass
 	assert job.status == 'failed'
 	assert job.completed == ('first',)
+	assert os.path.isfile(job.directory.join('checkpoints', '000_initial', 'snapshot.msgpack'))
+	assert os.path.isfile(job.directory.join('checkpoints', '001_first', 'snapshot.msgpack'))
 	before = job.directory.join('checkpoints', '002_second', 'log.txt')
 	with open(before) as stream:
 		failed_log = stream.read()
 	assert 'Traceback' in failed_log and 'recoverable' in failed_log
 	assert updates.count('Job_001::second → Older → Local') == 2
+	job.rollback('first')
 	job.fail = False
 	await job.run()
 	assert job.first_runs == 1 and job.second_runs == 1
@@ -137,6 +140,7 @@ async def first():
 		else:
 			raise AssertionError('Log failure was swallowed')
 	assert third.status == 'failed' and third.completed == ('first',)
+	third.rollback('first')
 	third.fail = False
 	third.artifact = True
 	with patch.object(a.Logger, '_artifact', side_effect=OSError('artifact failure')):
