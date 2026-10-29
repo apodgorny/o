@@ -158,6 +158,10 @@ class JsonSchema(o.Module):
 		if nullable:
 			schema = cls._make_nullable(schema)
 
+		description = getattr(field, 'description', None)
+		if description is not None:
+			schema = {**schema, 'description': description}
+
 		return schema
 
 	# Merge inherited field view
