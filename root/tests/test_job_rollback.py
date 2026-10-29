@@ -115,6 +115,12 @@ async def verify():
 	await job.run()
 	assert job.completed == ('one', 'two', 'three')
 	assert job.data['value'] == 'three'
+	job.rollback('initial')
+	assert job.completed == ()
+	assert job.prompt == 'original'
+	assert 'value' not in job.data
+	await job.run()
+	assert job.completed == ('one', 'two', 'three')
 	job.erase()
 
 	job = app.Trial()
