@@ -193,6 +193,64 @@ class Job(a.Logger):
 		result    = directory.mkdir(folder)
 		return result
 
+	# Resolve a checkpoint's snapshot file.
+	# ----------------------------------------------------------------------
+	def _snapshot_path(self, index, name):
+		if index == 0:
+			directory = self.directory.mkdir('checkpoints', '000_initial')
+		else:
+			directory = self._checkpoint_directory(index, name)
+		result = os.path.join(directory.get_path(), 'snapshot.msgpack')
+		return result
+
+	# Save a fully typed copy of the job data atomically.
+	# ----------------------------------------------------------------------
+	def _save_snapshot(self, index, name):
+		path = self._snapshot_path(index, name)
+		temp = path + '.tmp'
+		data = o.services.Memory.to_bytes(self.data.serialize())
+		try:
+			with open(temp, 'wb') as stream:
+				stream.write(data)
+				stream.flush()
+				os.fsync(stream.fileno())
+			os.replace(temp, path)
+		finally:
+			if os.path.exists(temp):
+				os.unlink(temp)
+
+	# Restore job data and mark later checkpoints incomplete.
+	# ----------------------------------------------------------------------
+	def _restore_snapshot(self, index, name):
+		path = self._snapshot_path(index, name)
+		with open(path, 'rb') as stream:
+			spec = o.services.Memory.from_bytes(stream.read())
+		data = o.T.deserialize(spec)
+		if not isinstance(data, o.Dict):
+			raise TypeError('Job snapshot must contain an o.Dict')
+
+		keep = set(list(self._checkpoints)[:index])
+		with o.services.Memory.write():
+			node = self._node()
+			node['data'] = data
+			for checkpoint in list(node['completed']):
+				if checkpoint not in keep:
+					del node['completed'][checkpoint]
+
+	# Recover the latest contiguous successful checkpoint after failure.
+	# ----------------------------------------------------------------------
+	def _recover(self):
+		index = 0
+		name  = 'initial'
+		for position, checkpoint in enumerate(self._checkpoints, 1):
+			if checkpoint in self._node()['completed']:
+				index = position
+				name  = checkpoint
+			else:
+				break
+		self._restore_snapshot(index, name)
+		logging.info('Job %s recovered after checkpoint %s', self.id, name)
+
 	# Record timing and failures without changing checkpoint identity.
 	# ----------------------------------------------------------------------
 	async def _run_checkpoint(self, index, name, method):
@@ -215,6 +273,7 @@ class Job(a.Logger):
 					async with self._progress_spinner:
 						try:
 							await method()
+							self._save_snapshot(index, name)
 							self._node()['completed'][name] = True
 						finally:
 							if sys.exception() is None:
@@ -300,6 +359,10 @@ class Job(a.Logger):
 			try:
 				with self.logging(self.directory):
 					try:
+						if self.status == 'failed':
+							self._recover()
+						elif not self.completed and not os.path.isfile(self._snapshot_path(0, 'initial')):
+							self._save_snapshot(0, 'initial')
 						self._node()['status'] = 'running'
 						logging.info('Job %s started', self.id)
 						for index, (name, method) in enumerate(self._checkpoints.items(), 1):
@@ -315,6 +378,22 @@ class Job(a.Logger):
 					jobs = self._jobs()
 					if jobs is not None and self._id in jobs:
 						self._node()['status'] = 'failed'
+
+	# Restore a successful checkpoint and leave execution paused.
+	# ----------------------------------------------------------------------
+	def rollback(self, name):
+		if not self.safeguard():
+			raise RuntimeError('Cannot rollback a running job')
+		if name not in self._checkpoints:
+			raise KeyError(f'Unknown checkpoint: {name}')
+		if name not in self._node()['completed']:
+			raise ValueError(f'Checkpoint has no successful snapshot: {name}')
+
+		index = list(self._checkpoints).index(name) + 1
+		with self.logging(self.directory):
+			self._restore_snapshot(index, name)
+			self._node()['status'] = 'created'
+			logging.warning('Job %s rolled back to completed checkpoint %s', self.id, name)
 
 	# Erase the job's files and unlink its persistent branch.
 	# ----------------------------------------------------------------------
