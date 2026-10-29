@@ -384,12 +384,14 @@ class Job(a.Logger):
 	def rollback(self, name):
 		if not self.safeguard():
 			raise RuntimeError('Cannot rollback a running job')
-		if name not in self._checkpoints:
+		if name == 'initial':
+			index = 0
+		elif name in self._checkpoints:
+			if name not in self._node()['completed']:
+				raise ValueError(f'Checkpoint has no successful snapshot: {name}')
+			index = list(self._checkpoints).index(name) + 1
+		else:
 			raise KeyError(f'Unknown checkpoint: {name}')
-		if name not in self._node()['completed']:
-			raise ValueError(f'Checkpoint has no successful snapshot: {name}')
-
-		index = list(self._checkpoints).index(name) + 1
 		with self.logging(self.directory):
 			self._restore_snapshot(index, name)
 			self._node()['status'] = 'created'
