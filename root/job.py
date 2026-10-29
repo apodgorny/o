@@ -412,3 +412,29 @@ class Job(a.Logger):
 			Job._instances.pop(self._key, None)
 		else:
 			raise ValueError(f'Refusing to erase symbolic link: {path}')
+
+	# Erase stored jobs and remove abandoned job directories for this library.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def erase_all(cls):
+		jobs = cls._jobs()
+		if jobs is not None:
+			for job_id in list(jobs.keys()):
+				cls(job_id).erase()
+
+		root = cls._library().join('jobs')
+		if not os.path.islink(root):
+			if os.path.isdir(root):
+				for job_id in os.listdir(root):
+					if job_id.isdecimal():
+						path = os.path.join(root, job_id)
+						if not os.path.islink(path):
+							if os.path.isdir(path):
+								shutil.rmtree(path)
+						else:
+							raise ValueError(f'Refusing to erase symbolic link: {path}')
+		else:
+			raise ValueError(f'Refusing to erase symbolic link: {root}')
+
+		if hasattr(o.V, 'job_counter'):
+			del o.V.job_counter
