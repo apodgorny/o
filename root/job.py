@@ -233,7 +233,7 @@ class Job(a.Logger):
 		with o.services.Memory.write():
 			node = self._node()
 			node['data'] = data
-			for checkpoint in list(node['completed']):
+			for checkpoint in list(node['completed'].keys()):
 				if checkpoint not in keep:
 					del node['completed'][checkpoint]
 
