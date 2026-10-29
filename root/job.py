@@ -395,7 +395,8 @@ class Job(a.Logger):
 		with self.logging(self.directory):
 			self._restore_snapshot(index, name)
 			self._node()['status'] = 'created'
-			logging.warning('Job %s rolled back to completed checkpoint %s', self.id, name)
+			target = 'initial state' if index == 0 else f'completed checkpoint {name}'
+			logging.warning('Job %s rolled back to %s', self.id, target)
 
 	# Erase the job's files and unlink its persistent branch.
 	# ----------------------------------------------------------------------
