@@ -359,7 +359,7 @@ class Job(a.Logger):
 			try:
 				with self.logging(self.directory):
 					try:
-						if self.status == 'failed':
+						if self.status in ('failed', 'running'):
 							self._recover()
 						elif not self.completed and not os.path.isfile(self._snapshot_path(0, 'initial')):
 							self._save_snapshot(0, 'initial')
