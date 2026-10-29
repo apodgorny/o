@@ -75,7 +75,7 @@ class TestJsonSchema(o.Tester):
 			assert User.to_json_schema() == {
 				'type'                 : 'object',
 				'properties'           : {
-					'description' : { 'type' : 'string' },
+					'description' : { 'type' : 'string', 'description' : 'Semantic search description of the situation this node represents' },
 					'name' : { 'type' : 'string' },
 					'age'  : { 'type' : ['integer', 'null'] },
 				},
@@ -98,7 +98,7 @@ class TestJsonSchema(o.Tester):
 			assert Parent.to_json_schema() == {
 				'type'                 : 'object',
 				'properties'           : {
-					'description' : { 'type' : 'string' },
+					'description' : { 'type' : 'string', 'description' : 'Semantic search description of the situation this node represents' },
 					'child' : { '$ref' : f'#/$defs/{Child.__proto__}' },
 				},
 				'required'             : ['child'],
@@ -107,7 +107,7 @@ class TestJsonSchema(o.Tester):
 					Child.__proto__ : {
 						'type'                 : 'object',
 						'properties'           : {
-							'description' : { 'type' : 'string' },
+							'description' : { 'type' : 'string', 'description' : 'Semantic search description of the situation this node represents' },
 							'name' : { 'type' : 'string' },
 						},
 						'required'             : ['name'],
@@ -118,6 +118,31 @@ class TestJsonSchema(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_field_descriptions_reach_json_schema(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Catalog = o.T.extend(
+				f'JsonSchemaDescriptions_{root_name}',
+				characters=o.F(dict[str, str], 'Latin snake_case keys mapped to readable names.'),
+				count=o.F(int, 'Number of characters.', default=None),
+			)
+			properties = Catalog.to_json_schema()['properties']
+			assert properties['characters'] == {
+				'type': 'object',
+				'additionalProperties': {'type': 'string'},
+				'description': 'Latin snake_case keys mapped to readable names.',
+			}
+			assert properties['count'] == {
+				'type': ['integer', 'null'],
+				'description': 'Number of characters.',
+			}
+		finally:
+			cls._restore_runtime(state)
 
 if __name__ == '__main__':
 	TestJsonSchema.run()
