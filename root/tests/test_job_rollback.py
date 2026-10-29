@@ -37,8 +37,12 @@ class Trial(o.Job):
 		self.checkpoint('three', self._three)
 
 	async def _one(self):
+		assert 'value' not in self.data
 		self.data['actor'] = Actor(name='Mira')
 		self.data['value'] = 'one'
+		if os.path.exists(os.environ['FAIL_ONE']):
+			self.data['value'] = 'partial-first'
+			raise ValueError('first checkpoint failed')
 
 	async def _two(self):
 		assert self.data['value'] == 'one'
@@ -62,6 +66,7 @@ import app
 async def verify():
 	job = app.Trial()
 	job.prompt = 'original'
+	os.environ['FAIL_ONE'] = os.path.join(sys.argv[1], 'fail-one')
 	fail = os.path.join(sys.argv[1], 'fail-two')
 	with open(fail, 'w') as stream:
 		stream.write('fail')
@@ -110,6 +115,26 @@ async def verify():
 	await job.run()
 	assert job.completed == ('one', 'two', 'three')
 	assert job.data['value'] == 'three'
+	job.erase()
+
+	job = app.Trial()
+	job.prompt = 'seed'
+	with open(os.environ['FAIL_ONE'], 'w') as stream:
+		stream.write('fail')
+	try:
+		await job.run()
+	except ValueError:
+		pass
+	else:
+		raise AssertionError('First checkpoint should fail')
+	assert job.completed == ()
+	assert job.status == 'failed'
+	assert job.data['value'] == 'partial-first'
+	os.unlink(os.environ['FAIL_ONE'])
+	await job.run()
+	assert job.completed == ('one', 'two', 'three')
+	assert job.data['value'] == 'three'
+	assert job.prompt == 'seed'
 	job.erase()
 
 asyncio.run(verify())
