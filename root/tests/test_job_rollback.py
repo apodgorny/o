@@ -103,12 +103,19 @@ async def verify():
 	with open(log) as stream:
 		assert stream.read().startswith(failed_log)
 
+	# Folder identity follows checkpoint names rather than current positions.
+	# ----------------------------------------------------------------------
+	os.rename(os.path.dirname(third), os.path.join(root, 'checkpoints', '009_three'))
+	os.mkdir(os.path.join(root, 'checkpoints', 'notes'))
 	job.rollback('one')
 	assert job.status == 'created'
 	assert job.completed == ('one',)
 	assert job.data['value'] == 'one'
 	assert job.data['actor'].name == 'Mira'
-	assert os.path.isfile(second) and os.path.isfile(third)
+	assert os.path.isfile(initial) and os.path.isfile(first)
+	assert not os.path.exists(os.path.dirname(second))
+	assert not os.path.exists(os.path.join(root, 'checkpoints', '009_three'))
+	assert os.path.isdir(os.path.join(root, 'checkpoints', 'notes'))
 	with open(os.path.join(root, 'log.txt')) as stream:
 		assert 'rolled back to completed checkpoint one' in stream.read()
 
@@ -119,6 +126,10 @@ async def verify():
 	assert job.completed == ()
 	assert job.prompt == 'original'
 	assert 'value' not in job.data
+	assert os.path.isfile(initial)
+	assert not os.path.exists(os.path.dirname(first))
+	assert not os.path.exists(os.path.dirname(second))
+	assert not os.path.exists(os.path.dirname(third))
 	await job.run()
 	assert job.completed == ('one', 'two', 'three')
 	job.erase()

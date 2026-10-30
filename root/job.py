@@ -251,6 +251,21 @@ class Job(a.Logger):
 		self._restore_snapshot(index, name)
 		logging.info('Job %s recovered after checkpoint %s', self.id, name)
 
+	# Discard checkpoint files outside the explicitly retained workflow prefix.
+	# ----------------------------------------------------------------------
+	def _remove_checkpoints(self, index):
+		keep = {'initial', *list(self._checkpoints)[:index]}
+		for child in self.directory.mkdir('checkpoints'):
+			if child.is_directory():
+				prefix, separator, name = child.get_name().partition('_')
+				if prefix.isdecimal():
+					if name not in keep:
+						path = child.get_path()
+						if not os.path.islink(path):
+							shutil.rmtree(path)
+						else:
+							raise ValueError(f'Refusing to remove symbolic link: {path}')
+
 	# Record timing and failures without changing checkpoint identity.
 	# ----------------------------------------------------------------------
 	async def _run_checkpoint(self, index, name, method):
@@ -382,21 +397,24 @@ class Job(a.Logger):
 	# Restore a successful checkpoint and leave execution paused.
 	# ----------------------------------------------------------------------
 	def rollback(self, name):
-		if not self.safeguard():
-			raise RuntimeError('Cannot rollback a running job')
-		if name == 'initial':
-			index = 0
-		elif name in self._checkpoints:
-			if name not in self._node()['completed']:
-				raise ValueError(f'Checkpoint has no successful snapshot: {name}')
-			index = list(self._checkpoints).index(name) + 1
+		if self.safeguard():
+			if name == 'initial':
+				index = 0
+			elif name in self._checkpoints:
+				if name in self._node()['completed']:
+					index = list(self._checkpoints).index(name) + 1
+				else:
+					raise ValueError(f'Checkpoint has no successful snapshot: {name}')
+			else:
+				raise KeyError(f'Unknown checkpoint: {name}')
+			with self.logging(self.directory):
+				self._restore_snapshot(index, name)
+				self._node()['status'] = 'created'
+				self._remove_checkpoints(index)
+				target = 'initial state' if index == 0 else f'completed checkpoint {name}'
+				logging.warning('Job %s rolled back to %s', self.id, target)
 		else:
-			raise KeyError(f'Unknown checkpoint: {name}')
-		with self.logging(self.directory):
-			self._restore_snapshot(index, name)
-			self._node()['status'] = 'created'
-			target = 'initial state' if index == 0 else f'completed checkpoint {name}'
-			logging.warning('Job %s rolled back to %s', self.id, target)
+			raise RuntimeError('Cannot rollback a running job')
 
 	# Erase the job's files and unlink its persistent branch.
 	# ----------------------------------------------------------------------

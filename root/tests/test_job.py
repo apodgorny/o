@@ -99,12 +99,13 @@ async def first():
 	assert 'Traceback' in failed_log and 'recoverable' in failed_log
 	assert updates.count('Job_001::second → Older → Local') == 2
 	job.rollback('first')
+	assert not os.path.exists(os.path.dirname(before))
 	job.fail = False
 	await job.run()
 	assert job.first_runs == 1 and job.second_runs == 1
 	assert job.status == 'complete'
 	with open(before) as stream:
-		assert stream.read().startswith(failed_log)
+		assert 'recoverable' not in stream.read()
 	assert os.path.isdir(job.directory.join('checkpoints', '001_first'))
 	other = Trial()
 	other.fail = False
