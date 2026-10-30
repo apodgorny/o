@@ -68,6 +68,7 @@ async def verify():
 	job.prompt = 'original'
 	os.environ['FAIL_ONE'] = os.path.join(sys.argv[1], 'fail-one')
 	fail = os.path.join(sys.argv[1], 'fail-two')
+	os.environ['FAIL_TWO'] = fail
 	with open(fail, 'w') as stream:
 		stream.write('fail')
 
