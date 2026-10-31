@@ -617,6 +617,24 @@ class TMeta(type(o.Module)):
 				if existing.__shape_hash__ == new_hash:
 					return existing
 
+				# Apply description-only changes without invalidating persisted data.
+				# ----------------------------------------------------------------------
+				old_fields = {}
+				for name, field in fields.items():
+					if not isinstance(field, o.F):
+						field = o.F(field)
+					props = {key: value for key, value in field.props.items() if key != 'description'}
+					description = existing.__zone__.get(f'_.{name}.description', None)
+					old_fields[name] = o.F(field.type, description, default=field.default, **props)
+
+				if existing.__shape_hash__ == cls.__class__.__get_shape_hash__(old_fields, __annotation__):
+					with o.services.Memory.write():
+						for name, field in fields.items():
+							existing.__zone__.set(f'_.{name}.description', field.props.get('description'))
+						existing.__zone__.set('__shape_hash__', new_hash)
+					existing.__shape_hash__ = new_hash
+					return existing
+
 				if existing.has_persistent_instances():
 					raise TypeError(
 						f'Cannot redefine `{existing.__proto__}`: migration required'
