@@ -119,5 +119,47 @@ class TestJsonSchema(o.Tester):
 			cls._restore_runtime(state)
 
 
+	# Filter only generated fields, including nested objects, without changing the full type schema.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_prompt_schema_filters_nested_fields(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Child = o.T.extend(
+				f'PromptSchemaChild_{root_name}',
+				seen   = o.F(str),
+				hidden = o.F(str, default=None, prompt=False),
+			)
+			Parent = o.T.extend(
+				f'PromptSchemaParent_{root_name}',
+				events    = o.F(list[Child]),
+				show_time = o.F(str, default=None, prompt=False),
+			)
+
+			full      = Parent.to_json_schema()
+			generated = Parent.to_prompt_schema()
+			child_id  = Child.__proto__
+
+			assert 'show_time' in full['properties']
+			assert 'show_time' not in generated['properties']
+			assert 'show_time' not in generated.get('required', [])
+			assert 'hidden' in full['$defs'][child_id]['properties']
+			assert 'hidden' not in generated['$defs'][child_id]['properties']
+			assert 'seen' in generated['$defs'][child_id]['properties']
+			assert Parent.to_json_schema() == full
+			assert "'show_time'" not in Parent.to_prompt()
+			assert "'hidden'" not in Parent.to_prompt()
+			assert "'seen'" in Parent.to_prompt()
+
+			parent = Parent(events=[Child(seen='visible')])
+			assert parent.show_time is None
+			parent.show_time = '2026-10-30T12:00:00+00:00'
+			assert parent.show_time == '2026-10-30T12:00:00+00:00'
+		finally:
+			cls._restore_runtime(state)
+
+
 if __name__ == '__main__':
 	TestJsonSchema.run()
