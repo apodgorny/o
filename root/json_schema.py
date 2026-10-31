@@ -121,7 +121,7 @@ class JsonSchema(o.Module):
 		with o.services.Memory.read():
 			for name, field in cls._get_fields(t_cls).items():
 				field_schema, is_required = cls._get_field_schema(field, defs, stack)
-				properties[name] = field_schema
+				properties[name]          = field_schema
 
 				if is_required:
 					required.append(name)
