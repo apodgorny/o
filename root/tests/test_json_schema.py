@@ -1,4 +1,5 @@
 import os
+import runpy
 
 import o
 
@@ -227,6 +228,38 @@ class TestJsonSchema(o.Tester):
 				raised = 'JSON schema requires string dict keys' in str(error)
 
 			assert raised
+		finally:
+			cls._restore_runtime(state)
+
+
+	# Compare representative schemas directly with the archived implementation.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_schema_matches_preserved_implementation(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			path      = os.path.join(os.path.dirname(__file__), '..', '_json_schema.py')
+			legacy    = runpy.run_path(path)['JsonSchema']
+
+			Child = o.T.extend(
+				f'JsonSchemaLegacyChild_{root_name}',
+				name     = o.F(str),
+				nickname = o.F(str, default=None),
+			)
+			Parent = o.T.extend(
+				f'JsonSchemaLegacyParent_{root_name}',
+				first       = o.F(Child),
+				second      = o.F(Child, default=None),
+				many        = o.F(list[Child]),
+				by_name     = o.F(dict[str, Child]),
+				alternates  = o.F(str | int | None),
+				with_default = o.F(str, default='ready'),
+			)
+
+			for target in (o.Int, o.Str, o.Null, Child, Parent):
+				assert target.to_json_schema() == legacy.build(target)
 		finally:
 			cls._restore_runtime(state)
 
