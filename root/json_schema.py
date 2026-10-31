@@ -13,25 +13,17 @@ class JsonSchema(o.Module):
 		type(None) : 'null',
 	}
 
+	# ======================================================================
+	# FRAMEWORK METHODS
+	# ======================================================================
+
 	# Build schema on call
 	# ----------------------------------------------------------------------
 	def __new__(cls, t_cls):
 		return cls.build(t_cls)
-
-	# Build class schema
-	# ----------------------------------------------------------------------
-	@classmethod
-	def build(cls, t_cls):
-		if t_cls is o.T:
-			raise TypeError('`o.T` has no single JSON schema')
-
-		defs   = {}
-		schema = cls._get_root_schema(t_cls, defs, ())
-
-		if defs:
-			schema = {**schema, '$defs' : defs}
-
-		return schema
+	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
 
 	# Build root schema
 	# ----------------------------------------------------------------------
@@ -52,18 +44,14 @@ class JsonSchema(o.Module):
 	@classmethod
 	def _get_class_schema(cls, t_cls, defs, stack):
 		annotation = getattr(t_cls, '__annotation__', UNDEFINED)
-		schema     = None
 
 		if annotation is UNDEFINED:
 			name = cls._get_def_name(t_cls)
 
-			if name in stack:
-				schema = { '$ref' : f'#/$defs/{name}' }
-			else:
-				if name not in defs:
-					defs[name] = cls._get_object_schema(t_cls, defs, stack + (name,))
+			if name not in stack and name not in defs:
+				defs[name] = cls._get_object_schema(t_cls, defs, stack + (name,))
 
-				schema = { '$ref' : f'#/$defs/{name}' }
+			schema = { '$ref' : f'#/$defs/{name}' }
 		else:
 			schema = cls._get_annotation_schema(annotation, defs, stack)
 
@@ -73,8 +61,8 @@ class JsonSchema(o.Module):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _get_annotation_schema(cls, annotation, defs, stack):
-		annotation = o.Annotation(annotation)
-		schema     = None
+		if not isinstance(annotation, o.Annotation):
+			annotation = o.Annotation(annotation)
 
 		if annotation.is_union:
 			schema = {
@@ -100,25 +88,25 @@ class JsonSchema(o.Module):
 		elif annotation.is_dict:
 			key = annotation.key.annotation if annotation.key is not None else str
 
-			if key is not str:
+			if key is str:
+				value = {}
+
+				if annotation.value is not None:
+					value = cls._get_annotation_schema(annotation.value, defs, stack)
+
+				schema = {
+					'type'                 : 'object',
+					'additionalProperties' : value,
+				}
+			else:
 				raise TypeError(f'JSON schema requires string dict keys, got `{annotation}`')
-
-			value = {}
-
-			if annotation.value is not None:
-				value = cls._get_annotation_schema(annotation.value, defs, stack)
-
-			schema = {
-				'type'                 : 'object',
-				'additionalProperties' : value,
-			}
 		else:
 			json_type = cls.ATOMIC_TYPES.get(annotation.origin, UNDEFINED)
 
-			if json_type is UNDEFINED:
+			if json_type is not UNDEFINED:
+				schema = { 'type' : json_type }
+			else:
 				raise TypeError(f'Unsupported JSON schema annotation: `{annotation}`')
-
-			schema = { 'type' : json_type }
 
 		return schema
 
@@ -131,9 +119,10 @@ class JsonSchema(o.Module):
 
 		with o.services.Memory.read():
 			for name, field in cls._get_fields(t_cls).items():
-				properties[name] = cls._get_field_schema(field, defs, stack)
+				field_schema, is_required = cls._get_field_schema(field, defs, stack)
+				properties[name] = field_schema
 
-				if not cls._is_field_optional(field):
+				if is_required:
 					required.append(name)
 
 		schema = {
@@ -147,18 +136,34 @@ class JsonSchema(o.Module):
 
 		return schema
 
-	# Build field schema
+	# Build field schema and requiredness together
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _get_field_schema(cls, field, defs, stack):
-		field_cls      = field.type
-		schema         = cls._get_class_schema(field_cls, defs, stack)
-		nullable       = cls._is_field_nullable(field)
+		field_cls  = field.type
+		field_type = getattr(field_cls, '__annotation__', UNDEFINED)
+
+		if field_type is UNDEFINED:
+			schema   = cls._get_class_schema(field_cls, defs, stack)
+			nullable = False
+		else:
+			if isinstance(field_type, o.Annotation):
+				annotation = field_type
+			else:
+				annotation = o.Annotation(field_type)
+
+			schema   = cls._get_annotation_schema(annotation, defs, stack)
+			nullable = annotation.is_optional
+
+		default  = getattr(field, 'default', UNDEFINED)
+		nullable = nullable or default is None
 
 		if nullable:
 			schema = cls._make_nullable(schema)
 
-		return schema
+		required = default is UNDEFINED and not nullable
+
+		return schema, required
 
 	# Merge inherited field view
 	# ----------------------------------------------------------------------
@@ -170,33 +175,9 @@ class JsonSchema(o.Module):
 			namespace = base.__dict__.get('_')
 
 			if namespace is not None:
-				for name, field in namespace.items():
-					fields[name] = field
+				fields.update(namespace.items())
 
 		return fields
-
-	# Check field optionality
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _is_field_optional(cls, field):
-		default  = getattr(field, 'default', UNDEFINED)
-		optional = cls._is_field_nullable(field) or (default is not UNDEFINED)
-
-		return optional
-
-	# Check field nullability
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _is_field_nullable(cls, field):
-		field_cls      = field.type
-		field_type     = getattr(field_cls, '__annotation__', UNDEFINED)
-		default        = getattr(field, 'default', UNDEFINED)
-		field_nullable = False
-
-		if field_type is not UNDEFINED:
-			field_nullable = o.Annotation(field_type).is_optional
-
-		return field_nullable or (default is None)
 
 	# Get stable definition name
 	# ----------------------------------------------------------------------
@@ -225,5 +206,24 @@ class JsonSchema(o.Module):
 			if not has_null:
 				any_of.append({ 'type' : 'null' })
 				schema['anyOf'] = any_of
+
+		return schema
+
+# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
+
+	# Build class schema
+	# ----------------------------------------------------------------------
+	@classmethod
+	def build(cls, t_cls):
+		if t_cls is not o.T:
+			defs   = {}
+			schema = cls._get_root_schema(t_cls, defs, ())
+
+			if defs:
+				schema = {**schema, '$defs' : defs}
+		else:
+			raise TypeError('`o.T` has no single JSON schema')
 
 		return schema
