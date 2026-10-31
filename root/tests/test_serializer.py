@@ -197,6 +197,33 @@ class TestSerializer(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Restore concrete subclasses in fields with typed collection annotations.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_polymorphic_collections_roundtrip(cls):
+		state = cls._patch_runtime()
+		try:
+			root_name = os.path.basename(state['root'])
+			Base = o.T.extend(f'SerializerBase_{root_name}', label=str)
+			Derived = Base.extend('Derived', conclusion=str)
+			Parent = o.T.extend(
+				f'SerializerHolder_{root_name}',
+				reactions=dict[str, Base],
+				entries=list[Base],
+			)
+			child = Derived(label='seen', conclusion='learned')
+			instance = Parent(reactions={'alex': child}, entries=[child])
+			spec = instance.serialize()
+			copy = o.T.deserialize(spec)
+
+			assert spec['instance']['reactions']['__class__'] == 'o.T.Dict'
+			assert spec['instance']['reactions']['__items__']['alex']['__class__'] == Derived.__proto__
+			assert isinstance(copy.reactions['alex'], Derived)
+			assert isinstance(copy.entries[0], Derived)
+			assert copy.reactions['alex'].conclusion == 'learned'
+			assert copy.entries[0].conclusion == 'learned'
+		finally:
+			cls._restore_runtime(state)
 
 if __name__ == '__main__':
 	TestSerializer.run()

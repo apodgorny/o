@@ -275,6 +275,20 @@ class T(o.Module, metaclass=o.TMeta):
 	def deserialize(cls, spec):
 		return o.Deserializer.deserialize(spec)
 
+	# Get shallow Python representation without losing nested entity types.
+	# ----------------------------------------------------------------------
+	def to_data_shallow(self):
+		if self.__class__.__is_atom__ or isinstance(self, (o.Dict, o.List)):
+			result = self.__cast_out__()
+		else:
+			result = {
+				name: child
+				for name, _, child in self.__dependants__()
+				if isinstance(name, str)
+			}
+
+		return result
+
 	# Convert object tree into visible Python data
 	# ----------------------------------------------------------------------
 	def to_data(self):

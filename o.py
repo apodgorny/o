@@ -92,7 +92,7 @@ class O(A):
 
 		if not isinstance(value, type_cls):
 			if isinstance(value, o.T):
-				value = value.to_data()
+				value = value.to_data_shallow()
 
 			if type_cls is o.T:
 				result = o.T(value)

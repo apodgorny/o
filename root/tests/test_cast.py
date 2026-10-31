@@ -126,6 +126,57 @@ class TestCast(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Keep nested entities intact in shallow representations.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_shallow_data_preserves_nested_types(cls):
+		state = cls._patch_runtime()
+		try:
+			root_name = os.path.basename(state['root'])
+			Base = o.T.extend(f'ShallowBase_{root_name}', label=str)
+			Derived = Base.extend('Derived', conclusion=str)
+			Parent = o.T.extend(f'ShallowParent_{root_name}', child=Base)
+			child = Derived(label='seen', conclusion='learned')
+			parent = Parent(child=child)
+
+			assert parent.to_data_shallow()['child'].id == child.id
+			assert o.Dict({'alex': child}).to_data_shallow()['alex'].id == child.id
+			assert o.List([child]).to_data_shallow()[0].id == child.id
+			assert o.Str('hello').to_data_shallow() == 'hello'
+		finally:
+			cls._restore_runtime(state)
+
+	# Preserve nested subclasses across typed collection and object casts.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_cast_preserves_nested_subclasses(cls):
+		state = cls._patch_runtime()
+		try:
+			root_name = os.path.basename(state['root'])
+			Base = o.T.extend(f'CastBase_{root_name}', label=str)
+			Derived = Base.extend('Derived', conclusion=str)
+			Source = o.T.extend(f'CastSource_{root_name}', child=Base)
+			Target = o.T.extend(f'CastTarget_{root_name}', child=Base)
+			Holder = o.T.extend(
+				f'CastHolder_{root_name}',
+				reactions=dict[str, Base],
+				entries=list[Base],
+			)
+			child = Derived(label='seen', conclusion='learned')
+			holder = Holder(
+				reactions=o.Dict({'alex': child}),
+				entries=o.List([child]),
+			)
+			converted = o.cast(Target, Source(child=child))
+
+			assert isinstance(holder.reactions['alex'], Derived)
+			assert isinstance(holder.entries[0], Derived)
+			assert holder.reactions['alex'].id == child.id
+			assert holder.entries[0].id == child.id
+			assert isinstance(converted.child, Derived)
+			assert converted.child.id == child.id
+		finally:
+			cls._restore_runtime(state)
 
 if __name__ == '__main__':
 	TestCast.run()
