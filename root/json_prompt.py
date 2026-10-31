@@ -249,7 +249,11 @@ class JsonPrompt(o.Module):
 				for name, field in namespace.items():
 					fields[name] = field
 
-		return fields
+		return {
+			name: field
+			for name, field in fields.items()
+			if getattr(field, 'prompt', True)
+		}
 
 	# Check field nullability
 	# ----------------------------------------------------------------------
