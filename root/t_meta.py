@@ -591,6 +591,11 @@ class TMeta(type(o.Module)):
 	def to_json_schema(cls):
 		return o.JsonSchema(cls)
 
+	# Export schema for LLM generation, excluding non-prompt fields.
+	# ----------------------------------------------------------------------
+	def to_prompt_schema(cls):
+		return o.PromptSchema(cls)
+
 	# Export JSON prompt example
 	# ----------------------------------------------------------------------
 	def to_prompt(cls):
