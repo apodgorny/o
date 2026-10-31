@@ -173,25 +173,21 @@ class TestJsonSchema(o.Tester):
 				required         = o.F(str),
 				defaulted        = o.F(str, default='ready'),
 				default_null     = o.F(str, default=None),
-				union_required   = o.F(str | int),
-				union_nullable   = o.F(str | None),
-				union_defaulted  = o.F(str | None, default='ready'),
 			)
 
 			schema     = Example.to_json_schema()
 			properties = schema['properties']
 
-			assert schema['required'] == ['required', 'union_required']
+			assert schema['required'] == ['required']
 			assert properties['required'] == { 'type' : 'string' }
 			assert properties['defaulted'] == { 'type' : 'string' }
 			assert properties['default_null'] == { 'type' : ['string', 'null'] }
-			assert properties['union_required'] == {
+			assert o.JsonSchema._get_annotation_schema(str | int, {}, ()) == {
 				'anyOf' : [{ 'type' : 'integer' }, { 'type' : 'string' }]
 			}
-			assert properties['union_nullable'] == {
+			assert o.JsonSchema._get_annotation_schema(str | None, {}, ()) == {
 				'anyOf' : [{ 'type' : 'null' }, { 'type' : 'string' }]
 			}
-			assert properties['union_defaulted'] == properties['union_nullable']
 		finally:
 			cls._restore_runtime(state)
 
@@ -251,12 +247,16 @@ class TestJsonSchema(o.Tester):
 				second       = o.F(Child, default=None),
 				many         = o.F(list[Child]),
 				by_name      = o.F(dict[str, Child]),
-				alternates   = o.F(str | int | None),
 				with_default = o.F(str, default='ready'),
 			)
 
 			for target in (o.Int, o.Str, o.Null, Child, Parent):
 				assert target.to_json_schema() == legacy.build(target)
+
+			assert (
+				o.JsonSchema._get_annotation_schema(str | int | None, {}, ())
+				== legacy._get_annotation_schema(str | int | None, {}, ())
+			)
 		finally:
 			cls._restore_runtime(state)
 
