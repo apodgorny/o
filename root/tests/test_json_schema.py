@@ -119,7 +119,6 @@ class TestJsonSchema(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-
 	# Filter only generated fields, including nested objects, without changing the full type schema.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -160,7 +159,6 @@ class TestJsonSchema(o.Tester):
 			assert parent.show_time == '2026-10-30T12:00:00+00:00'
 		finally:
 			cls._restore_runtime(state)
-
 
 	# Preserve optionality for defaults, nullable unions, and required unions.
 	# ----------------------------------------------------------------------
@@ -231,7 +229,6 @@ class TestJsonSchema(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-
 	# Compare representative schemas directly with the archived implementation.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -250,11 +247,11 @@ class TestJsonSchema(o.Tester):
 			)
 			Parent = o.T.extend(
 				f'JsonSchemaLegacyParent_{root_name}',
-				first       = o.F(Child),
-				second      = o.F(Child, default=None),
-				many        = o.F(list[Child]),
-				by_name     = o.F(dict[str, Child]),
-				alternates  = o.F(str | int | None),
+				first        = o.F(Child),
+				second       = o.F(Child, default=None),
+				many         = o.F(list[Child]),
+				by_name      = o.F(dict[str, Child]),
+				alternates   = o.F(str | int | None),
 				with_default = o.F(str, default='ready'),
 			)
 
