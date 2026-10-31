@@ -161,5 +161,75 @@ class TestJsonSchema(o.Tester):
 			cls._restore_runtime(state)
 
 
+	# Preserve optionality for defaults, nullable unions, and required unions.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_schema_optional_fields_and_unions(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Example = o.T.extend(
+				f'JsonSchemaOptionality_{root_name}',
+				required         = o.F(str),
+				defaulted        = o.F(str, default='ready'),
+				default_null     = o.F(str, default=None),
+				union_required   = o.F(str | int),
+				union_nullable   = o.F(str | None),
+				union_defaulted  = o.F(str | None, default='ready'),
+			)
+
+			schema     = Example.to_json_schema()
+			properties = schema['properties']
+
+			assert schema['required'] == ['required', 'union_required']
+			assert properties['required'] == { 'type' : 'string' }
+			assert properties['defaulted'] == { 'type' : 'string' }
+			assert properties['default_null'] == { 'type' : ['string', 'null'] }
+			assert properties['union_required'] == {
+				'anyOf' : [{ 'type' : 'integer' }, { 'type' : 'string' }]
+			}
+			assert properties['union_nullable'] == {
+				'anyOf' : [{ 'type' : 'null' }, { 'type' : 'string' }]
+			}
+			assert properties['union_defaulted'] == properties['union_nullable']
+		finally:
+			cls._restore_runtime(state)
+
+	# Keep shared child definitions reusable and preserve unsupported-key errors.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_schema_repeated_children_and_dict_key_errors(cls):
+		state = cls._patch_runtime()
+
+		try:
+			root_name = os.path.basename(state['root'])
+			Child = o.T.extend(f'JsonSchemaSharedChild_{root_name}', value=str)
+			Pair = o.T.extend(
+				f'JsonSchemaSharedPair_{root_name}',
+				left  = o.F(Child),
+				right = o.F(Child),
+			)
+			schema = Pair.to_json_schema()
+			child_ref = { '$ref' : f'#/$defs/{Child.__proto__}' }
+
+			assert schema['properties']['left'] == child_ref
+			assert schema['properties']['right'] == child_ref
+			assert len(schema['$defs']) == 1
+			assert schema['required'] == ['left', 'right']
+
+			Invalid = o.T.extend(f'JsonSchemaInvalidKeys_{root_name}', dict[int, str])
+			raised = False
+
+			try:
+				Invalid.to_json_schema()
+			except TypeError as error:
+				raised = 'JSON schema requires string dict keys' in str(error)
+
+			assert raised
+		finally:
+			cls._restore_runtime(state)
+
+
 if __name__ == '__main__':
 	TestJsonSchema.run()
