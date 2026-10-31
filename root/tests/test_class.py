@@ -1260,11 +1260,12 @@ class TestClass(o.Tester):
 			class_name = f'ExtendDifferentProps_{root_name}'
 
 			First  = o.T.extend(class_name, name=o.F(str, description='alpha'))
+			old_hash = First.__shape_hash__
 			Second = o.T.extend(class_name, name=o.F(str, description='beta'))
 
-			assert Second is not First
+			assert Second is First
 			assert Second._.name.description == 'beta'
-			assert Second.__shape_hash__ != First.__shape_hash__
+			assert Second.__shape_hash__ != old_hash
 		finally:
 			cls._restore_runtime(state)
 
