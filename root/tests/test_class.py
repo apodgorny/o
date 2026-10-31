@@ -1263,7 +1263,7 @@ class TestClass(o.Tester):
 			old_hash = First.__shape_hash__
 			Second = o.T.extend(class_name, name=o.F(str, description='beta'))
 
-			assert Second is First
+			assert Second is not First
 			assert Second._.name.description == 'beta'
 			assert Second.__shape_hash__ != old_hash
 		finally:
