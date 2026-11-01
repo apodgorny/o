@@ -378,6 +378,23 @@ class TMeta(type(o.Module)):
 
 		return props
 
+	# Replace persisted field definitions without touching instances
+	# ----------------------------------------------------------------------
+	def __replace_fields__(cls, fields, annotation=None):
+		for name in cls.__class__.__read__(cls):
+			delattr(cls, name)
+
+		for name, field in fields.items():
+			if not isinstance(field, o.F):
+				field = o.F(field)
+
+			cls.__write_field__(name, field)
+
+		cls.__zone__.set(
+			'__shape_hash__',
+			cls.__class__.__get_shape_hash__(fields, annotation)
+		)
+
 	# Publish field view on Python class
 	# ----------------------------------------------------------------------
 	def __publish__(cls, fields):
@@ -603,35 +620,48 @@ class TMeta(type(o.Module)):
 
 	# Extend
 	# ----------------------------------------------------------------------
-	def extend(cls, __name__, __annotation__=None, __drop__=False, **fields):
-		replaced = False
+	def extend(cls, __name__, __annotation__=None, **fields):
+		base_cls = (
+			cls.__class__.__embody__(__annotation__)
+			if __annotation__ is not None else cls
+		)
+		new_cls       = getattr(base_cls, __name__, None)
+		new_hash      = cls.__class__.__get_shape_hash__(fields, __annotation__)
+		shape_changed = new_cls is not None and new_cls.__shape_hash__ != new_hash
 
-		if hasattr(cls, __name__):
-			existing = getattr(cls, __name__)
+		if shape_changed:
+			changes = o.services.Migrations.prepare(new_cls, fields, __annotation__)
 
-			if __drop__:
-				existing.drop()
+		try:
+			if shape_changed:
+				with o.services.Memory.write():
+					o.services.Migrations.apply(changes)
+					new_cls.__replace_fields__(fields, __annotation__)
+
+				for entity in tuple(o.__entities__.values()):
+					if isinstance(entity, new_cls):
+						o.unregister_entity(entity)
+
+				o.unregister_entity(new_cls)
+
+			if new_cls is None or shape_changed:
+				has_annotation = __annotation__ is not None
+				bases          = (cls, __annotation__) if has_annotation else (cls,)
+				namespace      = (
+					{'__is_runtime_defined__': True}
+					if shape_changed else {**fields, '__is_runtime_defined__': True}
+				)
+
+				new_cls = cls.__class__.__new__(cls.__class__, __name__, bases, namespace)
+
+				if new_cls.__shape_hash__ != new_hash:
+					new_cls.__shape_hash__ = new_hash
+					new_cls.__zone__.set('__shape_hash__', new_hash)
+
+		except BaseException as error:
+			if shape_changed:
+				raise SystemExit(f'Migration failed; restart required: {error}') from error
 			else:
-				new_hash = cls.__class__.__get_shape_hash__(fields, __annotation__)
-
-				if existing.__shape_hash__ == new_hash:
-					return existing
-
-				if existing.has_persistent_instances():
-					raise TypeError(
-						f'Cannot redefine `{existing.__proto__}`: migration required'
-					)
-
-				existing.drop()
-				replaced = True
-
-		has_annotation = __annotation__ is not None
-		namespace      = {**fields, '__is_runtime_defined__': True}
-		bases          = (cls, __annotation__) if has_annotation else (cls, )
-		new_cls        = cls.__class__.__new__(cls.__class__, __name__, bases, namespace)
-
-		if replaced:
-			print(f'ℹ️ Schema changed: `{new_cls.__proto__}`; automatically replaced')
+				raise
 
 		return new_cls
-
