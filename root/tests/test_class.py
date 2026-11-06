@@ -14,6 +14,10 @@ UNDEFINED = o.Undefined
 class TestClass(o.Tester):
 	RUNTIME_PREFIX = 'o_class_'
 
+	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
+
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _patch_runtime(cls):
@@ -78,6 +82,10 @@ class TestClass(o.Tester):
 		result = getattr(o.tests_runtime, class_name)
 
 		return result
+
+	# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
 
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -1082,52 +1090,51 @@ class TestClass(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Create an absent class without requesting a migration.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_extend_with_drop_is_noop_when_class_absent(cls):
+	def test_extend_creates_absent_class(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name  = os.path.basename(state['root'])
-			class_name = f'ExtendDropAbsent_{root_name}'
+			class_name = f'ExtendAbsent_{root_name}'
 
-			Made = o.T.extend(class_name, __drop__=True, name=str)
+			Made = o.T.extend(class_name, name=str)
 
 			assert Made.__proto__ == f'o.T.{class_name}'
-			assert Made.__has_field__('name') == True
-			assert o.services.Memory.has(Made.__proto__) == True
+			assert Made._.name.type is o.Str
+			assert o.services.Memory.has(Made.__proto__) is True
+			assert o.T.extend(class_name, name=str) is Made
 		finally:
 			cls._restore_runtime(state)
 
+	# Preserve the class hierarchy when loaded subclasses prevent migration.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_extend_with_drop_cascades_through_existing_subclasses(cls):
+	def test_migration_rejects_loaded_subclasses_without_changes(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name   = os.path.basename(state['root'])
-			parent_name = f'ExtendDropCascadeParent_{root_name}'
-			child_name  = f'ExtendDropCascadeChild_{root_name}'
+			parent_name = f'MigrationParent_{root_name}'
+			child_name  = f'MigrationChild_{root_name}'
 
-			First      = o.T.extend(parent_name, name=str)
-			OldChild   = First.extend(child_name, tag=str)
-			first_inst = First(name='one')
-			old_child_inst = OldChild(name='two', tag='x')
+			Parent   = o.T.extend(parent_name, name=str)
+			Child    = Parent.extend(child_name, tag=str)
+			old_hash = Parent.__shape_hash__
 
-			old_child_proto      = OldChild.__proto__
-			first_inst_proto     = first_inst.__proto__
-			old_child_inst_proto = old_child_inst.__proto__
+			with TestCase().assertRaisesRegex(RuntimeError, 'Migration requires unloaded instances and subclasses'):
+				o.T.extend(parent_name, age=int)
 
-			Second = o.T.extend(parent_name, __drop__=True, age=int)
-
-			assert Second.__has_field__('age') == True
-			assert Second.__has_field__('name') == False
-			assert o.services.Memory.has(old_child_proto) == False
-			assert o.services.Memory.has(first_inst_proto) == False
-			assert o.services.Memory.has(old_child_inst_proto) == False
-			assert OldChild.id not in o.__entities__
-			assert first_inst.id not in o.__entities__
-			assert old_child_inst.id not in o.__entities__
+			assert getattr(o.T, parent_name) is Parent
+			assert getattr(Parent, child_name) is Child
+			assert Parent.__shape_hash__ == old_hash
+			assert Parent._.name.type is o.Str
+			assert Parent.__has_field__('age') is False
+			assert Child._.tag.type is o.Str
+			assert o.services.Memory.has(Parent.__proto__) is True
+			assert o.services.Memory.has(Child.__proto__) is True
 		finally:
 			cls._restore_runtime(state)
 
@@ -1294,98 +1301,75 @@ class TestClass(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Preserve an unrooted loaded instance when migration is rejected.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_extend_with_drop_replaces_existing_class(cls):
+	def test_migration_rejects_loaded_instances_without_changes(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name  = os.path.basename(state['root'])
-			class_name = f'ExtendWithDrop_{root_name}'
+			class_name = f'MigrationLoaded_{root_name}'
 
-			First      = o.T.extend(class_name, name=str)
-			first_inst = First(name='first')
-			first_id   = First.id
+			Original = o.T.extend(class_name, name=str)
+			instance = Original(name='first')
+			old_hash = Original.__shape_hash__
 
-			Second = o.T.extend(class_name, __drop__=True, age=int)
+			assert Original.has_persistent_instances() is False
+			with TestCase().assertRaisesRegex(RuntimeError, 'Migration requires unloaded instances and subclasses'):
+				o.T.extend(class_name, age=int)
 
-			assert Second is not First
-			assert Second.id == first_id
-			assert Second._.age.type is o.Int
-			assert Second.__has_field__('age') == True
-			assert Second.__has_field__('name') == False
-			assert o.__entities__[first_id] is Second
-			assert o.services.Memory.has(first_inst.__proto__) == False
+			assert getattr(o.T, class_name) is Original
+			assert Original.__shape_hash__ == old_hash
+			assert Original._.name.type is o.Str
+			assert Original.__has_field__('age') is False
+			assert instance.name == 'first'
+			assert o.__entities__[Original.id] is Original
+			assert o.__entities__[instance.id] is instance
+			assert o.services.Memory.has(instance.__proto__) is True
 		finally:
 			cls._restore_runtime(state)
 
-	# Replace only schemas without root-reachable instances, including descendants.
+	# Preserve root-reachable data when loaded descendants prevent migration.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_auto_redefine_respects_persistent_instances(cls):
+	def test_migration_preserves_persistent_instances_on_rejection(cls):
 		state = cls._patch_runtime()
 
 		try:
 			suffix = os.path.basename(state['root'])
-			name   = f'RedefineParent_{suffix}'
-			output = StringIO()
 
-			with redirect_stdout(output):
+			for container in ('direct', 'list', 'dict'):
+				name   = f'MigrationPersistent_{suffix}_{container}'
 				Parent = o.T.extend(name, value=int)
 				Child  = Parent.extend('Child', extra=str)
+				child  = Child(value=7, extra='saved')
+				value  = child
 
-				temporary_parent = Parent(value=1)
-				temporary_child  = Child(value=2, extra='temp')
+				if container == 'list':
+					value = o.List([child])
+				elif container == 'dict':
+					value = o.Dict({'child' : child})
 
-				assert Parent.has_persistent_instances() is False
-				assert Child.has_persistent_instances() is False
-				assert o.T.extend(name, value=int) is Parent
-				assert output.getvalue() == ''
+				expected                = value.to_data()
+				o.V.redefine_test_value = value
 
-				Replaced = o.T.extend(name, value=str)
+				try:
+					assert Parent.has_persistent_instances() is True
+					assert Child.has_persistent_instances() is True
 
-				assert Replaced is not Parent
-				assert Replaced._.value.type is o.Str
-				assert o.services.Memory.has(temporary_parent.__proto__) is False
-				assert o.services.Memory.has(temporary_child.__proto__) is False
-				assert output.getvalue().count('Schema changed:') == 1
+					with TestCase().assertRaisesRegex(RuntimeError, 'Migration requires unloaded instances and subclasses'):
+						o.T.extend(name, value=str)
 
-				Child = Replaced.extend('Child', extra=str)
-
-				for container in ('direct', 'list', 'dict'):
-					child = Child(value='saved', extra='child')
-					value = child
-
-					if container == 'list':
-						value = o.List([child])
-					elif container == 'dict':
-						value = o.Dict({'child': child})
-
-					expected = value.to_data()
-					o.V.redefine_test_value = value
-
-					try:
-						assert Replaced.has_persistent_instances() is True
-						assert Child.has_persistent_instances() is True
-
-						with TestCase().assertRaisesRegex(TypeError, 'migration required'):
-							o.T.extend(name, value=float)
-
-						assert o.V.redefine_test_value.to_data() == expected
-						assert Replaced._.value.type is o.Str
-						assert o.T.extend(name, value=str) is Replaced
-						assert output.getvalue().count('Schema changed:') == 1
-					finally:
-						del o.V.redefine_test_value
-
-					assert Replaced.has_persistent_instances() is False
-
-				Again = o.T.extend(name, value=float)
-
-				assert Again._.value.type is o.Float
-				assert o.T.extend(name, value=float) is Again
-				assert output.getvalue().count('Schema changed:') == 2
-				assert len(output.getvalue().splitlines()) == 2
+					assert o.V.redefine_test_value.to_data() == expected
+					assert getattr(o.T, name) is Parent
+					assert Parent.Child is Child
+					assert Parent._.value.type is o.Int
+					assert child.value == 7
+					assert child.extra == 'saved'
+					assert o.services.Memory.has(child.__proto__) is True
+				finally:
+					del o.V.redefine_test_value
 		finally:
 			cls._restore_runtime(state)
 
