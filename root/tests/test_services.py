@@ -4,6 +4,7 @@
 # Verify singular service names, cache ownership, and entity value semantics.
 # ==============================================================================
 
+import inspect
 import time
 
 from unittest.mock import patch
@@ -27,6 +28,12 @@ class TestServices(o.Tester):
 		assert type(o.services.Route).__name__ == 'Route'
 		assert type(o.services.Migration).__name__ == 'Migration'
 		assert o.start.__self__ is o.services.Ontology
+
+	# Keep the fast LMDB policy as the explicit public API default.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_start_sync_default(cls):
+		assert inspect.signature(o.start).parameters['sync'].default is False
 
 	# Resolve loaded classes through their cache keys and annotations.
 	# ----------------------------------------------------------------------

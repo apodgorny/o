@@ -16,16 +16,18 @@ class Ontology(o.Service):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Open storage, initialize dependent services, then load ontology classes.
+	# Start once; path defaults to the caller's ontology/ directory.
+	# sync=False favors fast commits, but a crash may lose data or corrupt LMDB.
+	# sync=True flushes each commit to disk for stronger durability.
 	# ----------------------------------------------------------------------
-	def start(self, path: str | None = None):
+	def start(self, path: str | None = None, sync: bool = False):
 		if path is None:
 			path = os.path.join(os.path.dirname(inspect.currentframe().f_back.f_globals['__file__']), 'ontology')
 
 		o.DATA_DIR = path
 
 		o.services.Cache.initialize()
-		o.services.Memory.initialize()
+		o.services.Memory.initialize(sync=sync)
 		o.services.Id.initialize()
 		o.services.Route.initialize()
 		o.services.Garbage.initialize()

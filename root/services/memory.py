@@ -231,9 +231,11 @@ class Memory(o.Service):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Initialize memory store
+	# Open LMDB with the durability policy supplied by o.start().
+	# sync=False skips the commit-time disk flush; crashes may lose data.
+	# Use sync=True if committed data must survive an OS crash or power loss.
 	# ----------------------------------------------------------------------
-	def initialize(self):
+	def initialize(self, sync: bool = False):
 		path = os.path.realpath(os.path.join(o.__path__, o.DATA_DIR))
 
 		if 'env' in self.__dict__:
@@ -250,7 +252,7 @@ class Memory(o.Service):
 			map_size = self.size,
 			max_dbs  = 1,
 			subdir   = True,
-			sync     = False,
+			sync     = sync,
 		)
 
 		self._read  = None
