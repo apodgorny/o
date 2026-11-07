@@ -1,3 +1,9 @@
+# ==============================================================================
+# SERIALIZER
+# ==============================================================================
+# Serialize ontology class and instance state.
+# ==============================================================================
+
 import o
 
 UNDEFINED = o.Undefined
@@ -217,12 +223,12 @@ class Serializer(o.Module):
 	@classmethod
 	def _deserialize_class(cls, spec):
 		proto  = spec['__proto__']
-		Class  = o.get(proto) if o.exists(proto) else UNDEFINED
+		Class  = o.services.Entity.get(proto) if o.services.Entity.exists(proto) else UNDEFINED
 		parent = UNDEFINED
 
 		if Class is UNDEFINED:
 			parent_proto, class_name = proto.rsplit('.', 1)
-			parent                   = o.get(parent_proto)
+			parent                   = o.services.Entity.get(parent_proto)
 
 			if parent is UNDEFINED:
 				raise TypeError(f'Parent `{parent_proto}` is not found')

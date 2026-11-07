@@ -1,3 +1,9 @@
+# ==============================================================================
+# DICT
+# ==============================================================================
+# Implement persistent dictionary behavior for ontology entities.
+# ==============================================================================
+
 import o
 
 UNDEFINED = o.Undefined
@@ -75,7 +81,7 @@ class Dict(o.T):
 				items[key_id] = value_id
 
 		for key_id in items:
-			key_ids[self._key_id(o.get(key_id))] = key_id
+			key_ids[self._key_id(o.services.Entity.get(key_id))] = key_id
 
 		object.__setattr__(self, '__items__', items)
 		object.__setattr__(self, '__key_ids__', key_ids)
@@ -90,7 +96,7 @@ class Dict(o.T):
 		value_id = self.__items__.get(key_id, UNDEFINED)
 
 		if value_id is not UNDEFINED:
-			value = o.value(value_id)
+			value = o.services.Entity.value(value_id)
 
 		if value is UNDEFINED:
 			raise KeyError(key)
@@ -107,8 +113,8 @@ class Dict(o.T):
 		value_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
 
 		with o.services.Memory.write():
-			key_child   = o.cast(key_type, key)
-			value_child = o.cast(value_type, value)
+			key_child   = o.services.Entity.cast(key_type, key)
+			value_child = o.services.Entity.cast(value_type, value)
 			key_id      = self._item_key_id(key_child)
 			old_value_id = UNDEFINED
 			items       = dict(self.__items__)
@@ -123,7 +129,7 @@ class Dict(o.T):
 
 			if old_value_id != value_child.id:
 				if old_value_id is not UNDEFINED:
-					o.services.Garbage.on_instance_unlink(o.get(old_value_id))
+					o.services.Garbage.on_instance_unlink(o.services.Entity.get(old_value_id))
 
 				o.services.Garbage.on_instance_link(value_child)
 
@@ -139,8 +145,8 @@ class Dict(o.T):
 
 		if key_id in self.__items__:
 			with o.services.Memory.write():
-				o.services.Garbage.on_instance_unlink(o.get(key_id))
-				o.services.Garbage.on_instance_unlink(o.get(self.__items__[key_id]))
+				o.services.Garbage.on_instance_unlink(o.services.Entity.get(key_id))
+				o.services.Garbage.on_instance_unlink(o.services.Entity.get(self.__items__[key_id]))
 				del self.__key_ids__[self._key_id(key)]
 				items = dict(self.__items__)
 				del items[key_id]
@@ -167,9 +173,9 @@ class Dict(o.T):
 			yield key, child_path, child
 
 		for key_id, value_id in self.__items__.items():
-			key        = o.value(key_id)
+			key        = o.services.Entity.value(key_id)
 			child_path = f'{path}[{repr(key)}]'
-			yield key, child_path, o.get(value_id)
+			yield key, child_path, o.services.Entity.get(value_id)
 
 	# Cast to dict
 	# ----------------------------------------------------------------------
@@ -186,8 +192,8 @@ class Dict(o.T):
 
 		with o.services.Memory.write():
 			for key, item in value.items():
-				key_child   = o.cast(key_type, key)
-				value_child = o.cast(value_type, item)
+				key_child   = o.services.Entity.cast(key_type, key)
+				value_child = o.services.Entity.cast(value_type, item)
 				o.services.Garbage.on_instance_link(key_child)
 				o.services.Garbage.on_instance_link(value_child)
 				new_items[key_child.id] = value_child.id
@@ -205,14 +211,14 @@ class Dict(o.T):
 	# ----------------------------------------------------------------------
 	def keys(self):
 		for key_id in self.__items__:
-			yield o.value(key_id)
+			yield o.services.Entity.value(key_id)
 
 	# Iterate dict items
 	# ----------------------------------------------------------------------
 	def items(self):
 		for key_id, value_id in self.__items__.items():
-			key   = o.value(key_id)
-			value = o.value(value_id)
+			key   = o.services.Entity.value(key_id)
+			value = o.services.Entity.value(value_id)
 
 			yield key, value
 

@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST CAST
+# ==============================================================================
+# Verify conversions between Python values and ontology entities.
+# ==============================================================================
+
 import os
 
 import o
@@ -167,7 +173,7 @@ class TestCast(o.Tester):
 				reactions=o.Dict({'alex': child}),
 				entries=o.List([child]),
 			)
-			converted = o.cast(Target, Source(child=child))
+			converted = o.services.Entity.cast(Target, Source(child=child))
 
 			assert isinstance(holder.reactions['alex'], Derived)
 			assert isinstance(holder.entries[0], Derived)

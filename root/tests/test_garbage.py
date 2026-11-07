@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST GARBAGE
+# ==============================================================================
+# Verify reference counting and collection of unreachable entities.
+# ==============================================================================
+
 import os
 import shutil
 import tempfile
@@ -70,8 +76,8 @@ class TestGarbage(o.Tester):
 		state = {
 			'root'         : root,
 			'data_dir'     : o.DATA_DIR,
-			'entities'     : dict(o.__entities__),
-			'cast_map'     : dict(o.__cast_map__),
+			'entities'     : dict(o.services.Cache.entities),
+			'cast_map'     : dict(o.services.Cache.cast_map),
 			'value'        : o.__dict__.get('V', UNDEFINED),
 			'old_size_key' : o.MEMORY_SIZE,
 		}
@@ -92,11 +98,11 @@ class TestGarbage(o.Tester):
 		o.DATA_DIR = state['data_dir']
 		o.MEMORY_SIZE = state['old_size_key']
 
-		o.__entities__.clear()
-		o.__entities__.update(state['entities'])
+		o.services.Cache.entities.clear()
+		o.services.Cache.entities.update(state['entities'])
 
-		o.__cast_map__.clear()
-		o.__cast_map__.update(state['cast_map'])
+		o.services.Cache.cast_map.clear()
+		o.services.Cache.cast_map.update(state['cast_map'])
 
 		if state['value'] is UNDEFINED:
 			if 'V' in o.__dict__:
@@ -236,7 +242,7 @@ class TestGarbage(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			value = o.ensure_value()
+			value = o.services.Entity.ensure_value()
 			value.foo = 1
 
 			assert value.foo == 1

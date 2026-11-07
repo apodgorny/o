@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST CLASS
+# ==============================================================================
+# Verify ontology class creation, persistence, and reconstruction.
+# ==============================================================================
+
 import os
 import shutil
 import sys
@@ -35,8 +41,8 @@ class TestClass(o.Tester):
 			'source_root'   : source_root,
 			'registry'      : registry_state,
 			'runtime'       : runtime_state,
-			'entities'      : dict(o.__entities__),
-			'cast_map'      : dict(o.__cast_map__),
+			'entities'      : dict(o.services.Cache.entities),
+			'cast_map'      : dict(o.services.Cache.cast_map),
 			'modules'       : [],
 			'paths'         : [],
 		}
@@ -46,11 +52,11 @@ class TestClass(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _restore_runtime(cls, state):
-		o.__entities__.clear()
-		o.__entities__.update(state['entities'])
+		o.services.Cache.entities.clear()
+		o.services.Cache.entities.update(state['entities'])
 
-		o.__cast_map__.clear()
-		o.__cast_map__.update(state['cast_map'])
+		o.services.Cache.cast_map.clear()
+		o.services.Cache.cast_map.update(state['cast_map'])
 
 		for module_name in state['modules']:
 			if module_name in sys.modules:
@@ -186,7 +192,7 @@ class TestClass(o.Tester):
 
 			entity_id = FieldPropsGetterAndSetter.id
 
-			del o.__entities__[entity_id]
+			del o.services.Cache.entities[entity_id]
 
 			reopened = o.T.FieldPropsGetterAndSetter
 
@@ -282,7 +288,7 @@ class TestClass(o.Tester):
 			assert base.__annotation__ == o.Annotation(list[str])
 			assert base.__annotation__.annotation == list[str]
 
-			del o.__entities__[ClassAnnotationCycle.id]
+			del o.services.Cache.entities[ClassAnnotationCycle.id]
 			reopened = getattr(base, class_name)
 
 			assert reopened.__proto__ == ClassAnnotationCycle.__proto__
@@ -376,7 +382,7 @@ class TestClass(o.Tester):
 
 			entity_id = MaterializationThroughGetattr.id
 
-			del o.__entities__[entity_id]
+			del o.services.Cache.entities[entity_id]
 			reopened = getattr(o.T, class_name)
 
 			assert reopened.id == entity_id
@@ -422,8 +428,8 @@ class TestClass(o.Tester):
 			CastMapAndEmbodimentReuseOne = o.T.extend(f'CastMapAndEmbodimentReuseOne_{root_name}', list[dict[str, int]])
 			CastMapAndEmbodimentReuseTwo = o.T.extend(f'CastMapAndEmbodimentReuseTwo_{root_name}', list[dict[str, int]])
 
-			assert o.__cast_map__[int] == o.Int.__proto__
-			assert o.__cast_map__[str] == o.Str.__proto__
+			assert o.services.Cache.cast_map[int] == o.Int.__proto__
+			assert o.services.Cache.cast_map[str] == o.Str.__proto__
 			assert CastMapAndEmbodimentReuseOne.__bases__[0] is CastMapAndEmbodimentReuseTwo.__bases__[0]
 		finally:
 			cls._restore_runtime(state)
@@ -437,9 +443,9 @@ class TestClass(o.Tester):
 			class_name                = f'ExistsAlignsWithClassRoom_{os.path.basename(state["root"])}'
 			ExistsAlignsWithClassRoom = o.T.extend(class_name)
 
-			assert o.exists(ExistsAlignsWithClassRoom.__proto__) == True
-			assert o.exists(ExistsAlignsWithClassRoom.id) == True
-			assert o.exists('o.T.MissingClass') == False
+			assert o.services.Entity.exists(ExistsAlignsWithClassRoom.__proto__) == True
+			assert o.services.Entity.exists(ExistsAlignsWithClassRoom.id) == True
+			assert o.services.Entity.exists('o.T.MissingClass') == False
 		finally:
 			cls._restore_runtime(state)
 
@@ -462,13 +468,13 @@ class TestClass(o.Tester):
 			)
 
 			class_id = GetReconstructsClassOnCacheMiss.id
-			loaded   = o.get(class_id)
+			loaded   = o.services.Entity.get(class_id)
 
 			assert loaded is GetReconstructsClassOnCacheMiss
 
-			del o.__entities__[class_id]
+			del o.services.Cache.entities[class_id]
 
-			reopened = o.get(class_id)
+			reopened = o.services.Entity.get(class_id)
 			t1       = reopened()
 
 			assert reopened.id == class_id
@@ -495,7 +501,7 @@ class TestClass(o.Tester):
 			)
 
 			assert SourceBackedClassPersistsOModule.__has_own_module__ == True
-			assert o.get_route(SourceBackedClassPersistsOModule.__route__)['proto'] == SourceBackedClassPersistsOModule.__proto__
+			assert o.services.Route.get(SourceBackedClassPersistsOModule.__route__)['proto'] == SourceBackedClassPersistsOModule.__proto__
 		finally:
 			cls._restore_runtime(state)
 
@@ -546,16 +552,16 @@ class TestClass(o.Tester):
 			id       = x.id
 
 			for entity_id in [class_id, id]:
-				if entity_id in o.__entities__:
-					del o.__entities__[entity_id]
+				if entity_id in o.services.Cache.entities:
+					del o.services.Cache.entities[entity_id]
 
 			if module_key in sys.modules:
 				del sys.modules[module_key]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert reopened.__class__.__proto__ == f'o.T.{class_name}'
-			assert o.get_route(reopened.__class__.__route__)['proto'] == reopened.__class__.__proto__
+			assert o.services.Route.get(reopened.__class__.__route__)['proto'] == reopened.__class__.__proto__
 			assert reopened.name == 'alex'
 			assert list(reopened.items) == [1, 2]
 			assert dict(reopened.meta.items()) == {'lang': 'uk'}
@@ -587,10 +593,10 @@ class TestClass(o.Tester):
 			id       = x.id
 
 			for entity_id in [class_id, id]:
-				if entity_id in o.__entities__:
-					del o.__entities__[entity_id]
+				if entity_id in o.services.Cache.entities:
+					del o.services.Cache.entities[entity_id]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert reopened.__class__.__proto__ == f'o.T.{class_name}'
 			assert reopened.__class__.__route__ is UNDEFINED
@@ -626,10 +632,10 @@ class TestClass(o.Tester):
 			assert o.services.Memory.get(f'{proto}.description', UNDEFINED) is not UNDEFINED
 
 			for key in [class_id, class_proto, id, proto]:
-				if key in o.__entities__:
-					del o.__entities__[key]
+				if key in o.services.Cache.entities:
+					del o.services.Cache.entities[key]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert reopened.__class__.__proto__ == class_proto
 			assert reopened.__class__.description == class_value
@@ -665,11 +671,11 @@ class TestClass(o.Tester):
 			class_proto = FieldAddedLaterPersists.__proto__
 
 			for key in [class_id, class_proto, x_before_id, x_before_proto]:
-				if key in o.__entities__:
-					del o.__entities__[key]
+				if key in o.services.Cache.entities:
+					del o.services.Cache.entities[key]
 
-			ReloadedClass = o.get(class_id)
-			x_before      = o.get(x_before_id)
+			ReloadedClass = o.services.Entity.get(class_id)
+			x_before      = o.services.Entity.get(x_before_id)
 
 			assert ReloadedClass.tag == field_value
 			assert x_before.tag == before_value
@@ -683,10 +689,10 @@ class TestClass(o.Tester):
 			assert x_after.tag == after_value
 
 			for key in [x_after_id, x_after_proto]:
-				if key in o.__entities__:
-					del o.__entities__[key]
+				if key in o.services.Cache.entities:
+					del o.services.Cache.entities[key]
 
-			x_after = o.get(x_after_id)
+			x_after = o.services.Entity.get(x_after_id)
 
 			assert x_after.tag == after_value
 		finally:
@@ -711,7 +717,7 @@ class TestClass(o.Tester):
 			RuntimeChild = SourceParentRuntimeChild.extend(child_name)
 
 			assert RuntimeChild.__bases__[0] is SourceParentRuntimeChild
-			assert o.get_route(SourceParentRuntimeChild.__route__)['proto'] == SourceParentRuntimeChild.__proto__
+			assert o.services.Route.get(SourceParentRuntimeChild.__route__)['proto'] == SourceParentRuntimeChild.__proto__
 			assert RuntimeChild.__route__ is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
@@ -737,7 +743,7 @@ class TestClass(o.Tester):
 
 			assert RuntimeParentSourceChild in LoadedChild.__mro__[1:]
 			assert RuntimeParentSourceChild.__route__ is UNDEFINED
-			assert o.get_route(LoadedChild.__route__)['proto'] == LoadedChild.__proto__
+			assert o.services.Route.get(LoadedChild.__route__)['proto'] == LoadedChild.__proto__
 		finally:
 			cls._restore_runtime(state)
 
@@ -756,8 +762,8 @@ class TestClass(o.Tester):
 			outer_id = NestedSubclassProtoChainMaterialization.id
 			inner_id = Inner.id
 
-			del o.__entities__[outer_id]
-			del o.__entities__[inner_id]
+			del o.services.Cache.entities[outer_id]
+			del o.services.Cache.entities[inner_id]
 
 			reopened = getattr(getattr(o.T, outer_name), inner_name)
 
@@ -961,10 +967,10 @@ class TestClass(o.Tester):
 			assert o.services.Memory.has(f'{parent_inst_proto}.name') == False
 			assert o.services.Memory.has(f'{child_inst_proto}.age') == False
 
-			assert parent_id not in o.__entities__
-			assert child_id not in o.__entities__
-			assert parent_inst_id not in o.__entities__
-			assert child_inst_id not in o.__entities__
+			assert parent_id not in o.services.Cache.entities
+			assert child_id not in o.services.Cache.entities
+			assert parent_inst_id not in o.services.Cache.entities
+			assert child_inst_id not in o.services.Cache.entities
 		finally:
 			cls._restore_runtime(state)
 
@@ -987,12 +993,12 @@ class TestClass(o.Tester):
 
 			assert o.services.Memory.has(one_proto) == False
 			assert o.services.Memory.has(f'{one_proto}.name') == False
-			assert one_id not in o.__entities__
+			assert one_id not in o.services.Cache.entities
 
 			assert o.services.Memory.has(Owner.__proto__) == True
 			assert o.services.Memory.has(two_proto) == True
 			assert o.services.Memory.has(f'{two_proto}.name') == True
-			assert two.id in o.__entities__
+			assert two.id in o.services.Cache.entities
 		finally:
 			cls._restore_runtime(state)
 
@@ -1071,7 +1077,7 @@ class TestClass(o.Tester):
 			for proto in protos:
 				assert o.services.Memory.has(proto) == False
 			for entity_id in ids:
-				assert entity_id not in o.__entities__
+				assert entity_id not in o.services.Cache.entities
 		finally:
 			cls._restore_runtime(state)
 
@@ -1208,7 +1214,7 @@ class TestClass(o.Tester):
 					Current = Parent.Empty
 					if legacy:
 						Current.__zone__.unset('__shape_hash__')
-					del o.__entities__[Current.id]
+					del o.services.Cache.entities[Current.id]
 
 					Reopened = Parent.Empty
 					assert Reopened.__shape_hash__ == expected
@@ -1289,7 +1295,7 @@ class TestClass(o.Tester):
 			entity_id  = Original.id
 			original_h = Original.__shape_hash__
 
-			del o.__entities__[entity_id]
+			del o.services.Cache.entities[entity_id]
 
 			Reopened = getattr(o.T, class_name)
 
@@ -1324,8 +1330,8 @@ class TestClass(o.Tester):
 			assert Original._.name.type is o.Str
 			assert Original.__has_field__('age') is False
 			assert instance.name == 'first'
-			assert o.__entities__[Original.id] is Original
-			assert o.__entities__[instance.id] is instance
+			assert o.services.Cache.entities[Original.id] is Original
+			assert o.services.Cache.entities[instance.id] is instance
 			assert o.services.Memory.has(instance.__proto__) is True
 		finally:
 			cls._restore_runtime(state)

@@ -1,3 +1,9 @@
+# ==============================================================================
+# SERIALIZER
+# ==============================================================================
+# Turn ontology entities into public serialized representations.
+# ==============================================================================
+
 import o
 
 
@@ -54,7 +60,7 @@ class Serializer(o.Module):
 				annotation = o.Annotation(annotation)
 
 				if annotation.is_list or annotation.is_dict:
-					result['__class__'] = o.get_by_annotation(annotation.origin).__proto__
+					result['__class__'] = o.services.Entity.get_by_annotation(annotation.origin).__proto__
 
 		elif isinstance(value, dict):
 			result = {}
@@ -83,7 +89,7 @@ class Serializer(o.Module):
 				type_cls = field.type
 
 				if not isinstance(type_cls, type):
-					type_cls = o.get(type_cls)
+					type_cls = o.services.Entity.get(type_cls)
 
 				field_spec = {
 					'type': type_cls.__proto__,

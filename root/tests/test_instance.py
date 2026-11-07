@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST INSTANCE
+# ==============================================================================
+# Verify persistent instance identity and field behavior.
+# ==============================================================================
+
 import os
 
 import o
@@ -151,8 +157,8 @@ class TestInstance(o.Tester):
 
 			t1 = GetResolvesLoadedClassAndInstance(foo='hello')
 
-			assert o.get(GetResolvesLoadedClassAndInstance.id) is GetResolvesLoadedClassAndInstance
-			assert o.get(t1.id) is t1
+			assert o.services.Entity.get(GetResolvesLoadedClassAndInstance.id) is GetResolvesLoadedClassAndInstance
+			assert o.services.Entity.get(t1.id) is t1
 		finally:
 			cls._restore_runtime(state)
 
@@ -166,8 +172,8 @@ class TestInstance(o.Tester):
 			GetResolvesLoadedProtoClassAndInstance = o.T.extend(f'GetResolvesLoadedProtoClassAndInstance_{root_name}', foo=str)
 			t1                                     = GetResolvesLoadedProtoClassAndInstance(foo='hello')
 
-			assert o.get(GetResolvesLoadedProtoClassAndInstance.__proto__) is GetResolvesLoadedProtoClassAndInstance
-			assert o.get(t1.__proto__) is t1
+			assert o.services.Entity.get(GetResolvesLoadedProtoClassAndInstance.__proto__) is GetResolvesLoadedProtoClassAndInstance
+			assert o.services.Entity.get(t1.__proto__) is t1
 		finally:
 			cls._restore_runtime(state)
 
@@ -269,7 +275,7 @@ class TestInstance(o.Tester):
 			del t1.__dict__['foo']
 			assert o.services.Memory.get(f'{t1.__proto__}.foo', UNDEFINED) is not UNDEFINED
 			assert isinstance(foo_id, int)
-			assert o.get(foo_id).__value__ == 'hello'
+			assert o.services.Entity.get(foo_id).__value__ == 'hello'
 			assert t1.foo == 'hello'
 			assert isinstance(t1.foo, str)
 		finally:
@@ -610,8 +616,8 @@ class TestInstance(o.Tester):
 
 			t1 = ExistsAlignsWithInstanceRoom(foo='hello')
 
-			assert o.exists(t1.id) == True
-			assert o.exists(t1.__proto__) == True
+			assert o.services.Entity.exists(t1.id) == True
+			assert o.services.Entity.exists(t1.__proto__) == True
 		finally:
 			cls._restore_runtime(state)
 
@@ -621,7 +627,7 @@ class TestInstance(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			assert o.get(999999) is UNDEFINED
+			assert o.services.Entity.get(999999) is UNDEFINED
 		finally:
 			cls._restore_runtime(state)
 
@@ -639,9 +645,9 @@ class TestInstance(o.Tester):
 			proto    = t1.__proto__
 			count    = o.services.Memory.get(f'{GetReconstructsObjectInstanceOnCacheMiss.__proto__}.__version__')
 
-			del o.__entities__[id]
+			del o.services.Cache.entities[id]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert reopened.id == id
 			assert reopened.__proto__ == proto
@@ -731,7 +737,7 @@ class TestInstance(o.Tester):
 			instance_names = set()
 			for key in Owner.__zone__.keys():
 				name = key.split('.')[0]
-				if o.is_instance_version(name):
+				if o.TMeta.is_instance_version(name):
 					instance_names.add(name)
 
 			assert len(instance_names) == 3

@@ -1,3 +1,9 @@
+# ==============================================================================
+# LIST
+# ==============================================================================
+# Implement persistent list behavior for ontology entities.
+# ==============================================================================
+
 import o
 
 UNDEFINED = o.Undefined
@@ -30,7 +36,7 @@ class List(o.T):
 	def __getitem__(self, index):
 		o.Timer.start('o.List.__getitem__')
 
-		value = o.value(self.__items__[index])
+		value = o.services.Entity.value(self.__items__[index])
 
 		o.Timer.stop('o.List.__getitem__')
 		return value
@@ -44,10 +50,10 @@ class List(o.T):
 
 		with o.services.Memory.write():
 			old_id = self.__items__[index]
-			child  = o.cast(item_type, value)
+			child  = o.services.Entity.cast(item_type, value)
 
 			if old_id != child.id:
-				o.services.Garbage.on_instance_unlink(o.get(old_id))
+				o.services.Garbage.on_instance_unlink(o.services.Entity.get(old_id))
 				o.services.Garbage.on_instance_link(child)
 
 			items        = list(self.__items__)
@@ -60,7 +66,7 @@ class List(o.T):
 	# ----------------------------------------------------------------------
 	def __delitem__(self, index):
 		with o.services.Memory.write():
-			o.services.Garbage.on_instance_unlink(o.get(self.__items__[index]))
+			o.services.Garbage.on_instance_unlink(o.services.Entity.get(self.__items__[index]))
 			items = list(self.__items__)
 			del items[index]
 			self.__save_items__(items)
@@ -74,7 +80,7 @@ class List(o.T):
 	# ----------------------------------------------------------------------
 	def __iter__(self):
 		for item_id in self.__items__:
-			yield o.value(item_id)
+			yield o.services.Entity.value(item_id)
 
 	# Get retained dependants
 	# ----------------------------------------------------------------------
@@ -85,7 +91,7 @@ class List(o.T):
 			yield key, child_path, child
 
 		for index, item_id in enumerate(self.__items__):
-			yield index, f'{path}[{index}]', o.get(item_id)
+			yield index, f'{path}[{index}]', o.services.Entity.get(item_id)
 
 	# Cast to list
 	# ----------------------------------------------------------------------
@@ -100,7 +106,7 @@ class List(o.T):
 
 		with o.services.Memory.write():
 			for item in value:
-				child = o.cast(item_type, item)
+				child = o.services.Entity.cast(item_type, item)
 				o.services.Garbage.on_instance_link(child)
 				new_ids.append(child.id)
 
@@ -141,7 +147,7 @@ class List(o.T):
 		item_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
 
 		with o.services.Memory.write():
-			child = o.cast(item_type, value)
+			child = o.services.Entity.cast(item_type, value)
 			o.services.Garbage.on_instance_link(child)
 			items = list(self.__items__)
 			items.append(child.id)

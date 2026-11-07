@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST ANNOTATION
+# ==============================================================================
+# Verify persistent ontology annotation and type resolution.
+# ==============================================================================
+
 import math
 import types
 import typing as t
@@ -149,9 +155,9 @@ class TestAnnotation(o.Tester):
 			identity   = container.id
 
 			assert o.services.Memory.get(proto + '.__annotation__') == 'list[o.T.AnnotationSourcePerson]'
-			o.unregister_entity(container)
-			o.unregister_entity(Person)
-			reopened = o.get(identity)
+			o.services.Cache.unregister(container)
+			o.services.Cache.unregister(Person)
+			reopened = o.services.Entity.get(identity)
 			assert reopened.id == identity
 			assert reopened.__proto__ == proto
 			assert reopened.__annotation__.annotation == list[o.T.AnnotationSourcePerson]

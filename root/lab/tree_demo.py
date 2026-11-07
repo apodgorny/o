@@ -3,7 +3,7 @@ import o
 
 entry_proto = 'o.T.LabTreeEntry'
 
-Entry = o.get(entry_proto) if o.exists(entry_proto) else o.T.extend(
+Entry = o.services.Entity.get(entry_proto) if o.services.Entity.exists(entry_proto) else o.T.extend(
 	'LabTreeEntry',
 	title=str,
 	children=o.F(list, default=None),

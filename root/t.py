@@ -1,3 +1,9 @@
+# ==============================================================================
+# T
+# ==============================================================================
+# Define the persistent root class and instance lifecycle.
+# ==============================================================================
+
 import os
 import json
 
@@ -44,7 +50,7 @@ class T(o.Module, metaclass=o.TMeta):
 				# - - - - - - - - - - - - - - - - - -
 				if cls is o.T:
 					value_type = type(__value__)
-					sub_cls    = o.get_by_annotation(value_type)
+					sub_cls    = o.services.Entity.get_by_annotation(value_type)
 
 					if sub_cls is UNDEFINED:
 						raise TypeError(f'Cannot cast `{value_type}` into `o.T`')
@@ -73,14 +79,14 @@ class T(o.Module, metaclass=o.TMeta):
 		with o.services.Memory.write():
 			field    = self.__class__._.__getattr__(name)
 			old_id   = self.__zone__.get(name, UNDEFINED)
-			child    = o.cast(field.type, value)
+			child    = o.services.Entity.cast(field.type, value)
 			child_id = child.id
-			value    = o.value(child_id)
+			value    = o.services.Entity.value(child_id)
 
 			if old_id != child_id:
 				o.services.Garbage.on_instance_link(child)
 				if old_id is not UNDEFINED:
-					o.services.Garbage.on_instance_unlink(o.get(old_id))
+					o.services.Garbage.on_instance_unlink(o.services.Entity.get(old_id))
 
 			self.__zone__.set(name, child_id)
 
@@ -103,7 +109,7 @@ class T(o.Module, metaclass=o.TMeta):
 			value = UNDEFINED
 
 			if self.__zone__.has(name):
-				value = o.value(self.__zone__.get(name))
+				value = o.services.Entity.value(self.__zone__.get(name))
 				object.__setattr__(self, name, value)
 			elif self.__class__.__has_field__(name):
 				value = getattr(self.__class__, name, UNDEFINED)
@@ -157,7 +163,7 @@ class T(o.Module, metaclass=o.TMeta):
 			child_id = self.__zone__.get(name, UNDEFINED)
 			if child_id is UNDEFINED:
 				raise AttributeError(name)
-			o.services.Garbage.on_instance_unlink(o.get(child_id))
+			o.services.Garbage.on_instance_unlink(o.services.Entity.get(child_id))
 			self.__zone__.unset(name)
 
 		if name in self.__dict__:
@@ -171,7 +177,7 @@ class T(o.Module, metaclass=o.TMeta):
 	def __read__(cls, version):
 		self           = object.__new__(cls)
 		proto          = f'{cls.__proto__}.{version}'
-		id             = o.proto_to_id(proto)
+		id             = o.services.Id.set(proto)
 		version_number = int(version[1:])
 
 		object.__setattr__(self, 'id',          id             )
@@ -180,7 +186,7 @@ class T(o.Module, metaclass=o.TMeta):
 		object.__setattr__(self, '__zone__',    o.services.Memory.zone(f'{proto}.'))
 		object.__setattr__(self, '__refcount__', 0             )
 
-		o.register_entity(self)
+		o.services.Cache.register(self)
 
 		return self
 
@@ -193,7 +199,7 @@ class T(o.Module, metaclass=o.TMeta):
 		with o.services.Memory.write() as memory:
 			version = cls.__inc_version__()
 			proto   = f'{cls.__proto__}._{version}'
-			id      = o.services.Ids.set(proto)
+			id      = o.services.Id.set(proto)
 
 			memory.set(proto, True)
 
@@ -221,7 +227,7 @@ class T(o.Module, metaclass=o.TMeta):
 				child = UNDEFINED
 
 				if '.' not in name and not name.startswith('_'):
-					child = o.get(child_id)
+					child = o.services.Entity.get(child_id)
 					yield name, f'{path}.{name}', child
 
 	# Cast Python-visible value into entity
@@ -258,11 +264,11 @@ class T(o.Module, metaclass=o.TMeta):
 		with o.services.Memory.write() as memory:
 			entity.__zone__.clear()
 			memory.unset(entity.__proto__)
-			o.services.Ids.unset(entity.id)
+			o.services.Id.unset(entity.id)
 			if route is not UNDEFINED:
-				o.services.Routes.unset(route)
+				o.services.Route.unset(route)
 
-		o.unregister_entity(entity)
+		o.services.Cache.unregister(entity)
 
 	# Serialize class or instance into spec
 	# ----------------------------------------------------------------------

@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST DICT
+# ==============================================================================
+# Verify persistent dictionary keys, values, and reconstruction.
+# ==============================================================================
+
 import os
 
 import o
@@ -112,9 +118,9 @@ class TestDict(o.Tester):
 			id    = x.id
 			proto = x.__proto__
 
-			del o.__entities__[id]
+			del o.services.Cache.entities[id]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert isinstance(reopened, ReconstructsDictOnCacheMiss)
 			assert reopened.id == id
@@ -137,9 +143,9 @@ class TestDict(o.Tester):
 
 			x.__zone__.set('__items__', old_items)
 
-			del o.__entities__[id]
+			del o.services.Cache.entities[id]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert isinstance(reopened, ReconstructsOldDictItemsStorage)
 			assert reopened.__items__ == old_items
@@ -160,8 +166,8 @@ class TestDict(o.Tester):
 			bob                      = Child(name='bob')
 			x                        = DictNProtoResolvesEntity({'a': alex, 'b': bob})
 			key_id                   = x._item_key_id('b')
-			child                    = o.get(x.__items__[key_id])
-			resolved                 = o.get(f'{x.__proto__}[\'b\']')
+			child                    = o.services.Entity.get(x.__items__[key_id])
+			resolved                 = o.services.Entity.get(f'{x.__proto__}[\'b\']')
 
 			assert resolved is child
 			assert isinstance(resolved, Child)

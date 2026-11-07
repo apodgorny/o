@@ -1,3 +1,9 @@
+# ==============================================================================
+# ACCESSOR
+# ==============================================================================
+# Resolve ontology field metadata and runtime access.
+# ==============================================================================
+
 import o
 
 UNDEFINED       = o.Undefined
@@ -37,7 +43,7 @@ class Accessor(o.Module):
 				if value is UNDEFINED:
 					raise AttributeError(name)
 				if name == 'type':
-					value = o.get(value)
+					value = o.services.Entity.get(value)
 		else:
 			value = o.Accessor(
 				target,

@@ -1,3 +1,9 @@
+# ==============================================================================
+# MIGRATION SERVICE
+# ==============================================================================
+# Validate and apply stored-instance schema changes.
+# ==============================================================================
+
 import sys
 
 import o
@@ -7,7 +13,7 @@ UNDEFINED = o.Undefined
 ATOMIC    = (int, float, str, bool, type(None))
 
 
-class Migrations(o.Service):
+class Migration(o.Service):
 
 	# ======================================================================
 	# PRIVATE METHODS
@@ -33,7 +39,7 @@ class Migrations(o.Service):
 	# Validate atomic conversion without creating persistent entities
 	# ----------------------------------------------------------------------
 	def _convert(self, memory, key, old_id, change):
-		old_type       = o.get(change['old']['type'])
+		old_type       = o.services.Entity.get(change['old']['type'])
 		old_annotation = o.Annotation(getattr(old_type, '__annotation__', old_type))
 		new_type       = change['new'].type
 		new_annotation = o.Annotation(getattr(new_type, '__annotation__', new_type))
@@ -78,7 +84,7 @@ class Migrations(o.Service):
 		if ready:
 			ready = not any(
 				isinstance(entity, existing)
-				for entity in o.__entities__.values()
+				for entity in o.services.Cache.entities.values()
 			)
 
 		if ready:
@@ -118,7 +124,7 @@ class Migrations(o.Service):
 					if isinstance(new.type, type) and issubclass(new.type, o.T):
 						type_changed = old['type'] != new.type.id
 					else:
-						old_type       = o.get(old['type'])
+						old_type       = o.services.Entity.get(old['type'])
 						old_annotation = getattr(old_type, '__annotation__', old_type)
 						type_changed   = (
 							o.Annotation(old_annotation) != o.Annotation(new.type)
@@ -152,7 +158,7 @@ class Migrations(o.Service):
 				for key, old_id in memory.items(prefix):
 					parts = key[len(prefix):].split('.')
 
-					if o.is_instance_version(parts[-1]):
+					if o.TMeta.is_instance_version(parts[-1]):
 						class_proto = key.rsplit('._', 1)[0]
 
 						for name, change in changes.items():
@@ -165,7 +171,7 @@ class Migrations(o.Service):
 											f'Required field `{name}` is missing on `{key}`'
 										)
 
-					elif len(parts) >= 2 and o.is_instance_version(parts[-2]):
+					elif len(parts) >= 2 and o.TMeta.is_instance_version(parts[-2]):
 						name   = parts[-1]
 						change = changes.get(name)
 
@@ -224,11 +230,11 @@ class Migrations(o.Service):
 						if change['new'] is None:
 							memory.unset(key)
 						else:
-							child = o.cast(target, value)
+							child = o.services.Entity.cast(target, value)
 							o.services.Garbage.on_instance_link(child)
 							memory.set(key, child.id)
 
-						o.services.Garbage.on_instance_unlink(o.get(old_id))
+						o.services.Garbage.on_instance_unlink(o.services.Entity.get(old_id))
 					else:
 						raise RuntimeError(
 							f'Stored value changed after migration approval: `{key}`'

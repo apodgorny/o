@@ -72,7 +72,7 @@ def _switch_store(cls, data_dir):
 	memory._read  = None
 	memory._write = None
 
-	for entity in o.__entities__.values():
+	for entity in o.services.Cache.entities.values():
 		if '__zone__' in entity.__dict__:
 			entity.__zone__.cache.clear()
 
@@ -106,7 +106,7 @@ def _patch_store(cls, prefix):
 		shutil.copytree(old_path, dst_path)
 
 	cls._switch_store(data_dir)
-	o.__dict__['initialize'] = o.ensure_value
+	o.__dict__['initialize'] = o.services.Entity.ensure_value
 
 	return state
 
@@ -143,8 +143,8 @@ def _patch_runtime(cls):
 		'temp_root': runtime_state['temp_root'],
 		'registry' : registry_state,
 		'runtime'  : runtime_state,
-		'entities' : dict(o.__entities__),
-		'cast_map' : dict(o.__cast_map__),
+		'entities' : dict(o.services.Cache.entities),
+		'cast_map' : dict(o.services.Cache.cast_map),
 		'value'    : o.__dict__.get('V', UNDEFINED),
 	}
 
@@ -155,11 +155,11 @@ def _patch_runtime(cls):
 # ----------------------------------------------------------------------
 @classmethod
 def _restore_runtime(cls, state):
-	o.__entities__.clear()
-	o.__entities__.update(state['entities'])
+	o.services.Cache.entities.clear()
+	o.services.Cache.entities.update(state['entities'])
 
-	o.__cast_map__.clear()
-	o.__cast_map__.update(state['cast_map'])
+	o.services.Cache.cast_map.clear()
+	o.services.Cache.cast_map.update(state['cast_map'])
 
 	if state['value'] is UNDEFINED:
 		if 'V' in o.__dict__:

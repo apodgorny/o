@@ -1,4 +1,11 @@
+# ==============================================================================
+# TYPE METACLASS
+# ==============================================================================
+# Define persistent ontology classes and resolve their runtime members.
+# ==============================================================================
+
 import hashlib
+import re
 
 import o
 
@@ -72,7 +79,7 @@ class TMeta(type(o.Module)):
 		cls.__has_own_module__ = has_own_module
 		cls.__proto__          = proto
 		cls.__version__        = version
-		cls.id                 = o.proto_to_id(proto)
+		cls.id                 = o.services.Id.set(proto)
 		cls.__zone__           = zone
 		cls._                  = o.Accessor(cls, ['_'])
 
@@ -105,7 +112,7 @@ class TMeta(type(o.Module)):
 			cls.__class__.__publish__(cls, fields)
 
 
-		o.register_entity(cls)
+		o.services.Cache.register(cls)
 
 		o.Timer.stop('o.TMeta.__new__')
 		return cls
@@ -134,7 +141,7 @@ class TMeta(type(o.Module)):
 			for key in cls.__zone__.keys():
 				name = key.split('.')[0]
 
-				if o.is_class_name(name):
+				if o.TMeta.is_class_name(name):
 					names.add(name)
 
 			for name in names:
@@ -152,7 +159,7 @@ class TMeta(type(o.Module)):
 		for key in cls.__zone__.keys():
 			name = key.split('.')[0]
 
-			if o.is_instance_version(name):
+			if o.TMeta.is_instance_version(name):
 				names.add(name)
 
 		for name in names:
@@ -250,10 +257,10 @@ class TMeta(type(o.Module)):
 			cls = annotation
 		else:
 			annotation = o.Annotation(annotation)
-			cls        = o.get_by_annotation(annotation.annotation)
+			cls        = o.services.Entity.get_by_annotation(annotation.annotation)
 
 			if cls is UNDEFINED:
-				base_cls     = o.get_by_annotation(annotation.origin)
+				base_cls     = o.services.Entity.get_by_annotation(annotation.origin)
 				visible_args = []
 
 				if not annotation.args:
@@ -305,7 +312,7 @@ class TMeta(type(o.Module)):
 	def __load__(mcls, cls, name):
 		entity = None
 		proto  = f'{cls.__proto__}.{name}'
-		route  = o.proto_to_route(proto)
+		route  = o.services.Route.proto_to_route(proto)
 
 		if route is not UNDEFINED:
 			entity = eval(route)
@@ -332,7 +339,7 @@ class TMeta(type(o.Module)):
 
 		with o.services.Memory.write() as memory:
 			memory.set(proto, True)
-			o.services.Ids.set(proto)
+			o.services.Id.set(proto)
 			cls.__zone__.set('__version__', cls.__version__)
 
 			if cls.__shape_hash__ is not None:
@@ -343,7 +350,7 @@ class TMeta(type(o.Module)):
 
 			if cls.__has_own_module__ and proto != ROOT_PROTO:
 				route = cls.__route__
-				o.services.Routes.set(route, {
+				o.services.Route.set(route, {
 					'id'    : cls_id,
 					'proto' : proto,
 					'mtime' : cls.__mtime__,
@@ -413,7 +420,7 @@ class TMeta(type(o.Module)):
 
 		if cls.__proto__ != ROOT_PROTO:
 			type_id  = field['type']
-			type_cls = o.get(type_id)
+			type_cls = o.services.Entity.get(type_id)
 			cls.__annotations__[name] = getattr(type_cls, '__annotation__', type_cls)
 
 		if default is not UNDEFINED:
@@ -461,12 +468,12 @@ class TMeta(type(o.Module)):
 
 		if is_root_bootstrapping and is_root_class:
 			annotation = o.Annotation(type_cls).annotation
-			proto      = o.__cast_map__.get(annotation, UNDEFINED)
+			proto      = o.services.Cache.cast_map.get(annotation, UNDEFINED)
 
 			if proto is UNDEFINED:
 				raise TypeError(f'`o.T.{name}` can not use bootstrap annotation `{annotation}`')
 
-			return o.services.Ids.set(proto)
+			return o.services.Id.set(proto)
 
 		return mcls.__embody__(type_cls).id
 	
@@ -489,8 +496,8 @@ class TMeta(type(o.Module)):
 		entity      = None
 		base_proto  = getattr(cls, '__proto__', ROOT_PROTO)
 		proto       = f'{base_proto}.{name}'
-		entity_id   = o.proto_to_id(proto)
-		entity      = o.__entities__.get(entity_id, None)
+		entity_id   = o.services.Id.set(proto)
+		entity      = o.services.Cache.entities.get(entity_id, None)
 
 		if cls.__has_field__(name):
 			return getattr(cls, f'_{name}')
@@ -505,14 +512,14 @@ class TMeta(type(o.Module)):
 
 			return default
 
-		if o.is_class_name(name):
+		if o.TMeta.is_class_name(name):
 			if entity is None and o.services.Memory.has(proto):
 				entity = cls.__class__.__load__(cls, name)
 			if entity is None:
 				raise AttributeError(f'Subclass `{name}` is not found on `{cls.__proto__}`')
 			return entity
 
-		if o.is_instance_version(name):
+		if o.TMeta.is_instance_version(name):
 			if entity is None and o.services.Memory.has(proto):
 				entity = cls.__read__(name)
 			if entity is None:
@@ -577,12 +584,24 @@ class TMeta(type(o.Module)):
 	# PUBLIC CLASS METHODS
 	# ======================================================================
 
+	# Recognize an ontology instance version token.
+	# ----------------------------------------------------------------------
+	@staticmethod
+	def is_instance_version(s):
+		return re.fullmatch(r'_[0-9]+', s) is not None
+
+	# Recognize a class name token in an ontology prototype.
+	# ----------------------------------------------------------------------
+	@staticmethod
+	def is_class_name(s):
+		return re.fullmatch(r'[A-Z][A-Za-z0-9_]*', s) is not None
+
 	# Check persistent instances reachable from o.V
 	# ----------------------------------------------------------------------
 	def has_persistent_instances(cls):
 		target = cls.__proto__
 		visited = set()
-		stack = [o.ensure_value()]
+		stack = [o.services.Entity.ensure_value()]
 
 		while stack:
 			instance = stack.pop()
@@ -599,7 +618,7 @@ class TMeta(type(o.Module)):
 			stack.extend(child for _, _, child in instance.__dependants__())
 
 			if isinstance(instance, o.Dict):
-				stack.extend(o.get(key_id) for key_id in instance.__items__)
+				stack.extend(o.services.Entity.get(key_id) for key_id in instance.__items__)
 
 		return False
 
@@ -630,19 +649,19 @@ class TMeta(type(o.Module)):
 		shape_changed = new_cls is not None and new_cls.__shape_hash__ != new_hash
 
 		if shape_changed:
-			changes = o.services.Migrations.prepare(new_cls, fields, __annotation__)
+			changes = o.services.Migration.prepare(new_cls, fields, __annotation__)
 
 		try:
 			if shape_changed:
 				with o.services.Memory.write():
-					o.services.Migrations.apply(changes)
+					o.services.Migration.apply(changes)
 					new_cls.__replace_fields__(fields, __annotation__)
 
-				for entity in tuple(o.__entities__.values()):
+				for entity in tuple(o.services.Cache.entities.values()):
 					if isinstance(entity, new_cls):
-						o.unregister_entity(entity)
+						o.services.Cache.unregister(entity)
 
-				o.unregister_entity(new_cls)
+				o.services.Cache.unregister(new_cls)
 
 			if new_cls is None or shape_changed:
 				has_annotation = __annotation__ is not None

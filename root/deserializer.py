@@ -1,3 +1,9 @@
+# ==============================================================================
+# DESERIALIZER
+# ==============================================================================
+# Reconstruct ontology entities from serialized specifications.
+# ==============================================================================
+
 import json, jsonschema
 
 import o
@@ -48,16 +54,16 @@ class Deserializer(o.Module):
 			if cls_proto not in self._spec['classes']:
 				raise TypeError(f'Missing definition for `{cls_proto}`')
 			
-			if not o.exists(cls_proto):
+			if not o.services.Entity.exists(cls_proto):
 				base_proto, cls_name = cls_proto.rsplit('.', 1)
-				if not o.exists(base_proto):
+				if not o.services.Entity.exists(base_proto):
 					self._resolve_class(base_proto)
 
 				cls_spec = self._spec['classes'][cls_proto]
 
 				for field_name in cls_spec:
 					type_proto = cls_spec[field_name]['type']
-					if not o.exists(type_proto):
+					if not o.services.Entity.exists(type_proto):
 						self._resolve_class(type_proto)
 
 				self._define_class(base_proto, cls_name, cls_spec)
@@ -73,13 +79,13 @@ class Deserializer(o.Module):
 	# Define class
 	# ----------------------------------------------------------------------
 	def _define_class(self, base_proto, cls_name, spec):
-		base_cls = o.get(base_proto)
+		base_cls = o.services.Entity.get(base_proto)
 		fields   = {}
 
 		for field_name, field_props in spec.items():
 			props = dict(field_props)
 
-			props['type'] = o.get(props['type'])
+			props['type'] = o.services.Entity.get(props['type'])
 
 			if 'default' not in props:
 				props['default'] = None
@@ -102,7 +108,7 @@ class Deserializer(o.Module):
 
 		if isinstance(spec, dict):
 			if '__class__' in spec:
-				cls    = o.get(spec['__class__'])
+				cls    = o.services.Entity.get(spec['__class__'])
 				value  = UNDEFINED
 				kwargs = {}
 

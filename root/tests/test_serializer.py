@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST SERIALIZER
+# ==============================================================================
+# Verify ontology serialization and reconstruction contracts.
+# ==============================================================================
+
 import os
 
 import do
@@ -77,7 +83,7 @@ class TestSerializer(o.Tester):
 			}
 
 			instance = o.T.deserialize(spec)
-			Class    = o.get(proto)
+			Class    = o.services.Entity.get(proto)
 
 			assert isinstance(instance, Class)
 			assert Class._.name.description == 'Field description'

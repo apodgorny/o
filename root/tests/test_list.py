@@ -1,3 +1,9 @@
+# ==============================================================================
+# TEST LIST
+# ==============================================================================
+# Verify persistent list behavior and reconstruction.
+# ==============================================================================
+
 import o
 
 
@@ -104,9 +110,9 @@ class TestList(o.Tester):
 			id    = x.id
 			proto = x.__proto__
 
-			del o.__entities__[id]
+			del o.services.Cache.entities[id]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert isinstance(reopened, ReconstructsListOnCacheMiss)
 			assert reopened.id == id
@@ -128,9 +134,9 @@ class TestList(o.Tester):
 
 			x.__zone__.set('__items__', old_items)
 
-			del o.__entities__[id]
+			del o.services.Cache.entities[id]
 
-			reopened = o.get(id)
+			reopened = o.services.Entity.get(id)
 
 			assert isinstance(reopened, ReconstructsOldListItemsStorage)
 			assert reopened.__items__ == old_items
@@ -150,8 +156,8 @@ class TestList(o.Tester):
 			alex                     = Child(name='alex')
 			bob                      = Child(name='bob')
 			x                        = ListNProtoResolvesEntity([alex, bob])
-			child                    = o.get(x.__items__[1])
-			resolved                 = o.get(f'{x.__proto__}[1]')
+			child                    = o.services.Entity.get(x.__items__[1])
+			resolved                 = o.services.Entity.get(f'{x.__proto__}[1]')
 
 			assert resolved is child
 			assert isinstance(resolved, Child)
