@@ -6,6 +6,8 @@
 
 import time
 
+from unittest.mock import patch
+
 import o
 
 
@@ -76,6 +78,26 @@ class TestServices(o.Tester):
 			assert Class.id == o.services.Id.hash(Class.__proto__)
 			assert o.services.Id.get(Class.id) == Class.__proto__
 			assert o.services.Entity.get(Class.id) is Class
+		finally:
+			cls._restore_runtime(state)
+
+	# Reconstructing an already persisted instance must not write its id again.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_instance_reconstruction_is_read_only(cls):
+		state = cls._patch_runtime()
+
+		try:
+			integer = o.Int(73)
+			ids     = o.services.Id
+
+			assert ids.get(integer.id) == integer.__proto__
+
+			with patch.object(ids, 'set', side_effect=AssertionError('Unexpected id write')):
+				reopened = o.Int.__read__(f'_{integer.__version__}')
+
+			assert reopened.id == integer.id
+			assert reopened.__proto__ == integer.__proto__
 		finally:
 			cls._restore_runtime(state)
 

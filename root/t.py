@@ -177,7 +177,7 @@ class T(o.Module, metaclass=o.TMeta):
 	def __read__(cls, version):
 		self           = object.__new__(cls)
 		proto          = f'{cls.__proto__}.{version}'
-		id             = o.services.Id.set(proto)
+		id             = o.services.Id.hash(proto)
 		version_number = int(version[1:])
 
 		object.__setattr__(self, 'id',          id             )

@@ -70,6 +70,26 @@ class TestDict(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Updating a known key must not create another persistent key entity.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_existing_key_update_reuses_key_entity(cls):
+		state = cls._patch_runtime()
+
+		try:
+			x              = o.Dict({'a': 1})
+			key_id         = x._item_key_id('a')
+			key_version    = o.Str.__version__
+
+			x['a'] = 2
+			x['a'] = 3
+
+			assert x['a'] == 3
+			assert x._item_key_id('a') == key_id
+			assert o.Str.__version__ == key_version
+		finally:
+			cls._restore_runtime(state)
+
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_dict_non_atomic_value_surface(cls):

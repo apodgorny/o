@@ -113,11 +113,16 @@ class Dict(o.T):
 		value_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
 
 		with o.services.Memory.write():
-			key_child   = o.services.Entity.cast(key_type, key)
-			value_child = o.services.Entity.cast(value_type, value)
-			key_id      = self._item_key_id(key_child)
+			key_id    = self._item_key_id(key)
+			key_child = UNDEFINED
+
+			if key_id is UNDEFINED:
+				key_child = o.services.Entity.cast(key_type, key)
+				key_id    = self._item_key_id(key_child)
+
+			value_child  = o.services.Entity.cast(value_type, value)
 			old_value_id = UNDEFINED
-			items       = dict(self.__items__)
+			items        = dict(self.__items__)
 
 			if key_id is UNDEFINED:
 				o.services.Garbage.on_instance_link(key_child)
