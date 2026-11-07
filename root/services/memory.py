@@ -250,6 +250,7 @@ class Memory(o.Service):
 			map_size = self.size,
 			max_dbs  = 1,
 			subdir   = True,
+			sync     = False,
 		)
 
 		self._read  = None
