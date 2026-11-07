@@ -5,7 +5,6 @@
 # ==============================================================================
 
 import argparse
-import json
 import os
 import platform
 import sys
@@ -145,65 +144,41 @@ class TestPerformance(o.Tester):
 
 		return (time.perf_counter_ns() - started) / 1e9
 
-	# Report complete elapsed workloads, independent of nested method totals.
+	# Time whole iterations without counting fixture construction.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_performance(cls, size=5000, workload='legacy'):
-		root_cls  = o.T.extend('APerfRun')
-		scenarios = [
-			('list_getitem', size, cls.trigger_list_getitem, (size,)),
-			('list_setitem', size, cls.trigger_list_setitem, (size,)),
-			('dict_getitem', size, cls.trigger_dict_getitem, (size,)),
-			('dict_setitem', size, cls.trigger_dict_setitem, (size,)),
+		root  = o.T.extend('APerfRun')
+		cases = [
+			('list_getitem', cls.trigger_list_getitem, (size,)),
+			('list_setitem', cls.trigger_list_setitem, (size,)),
+			('dict_getitem', cls.trigger_dict_getitem, (size,)),
+			('dict_setitem', cls.trigger_dict_setitem, (size,)),
 		]
 
 		if workload == 'legacy':
-			scenarios.append(('object_attr_get_set', size, cls.trigger_object_attr, (size, root_cls)))
+			cases.append(('object_attr_get_set', cls.trigger_object_attr, (size, root)))
 		else:
-			scenarios.extend([
-				('object_attr_get', size, cls.trigger_object_attr_get, (size, root_cls)),
-				('object_attr_set', size, cls.trigger_object_attr_set, (size, root_cls)),
-				('object_create', size, cls.trigger_object_create, (size, root_cls)),
+			cases.extend([
+				('object_attr_get', cls.trigger_object_attr_get, (size, root)),
+				('object_attr_set', cls.trigger_object_attr_set, (size, root)),
+				('object_create', cls.trigger_object_create, (size, root)),
 			])
 
-		scenarios.append(('define', size, cls.trigger_define, (size, root_cls)))
+		cases.append(('define', cls.trigger_define, (size, root)))
 		o.Timer.reset()
 
-		results = []
-		mode    = 'instrumented' if o.Timer.enabled else 'wall-clock, timers disabled'
+		print(f'Python {sys.version.split()[0]}, {platform.platform()}, {workload}, n={size}')
+		print('Time per iteration (fixture construction excluded).')
 
-		print(f'Python:   {sys.version.split()[0]}')
-		print(f'Platform: {platform.platform()}')
-		print(f'Workload: {workload} ({size} iterations per scenario)')
-		print(f'Timing:   {mode}, fixture creation excluded')
-		if workload == 'legacy':
-			print('object_attr_get_set: 2 reads + 2 writes per iteration')
-		else:
-			print('object_attr_get / object_attr_set: 2 accesses per iteration')
-
-		print('All measurements include Python loop overhead.')
-		print()
-
-		for name, iterations, run, args in scenarios:
+		for name, run, args in cases:
 			print(f'Running {name}...', flush=True)
 			seconds = run(*args)
-			per_iter = seconds * 1e6 / iterations
-			rate     = iterations / seconds
-			results.append({
-				'name'             : name,
-				'iterations'       : iterations,
-				'seconds'          : seconds,
-				'us_per_iteration' : per_iter,
-				'iterations_per_s' : rate,
-			})
-			print(f'{name:22} {iterations:>8,} iter  {seconds:>9.3f}s  {per_iter:>10,.3f} us/iter  {rate:>12,.1f} iter/s')
+			print(f'{name:22} {seconds:9.3f}s   {seconds * 1e6 / size:10.3f} us/iter')
 
 		if o.Timer.enabled:
-			print()
-			print('Inclusive method timings: nested durations overlap and must not be summed.')
+			print('Inclusive method times (nested calls overlap):')
 			o.Timer.report()
-
-		return results
 
 
 # Run the same workload on a fresh database on each invocation.
@@ -213,7 +188,6 @@ if __name__ == '__main__':
 	parser.add_argument('--size', type=int, default=5000)
 	parser.add_argument('--workload', choices=['legacy', 'expanded'], default='legacy')
 	parser.add_argument('--instrumented', action='store_true')
-	parser.add_argument('--output', default=None)
 	args = parser.parse_args()
 
 	if args.size <= 0:
@@ -224,21 +198,7 @@ if __name__ == '__main__':
 		o.Timer.enabled = args.instrumented
 
 		try:
-			results = TestPerformance.test_performance(args.size, args.workload)
+			TestPerformance.test_performance(args.size, args.workload)
 		finally:
 			o.services.Memory.env.close()
 
-	if args.output is not None:
-		data = {
-			'python'       : sys.version.split()[0],
-			'platform'     : platform.platform(),
-			'workload'     : args.workload,
-			'size'         : args.size,
-			'instrumented' : args.instrumented,
-			'results'      : results,
-		}
-
-		with open(args.output, 'w') as file:
-			json.dump(data, file, indent=2)
-
-		print(f'Results written to {args.output}')
