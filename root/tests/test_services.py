@@ -4,6 +4,8 @@
 # Verify singular service names, cache ownership, and entity value semantics.
 # ==============================================================================
 
+import time
+
 import o
 
 
@@ -46,6 +48,34 @@ class TestServices(o.Tester):
 
 			assert o.services.Entity.value(integer.id) == 73
 			assert o.services.Entity.value(o.V.id) is o.V
+		finally:
+			cls._restore_runtime(state)
+
+	# Looking up an absent class must not create an id mapping on disk.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_missing_class_lookup_is_read_only(cls):
+		name  = f'AbsentType{time.time_ns()}'
+		proto = f'{o.T.__proto__}.{name}'
+		id    = o.services.Id.hash(proto)
+
+		assert not o.services.Id.has(id)
+		assert not hasattr(o.T, name)
+		assert not o.services.Id.has(id)
+
+	# A newly defined type must publish its id after successful creation.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_new_class_id_is_persisted(cls):
+		state = cls._patch_runtime()
+
+		try:
+			name  = f'IdRegistration{time.time_ns()}'
+			Class = o.T.extend(name)
+
+			assert Class.id == o.services.Id.hash(Class.__proto__)
+			assert o.services.Id.get(Class.id) == Class.__proto__
+			assert o.services.Entity.get(Class.id) is Class
 		finally:
 			cls._restore_runtime(state)
 

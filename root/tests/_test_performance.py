@@ -1,4 +1,13 @@
+# ==============================================================================
+# ONTOLOGY PERFORMANCE TEST
+# ==============================================================================
+# Run an isolated, repeatable workload without modifying persistent user data.
+# ==============================================================================
+
+import os
+import tempfile
 import time
+
 from tqdm import tqdm
 
 import o
@@ -152,4 +161,10 @@ class TestPerformance(o.Tester):
 
 
 if __name__ == '__main__':
-	TestPerformance.test_performance()
+	with tempfile.TemporaryDirectory(prefix='o_perf_') as root:
+		o.start(os.path.join(root, 'ontology'))
+
+		try:
+			TestPerformance.test_performance()
+		finally:
+			o.services.Memory.env.close()

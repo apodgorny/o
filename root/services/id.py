@@ -20,10 +20,15 @@ class Id(o.Service):
 	def initialize(self):
 		self.zone = o.services.Memory.zone('ids/')
 
+	# Calculate an identifier without writing a proto mapping.
+	# ----------------------------------------------------------------------
+	def hash(self, proto):
+		return o.String.hash(proto, 15)
+
 	# Store the proto associated with a deterministic numeric id.
 	# ----------------------------------------------------------------------
 	def set(self, proto):
-		id = o.String.hash(proto, 15)
+		id = self.hash(proto)
 		self.zone.set(id, proto)
 		return id
 

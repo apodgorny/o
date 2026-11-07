@@ -79,7 +79,7 @@ class TMeta(type(o.Module)):
 		cls.__has_own_module__ = has_own_module
 		cls.__proto__          = proto
 		cls.__version__        = version
-		cls.id                 = o.services.Id.set(proto)
+		cls.id                 = o.services.Id.hash(proto)
 		cls.__zone__           = zone
 		cls._                  = o.Accessor(cls, ['_'])
 
@@ -496,7 +496,7 @@ class TMeta(type(o.Module)):
 		entity      = None
 		base_proto  = getattr(cls, '__proto__', ROOT_PROTO)
 		proto       = f'{base_proto}.{name}'
-		entity_id   = o.services.Id.set(proto)
+		entity_id   = o.services.Id.hash(proto)
 		entity      = o.services.Cache.entities.get(entity_id, None)
 
 		if cls.__has_field__(name):
