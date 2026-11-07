@@ -23,7 +23,7 @@ class TestJob(o.Tester):
 		with tempfile.TemporaryDirectory() as path:
 			os.mkdir(os.path.join(path, 'root'))
 			with open(os.path.join(path, 'app.py'), 'w') as output:
-				output.write('import a\n\napp = a.extend('app')\n')
+				output.write('import a\n\napp = a.extend(\'app\')\n')
 			with open(os.path.join(path, 'root', 'trial.py'), 'w') as output:
 				output.write('''import asyncio
 import logging
