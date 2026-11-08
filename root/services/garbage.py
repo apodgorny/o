@@ -59,6 +59,9 @@ class Garbage(o.Service):
 	def collect(self):
 		with o.services.Memory.write():
 			for id, proto in self.garbage.items():
+				if o.TREE_MODE:
+					o.services.Memory.unset(f'tree/parents/{id}')
+
 				o.services.Memory.unset(proto)
 				o.services.Memory.zone(f'{proto}.').clear()
 

@@ -4,6 +4,8 @@
 # Implement persistent list behavior for ontology entities.
 # ==============================================================================
 
+from collections import Counter
+
 import o
 
 UNDEFINED = o.Undefined
@@ -53,8 +55,8 @@ class List(o.T):
 			child  = o.services.Entity.cast(item_type, value)
 
 			if old_id != child.id:
-				o.services.Garbage.on_instance_unlink(o.services.Entity.get(old_id))
-				o.services.Garbage.on_instance_link(child)
+				self.__link__(child)
+				self.__unlink__(o.services.Entity.get(old_id))
 
 			items        = list(self.__items__)
 			items[index] = child.id
@@ -66,7 +68,7 @@ class List(o.T):
 	# ----------------------------------------------------------------------
 	def __delitem__(self, index):
 		with o.services.Memory.write():
-			o.services.Garbage.on_instance_unlink(o.services.Entity.get(self.__items__[index]))
+			self.__unlink__(o.services.Entity.get(self.__items__[index]))
 			items = list(self.__items__)
 			del items[index]
 			self.__save_items__(items)
@@ -101,16 +103,36 @@ class List(o.T):
 	# Cast visible list into entity
 	# ----------------------------------------------------------------------
 	def __cast_in__(self, value):
-		new_ids = []
-		item_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
+		new_children = []
+		additions    = []
+		remaining    = Counter(self.__dict__.get('__items__', []))
+		item_type    = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
 
 		with o.services.Memory.write():
 			for item in value:
 				child = o.services.Entity.cast(item_type, item)
-				o.services.Garbage.on_instance_link(child)
-				new_ids.append(child.id)
+				new_children.append(child)
 
-			self.__save_items__(new_ids)
+			for child in new_children:
+				if remaining[child.id] > 0:
+					remaining[child.id] -= 1
+				else:
+					additions.append(child)
+
+			if o.TREE_MODE:
+				pending = set()
+
+				for child in additions:
+					self.__link__(child, check_only=True, pending=pending)
+
+			for child in additions:
+				self.__link__(child)
+
+			for old_id, count in remaining.items():
+				for _ in range(count):
+					self.__unlink__(o.services.Entity.get(old_id))
+
+			self.__save_items__([child.id for child in new_children])
 
 	# Save list ids
 	# ----------------------------------------------------------------------
@@ -148,7 +170,7 @@ class List(o.T):
 
 		with o.services.Memory.write():
 			child = o.services.Entity.cast(item_type, value)
-			o.services.Garbage.on_instance_link(child)
+			self.__link__(child)
 			items = list(self.__items__)
 			items.append(child.id)
 			self.__save_items__(items)

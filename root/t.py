@@ -84,9 +84,9 @@ class T(o.Module, metaclass=o.TMeta):
 			value    = o.services.Entity.value(child_id)
 
 			if old_id != child_id:
-				o.services.Garbage.on_instance_link(child)
+				self.__link__(child)
 				if old_id is not UNDEFINED:
-					o.services.Garbage.on_instance_unlink(o.services.Entity.get(old_id))
+					self.__unlink__(o.services.Entity.get(old_id))
 
 			self.__zone__.set(name, child_id)
 
@@ -163,13 +163,61 @@ class T(o.Module, metaclass=o.TMeta):
 			child_id = self.__zone__.get(name, UNDEFINED)
 			if child_id is UNDEFINED:
 				raise AttributeError(name)
-			o.services.Garbage.on_instance_unlink(o.services.Entity.get(child_id))
+			self.__unlink__(o.services.Entity.get(child_id))
 			self.__zone__.unset(name)
 
 		if name in self.__dict__:
 			object.__delattr__(self, name)
 
 		self.__class__.__on_change__(self)
+
+	# Validate and register a holding edge before notifying garbage collection.
+	# ----------------------------------------------------------------------
+	def __link__(self, child, check_only=False, pending=None):
+		if o.TREE_MODE:
+			with o.services.Memory.write() as memory:
+				if child.__class__.__proto__ == 'o.T.V':
+					raise ValueError('Cannot attach the root value')
+
+				key = f'tree/parents/{child.id}'
+
+				if not memory.has(key) and (pending is None or child.id not in pending):
+					node_id = self.id
+
+					while node_id is not None:
+						if node_id != child.id:
+							node_id = memory.get(f'tree/parents/{node_id}', None)
+						else:
+							raise ValueError('Cycle is not allowed')
+
+					if pending is not None:
+						pending.add(child.id)
+
+					if not check_only:
+						memory.set(key, self.id)
+				else:
+					raise ValueError('Child already has a parent')
+
+				if not check_only:
+					o.services.Garbage.on_instance_link(child)
+		elif not check_only:
+			o.services.Garbage.on_instance_link(child)
+
+	# Remove a holding edge and its parent relationship.
+	# ----------------------------------------------------------------------
+	def __unlink__(self, child):
+		if o.TREE_MODE:
+			with o.services.Memory.write() as memory:
+				key = f'tree/parents/{child.id}'
+
+				if memory.get(key, None) == self.id:
+					memory.unset(key)
+				else:
+					raise ValueError('Parent mismatch')
+
+				o.services.Garbage.on_instance_unlink(child)
+		else:
+			o.services.Garbage.on_instance_unlink(child)
 
 	# Read instance from memory based on class and version
 	# ----------------------------------------------------------------------
@@ -262,6 +310,17 @@ class T(o.Module, metaclass=o.TMeta):
 			route = UNDEFINED
 
 		with o.services.Memory.write() as memory:
+			if o.TREE_MODE and self is not None:
+				if isinstance(entity, o.T.V) or memory.has(f'tree/parents/{entity.id}'):
+					raise ValueError('Cannot drop a retained tree node')
+
+				if isinstance(entity, o.Dict):
+					for key_id in list(entity.__items__):
+						entity.__unlink__(o.services.Entity.get(key_id))
+
+				for _, _, child in list(entity.__dependants__()):
+					entity.__unlink__(child)
+
 			entity.__zone__.clear()
 			memory.unset(entity.__proto__)
 			o.services.Id.unset(entity.id)
