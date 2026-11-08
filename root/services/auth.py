@@ -10,11 +10,27 @@ import o
 class Auth(o.Service):
 
 	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
+
+	# Identify clients without retaining O objects in authorization records.
+	# ----------------------------------------------------------------------
+	def _client_key(self, client):
+		if isinstance(client, o.T):
+			key = f'entity:{client.id}'
+		elif isinstance(client, str) and client:
+			key = f'name:{client}'
+		else:
+			raise TypeError('client must be an O instance or a nonempty string')
+
+		return key
+
+	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Assign or remove a client's explicit rights on a tree node.
-	# Only trusted server code may call this method.
+	# Assign explicit rights for a client, or remove the rule with None.
+	# Only trusted server code may change authorization policies.
 	# ----------------------------------------------------------------------
 	def set(self, node, client, permissions):
 		if not o.TREE_MODE:
@@ -23,14 +39,19 @@ class Auth(o.Service):
 		if not isinstance(node, o.T):
 			raise TypeError('node must be an O instance')
 
-		if not isinstance(client, (o.T, str)) or isinstance(client, str) and not client:
-			raise TypeError('client must be an O instance or a nonempty string')
+		client_id = self._client_key(client)
 
-		if permissions is not None and (not isinstance(permissions, str) or any(char not in 'rw' for char in permissions) or len(set(permissions)) != len(permissions)):
-			raise ValueError('permissions must be r, w, rw, an empty denial, or None to remove')
+		if permissions is not None:
+			if not isinstance(permissions, str):
+				raise ValueError('permissions must be r, w, rw, or empty')
 
-		client_id = f'entity:{client.id}' if isinstance(client, o.T) else f'name:{client}'
-		key       = f'{o.V.__proto__}.__auth__/{node.id}'
+			if len(set(permissions)) != len(permissions):
+				raise ValueError('permissions cannot contain duplicates')
+
+			if any(right not in 'rw' for right in permissions):
+				raise ValueError('permissions must contain only r and w')
+
+		key = f'{o.V.__proto__}.__auth__/{node.id}'
 
 		with o.services.Memory.write() as memory:
 			rules = memory.get(key, {})
@@ -45,7 +66,7 @@ class Auth(o.Service):
 			else:
 				memory.unset(key)
 
-	# Resolve the nearest explicit rule, denying access if none exists.
+	# Resolve the nearest explicit rule; missing rules deny access.
 	# ----------------------------------------------------------------------
 	def can(self, client, node, permission):
 		if not o.TREE_MODE:
@@ -54,15 +75,13 @@ class Auth(o.Service):
 		if not isinstance(node, o.T):
 			raise TypeError('node must be an O instance')
 
-		if not isinstance(client, (o.T, str)) or isinstance(client, str) and not client:
-			raise TypeError('client must be an O instance or a nonempty string')
+		client_id = self._client_key(client)
 
 		if permission not in ('r', 'w'):
 			raise ValueError('permission must be r or w')
 
-		client_id = f'entity:{client.id}' if isinstance(client, o.T) else f'name:{client}'
-		node_id   = node.id
-		allowed   = False
+		node_id = node.id
+		allowed = False
 
 		with o.services.Memory.read() as memory:
 			while node_id is not None:
