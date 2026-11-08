@@ -174,8 +174,8 @@ class T(o.Module, metaclass=o.TMeta):
 	# Validate and register a holding edge before notifying garbage collection.
 	# ----------------------------------------------------------------------
 	def __link__(self, child, check_only=False, pending=None):
-		with o.services.Memory.write() as memory:
-			if o.TREE_MODE:
+		if o.TREE_MODE:
+			with o.services.Memory.write() as memory:
 				if child.__class__.__proto__ == 'o.T.V':
 					raise ValueError('Cannot attach the root value')
 
@@ -198,14 +198,16 @@ class T(o.Module, metaclass=o.TMeta):
 				else:
 					raise ValueError('Child already has a parent')
 
-			if not check_only:
-				o.services.Garbage.on_instance_link(child)
+				if not check_only:
+					o.services.Garbage.on_instance_link(child)
+		elif not check_only:
+			o.services.Garbage.on_instance_link(child)
 
 	# Remove a holding edge and its parent relationship.
 	# ----------------------------------------------------------------------
 	def __unlink__(self, child):
-		with o.services.Memory.write() as memory:
-			if o.TREE_MODE:
+		if o.TREE_MODE:
+			with o.services.Memory.write() as memory:
 				key = f'tree/parents/{child.id}'
 
 				if memory.get(key, None) == self.id:
@@ -213,6 +215,8 @@ class T(o.Module, metaclass=o.TMeta):
 				else:
 					raise ValueError('Parent mismatch')
 
+				o.services.Garbage.on_instance_unlink(child)
+		else:
 			o.services.Garbage.on_instance_unlink(child)
 
 	# Read instance from memory based on class and version
