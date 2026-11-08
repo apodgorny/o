@@ -4,6 +4,8 @@
 # Implement persistent dictionary behavior for ontology entities.
 # ==============================================================================
 
+from collections import Counter
+
 import o
 
 UNDEFINED = o.Undefined
@@ -124,19 +126,27 @@ class Dict(o.T):
 			old_value_id = UNDEFINED
 			items        = dict(self.__items__)
 
-			if key_id is UNDEFINED:
-				o.services.Garbage.on_instance_link(key_child)
-
-				key_id    = key_child.id
-				self.__key_ids__[self._key_id(key_child)] = key_id
-			else:
+			if key_id is not UNDEFINED:
 				old_value_id = items[key_id]
 
-			if old_value_id != value_child.id:
-				if old_value_id is not UNDEFINED:
-					o.services.Garbage.on_instance_unlink(o.services.Entity.get(old_value_id))
+			pending = set()
 
-				o.services.Garbage.on_instance_link(value_child)
+			if key_id is UNDEFINED:
+				self.__link__(key_child, check_only=True, pending=pending)
+
+			if old_value_id != value_child.id:
+				self.__link__(value_child, check_only=True, pending=pending)
+
+			if key_id is UNDEFINED:
+				self.__link__(key_child)
+				key_id = key_child.id
+				self.__key_ids__[self._key_id(key_child)] = key_id
+
+			if old_value_id != value_child.id:
+				self.__link__(value_child)
+
+				if old_value_id is not UNDEFINED:
+					self.__unlink__(o.services.Entity.get(old_value_id))
 
 			items[key_id] = value_child.id
 			self.__save_items__(items)
@@ -150,8 +160,8 @@ class Dict(o.T):
 
 		if key_id in self.__items__:
 			with o.services.Memory.write():
-				o.services.Garbage.on_instance_unlink(o.services.Entity.get(key_id))
-				o.services.Garbage.on_instance_unlink(o.services.Entity.get(self.__items__[key_id]))
+				self.__unlink__(o.services.Entity.get(key_id))
+				self.__unlink__(o.services.Entity.get(self.__items__[key_id]))
 				del self.__key_ids__[self._key_id(key)]
 				items = dict(self.__items__)
 				del items[key_id]
@@ -190,19 +200,41 @@ class Dict(o.T):
 	# Cast visible dict into entity
 	# ----------------------------------------------------------------------
 	def __cast_in__(self, value):
-		new_items = {}
-		key_ids   = {}
-		key_type   = o.T if self.__class__.__annotation__.key is None else o.TMeta.__embody__(self.__class__.__annotation__.key.annotation)
-		value_type = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
+		new_items   = {}
+		key_ids     = {}
+		children    = []
+		additions   = []
+		old_items   = self.__dict__.get('__items__', {})
+		remaining   = Counter(list(old_items.keys()) + list(old_items.values()))
+		key_type    = o.T if self.__class__.__annotation__.key is None else o.TMeta.__embody__(self.__class__.__annotation__.key.annotation)
+		value_type  = o.T if self.__class__.__annotation__.value is None else o.TMeta.__embody__(self.__class__.__annotation__.value.annotation)
 
 		with o.services.Memory.write():
 			for key, item in value.items():
 				key_child   = o.services.Entity.cast(key_type, key)
 				value_child = o.services.Entity.cast(value_type, item)
-				o.services.Garbage.on_instance_link(key_child)
-				o.services.Garbage.on_instance_link(value_child)
+
+				children.extend((key_child, value_child))
 				new_items[key_child.id] = value_child.id
 				key_ids[self._key_id(key_child)] = key_child.id
+
+			for child in children:
+				if remaining[child.id] > 0:
+					remaining[child.id] -= 1
+				else:
+					additions.append(child)
+
+			pending = set()
+
+			for child in additions:
+				self.__link__(child, check_only=True, pending=pending)
+
+			for child in additions:
+				self.__link__(child)
+
+			for old_id, count in remaining.items():
+				for _ in range(count):
+					self.__unlink__(o.services.Entity.get(old_id))
 
 			self.__save_items__(new_items)
 
