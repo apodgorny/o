@@ -7,6 +7,7 @@
 import argparse
 import os
 import platform
+import subprocess
 import sys
 import tempfile
 import time
@@ -168,7 +169,7 @@ class TestPerformance(o.Tester):
 		cases.append(('define', cls.trigger_define, (size, root)))
 		o.Timer.reset()
 
-		print(f'Python {sys.version.split()[0]}, {platform.platform()}, {workload}, n={size}')
+		print(f'Python {sys.version.split()[0]}, {platform.platform()}, tree_mode={o.TREE_MODE}, {workload}, n={size}')
 		print('Time per iteration (fixture construction excluded).')
 
 		for name, run, args in cases:
@@ -181,24 +182,40 @@ class TestPerformance(o.Tester):
 			o.Timer.report()
 
 
-# Run the same workload on a fresh database on each invocation.
+# Run each mode in a separate interpreter and database to isolate state.
 # ----------------------------------------------------------------------
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--size', type=int, default=5000)
 	parser.add_argument('--workload', choices=['legacy', 'expanded'], default='legacy')
 	parser.add_argument('--instrumented', action='store_true')
+	parser.add_argument('--mode', choices=['both', 'tree', 'graph'], default='both')
 	args = parser.parse_args()
 
 	if args.size <= 0:
 		parser.error('--size must be positive')
 
-	with tempfile.TemporaryDirectory(prefix='o_perf_') as root:
-		o.start(os.path.join(root, 'ontology'))
-		o.Timer.enabled = args.instrumented
+	if args.mode == 'both':
+		for mode in ('tree', 'graph'):
+			command = [
+				sys.executable,
+				os.path.abspath(__file__),
+				'--size', str(args.size),
+				'--workload', args.workload,
+				'--mode', mode,
+			]
 
-		try:
-			TestPerformance.test_performance(args.size, args.workload)
-		finally:
-			o.services.Memory.env.close()
+			if args.instrumented:
+				command.append('--instrumented')
+
+			subprocess.run(command, check=True)
+	else:
+		with tempfile.TemporaryDirectory(prefix=f'o_perf_{args.mode}_') as root:
+			o.start(os.path.join(root, 'ontology'), tree_mode=args.mode == 'tree')
+			o.Timer.enabled = args.instrumented
+
+			try:
+				TestPerformance.test_performance(args.size, args.workload)
+			finally:
+				o.services.Memory.env.close()
 
