@@ -129,12 +129,10 @@ class Dict(o.T):
 			if key_id is not UNDEFINED:
 				old_value_id = items[key_id]
 
-			pending = set()
-
-			if key_id is UNDEFINED:
+			# Only a new key adds two edges that require prevalidation together.
+			if o.TREE_MODE and key_id is UNDEFINED:
+				pending = set()
 				self.__link__(key_child, check_only=True, pending=pending)
-
-			if old_value_id != value_child.id:
 				self.__link__(value_child, check_only=True, pending=pending)
 
 			if key_id is UNDEFINED:
@@ -224,10 +222,11 @@ class Dict(o.T):
 				else:
 					additions.append(child)
 
-			pending = set()
+			if o.TREE_MODE:
+				pending = set()
 
-			for child in additions:
-				self.__link__(child, check_only=True, pending=pending)
+				for child in additions:
+					self.__link__(child, check_only=True, pending=pending)
 
 			for child in additions:
 				self.__link__(child)

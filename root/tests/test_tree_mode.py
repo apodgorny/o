@@ -137,6 +137,37 @@ class TestTreeMode(o.Tester):
 			o.TREE_MODE = old_mode
 			cls._restore_runtime(state)
 
+	# Validate single-edge value replacement without prechecking it twice.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_tree_dict_replaces_existing_value(cls):
+		state    = cls._patch_runtime()
+		old_mode = o.TREE_MODE
+		o.TREE_MODE = True
+
+		try:
+			key       = o.T()
+			old_value = o.T()
+			new_value = o.T()
+			foreign   = o.T()
+			items     = o.Dict({key: old_value})
+			other     = o.List([foreign])
+
+			items[key] = new_value
+			assert items[key] is new_value
+
+			try:
+				items[key] = foreign
+				assert False
+			except ValueError as error:
+				assert 'parent' in str(error)
+
+			assert items[key] is new_value
+			o.List([old_value])
+		finally:
+			o.TREE_MODE = old_mode
+			cls._restore_runtime(state)
+
 	# Persist the mode across processes and reject conflicting restarts.
 	# ----------------------------------------------------------------------
 	@classmethod

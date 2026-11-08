@@ -119,10 +119,11 @@ class List(o.T):
 				else:
 					additions.append(child)
 
-			pending = set()
+			if o.TREE_MODE:
+				pending = set()
 
-			for child in additions:
-				self.__link__(child, check_only=True, pending=pending)
+				for child in additions:
+					self.__link__(child, check_only=True, pending=pending)
 
 			for child in additions:
 				self.__link__(child)
