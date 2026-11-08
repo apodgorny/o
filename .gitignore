@@ -1,6 +1,7 @@
 # o data
 root/_/
 root/__memory__/
+/ontology/
 .DS_Store
 *.mdb
 

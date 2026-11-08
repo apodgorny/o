@@ -115,6 +115,7 @@ def run_o(name, n, root):
 # ------------------------------------------------------------------------------
 def run_sqlite(name, n, db):
 	if name in ('list_getitem', 'list_setitem'):
+		db.execute('DROP TABLE IF EXISTS list_values')
 		db.execute('CREATE TABLE list_values (idx INTEGER PRIMARY KEY, value INTEGER NOT NULL)')
 		db.executemany(
 			'INSERT INTO list_values (idx, value) VALUES (?, ?)',
@@ -122,6 +123,7 @@ def run_sqlite(name, n, db):
 		)
 
 	elif name in ('dict_getitem', 'dict_setitem'):
+		db.execute('DROP TABLE IF EXISTS dict_values')
 		db.execute('CREATE TABLE dict_values (key TEXT PRIMARY KEY, value INTEGER NOT NULL)')
 		db.executemany(
 			'INSERT INTO dict_values (key, value) VALUES (?, ?)',
@@ -194,34 +196,33 @@ def compare(size, include_create):
 	cases.append('define')
 
 	with tempfile.TemporaryDirectory(prefix='o_sqlite_compare_') as directory:
-		o.start(os.path.join(directory, 'ontology'))
+		o.start(os.path.join(directory, 'ontology'), sync=False)
 		env = o.services.Memory.env
-		env.set_flags(sync=False)
 
 		try:
-			flags = env.flags()
-			if flags.get('sync') is not False:
+			if env.flags().get('sync') is False:
+				db = sqlite3.connect(
+					os.path.join(directory, 'sqlite.db'),
+					isolation_level=None,
+				)
+			else:
 				raise RuntimeError('LMDB sync=False was not applied')
 
-			db = sqlite3.connect(
-				os.path.join(directory, 'sqlite.db'),
-				isolation_level=None,
-			)
 			try:
 				mode = db.execute('PRAGMA journal_mode=WAL').fetchone()[0]
 				db.execute('PRAGMA synchronous=OFF')
 				sync = db.execute('PRAGMA synchronous').fetchone()[0]
-				if mode.lower() != 'wal' or sync != 0:
+				if mode.lower() == 'wal' and sync == 0:
+					root = o.T.extend('ASqlPerfRun')
+				else:
 					raise RuntimeError('SQLite WAL synchronous=OFF was not applied')
-
-				root = o.T.extend('ASqlPerfRun')
 
 				print(f'Python {sys.version.split()[0]}, SQLite {sqlite3.sqlite_version}, {platform.platform()}')
 				print(f'n={size}, LMDB sync=False, SQLite WAL synchronous=OFF, autocommit')
 				print('Fixture construction excluded. One commit per write statement; no outer transaction.')
 				print('Ratio = SQLite time / o time (larger means o is faster).')
 				print()
-				print(f'{"Operation":22} {"o (us/iter)":>14} {"SQLite (us/iter)":>17} {"SQLite / o":>12}')
+				print(f'''{'Operation':22} {'o (us/iter)':>14} {'SQLite (us/iter)':>17} {'SQLite / o':>12}''')
 				print('-' * 70)
 
 				for name in cases:
