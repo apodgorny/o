@@ -42,14 +42,14 @@ class V(o.T):
 	# ----------------------------------------------------------------------
 	@property
 	def __auth__(self):
-		if not o.TREE_MODE:
+		if o.TREE_MODE:
+			prefix = f'{self.__proto__}.__auth__/'
+			rules  = {}
+
+			with o.services.Memory.read() as memory:
+				for key, policies in memory.items(prefix):
+					rules[int(key[len(prefix):])] = policies
+		else:
 			raise RuntimeError('Auth requires tree mode')
-
-		prefix = f'{self.__proto__}.__auth__/'
-		rules  = {}
-
-		with o.services.Memory.read() as memory:
-			for key, policies in memory.items(prefix):
-				rules[int(key[len(prefix):])] = policies
 
 		return rules

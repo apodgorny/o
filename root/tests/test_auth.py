@@ -4,6 +4,8 @@
 # Verify persistent tree-only permissions, overrides, and isolation.
 # ==============================================================================
 
+import tempfile
+
 import o
 
 
@@ -110,4 +112,10 @@ class TestAuth(o.Tester):
 
 
 if __name__ == '__main__':
-	TestAuth.run()
+	with tempfile.TemporaryDirectory(prefix='o_auth_test_') as directory:
+		o.start(directory, tree_mode=True)
+
+		try:
+			TestAuth.run()
+		finally:
+			o.services.Memory.env.close()
