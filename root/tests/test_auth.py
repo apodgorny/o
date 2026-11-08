@@ -1,7 +1,7 @@
 # ==============================================================================
 # TEST AUTH SERVICE
 # ==============================================================================
-# Verify persistent tree-only permissions, overrides, and isolation.
+# Verify tree-only permissions, integer identities, and inherited overrides.
 # ==============================================================================
 
 import tempfile
@@ -24,8 +24,8 @@ class TestAuth(o.Tester):
 
 		try:
 			for operation in (
-				lambda: o.services.Auth.set(o.V, 'alice', 'r'),
-				lambda: o.services.Auth.can('alice', o.V, 'r'),
+				lambda: o.services.Auth.set(o.V, 7, 'r'),
+				lambda: o.services.Auth.can(7, o.V, 'r'),
 				lambda: o.V.__auth__,
 			):
 				try:
@@ -40,8 +40,9 @@ class TestAuth(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_inherited_permissions(cls):
-		state       = cls._patch_runtime()
-		old_mode    = o.TREE_MODE
+		state    = cls._patch_runtime()
+		old_mode = o.TREE_MODE
+
 		o.TREE_MODE = True
 
 		try:
@@ -55,57 +56,71 @@ class TestAuth(o.Tester):
 			middle.child = leaf
 
 			auth = o.services.Auth
-			assert auth.can('alice', leaf, 'r') is False
+			assert auth.can(7, leaf, 'r') is False
 
-			auth.set(root, 'alice', 'rw')
-			assert auth.can('alice', leaf, 'r') is True
-			assert auth.can('alice', leaf, 'w') is True
-			assert auth.can('bob', leaf, 'r') is False
-			assert auth.can('alice', other, 'r') is False
+			auth.set(root, 7, 'rw')
+			assert auth.can(7, leaf, 'r') is True
+			assert auth.can(7, leaf, 'w') is True
+			assert auth.can(8, leaf, 'r') is False
+			assert auth.can(7, other, 'r') is False
 
-			auth.set(middle, 'alice', 'w')
-			assert auth.can('alice', leaf, 'r') is False
-			assert auth.can('alice', leaf, 'w') is True
+			auth.set(middle, 7, 'w')
+			assert auth.can(7, leaf, 'r') is False
+			assert auth.can(7, leaf, 'w') is True
 
-			auth.set(leaf, 'alice', '')
-			assert auth.can('alice', leaf, 'w') is False
-			assert auth.can('alice', middle, 'w') is True
+			auth.set(leaf, 7, '')
+			assert auth.can(7, leaf, 'w') is False
+			assert auth.can(7, middle, 'w') is True
 
-			assert o.V.__auth__[leaf.id]['name:alice'] == ''
+			assert o.V.__auth__[leaf.id][7] == ''
 
-			auth.set(leaf, 'alice', None)
-			assert auth.can('alice', leaf, 'w') is True
+			auth.set(leaf, 7, None)
+			assert auth.can(7, leaf, 'w') is True
 			assert leaf.id not in o.V.__auth__
 
-			auth.set(middle, 'alice', None)
-			assert auth.can('alice', leaf, 'r') is True
+			auth.set(middle, 7, None)
+			assert auth.can(7, leaf, 'r') is True
 		finally:
 			o.TREE_MODE = old_mode
 			cls._restore_runtime(state)
 
-	# Track O client identities by stable ID, not object references.
+	# Accept only integer client IDs and preserve rules after invalid calls.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_client_identity_and_validation(cls):
-		state       = cls._patch_runtime()
-		old_mode    = o.TREE_MODE
+		state    = cls._patch_runtime()
+		old_mode = o.TREE_MODE
+
 		o.TREE_MODE = True
 
 		try:
-			auth   = o.services.Auth
-			client = o.T()
-			node   = o.T()
+			auth = o.services.Auth
+			node = o.T()
 
-			auth.set(node, client, 'r')
-			assert auth.can(client, node, 'r') is True
-			assert auth.can(str(client.id), node, 'r') is False
+			auth.set(node, 7, 'r')
+			assert auth.can(7, node, 'r') is True
+			assert auth.can(8, node, 'r') is False
+			assert o.V.__auth__[node.id][7] == 'r'
+
+			for invalid in ('7', True, 7.0, o.T()):
+				try:
+					auth.set(node, invalid, 'w')
+					assert False
+				except TypeError:
+					assert auth.can(7, node, 'r') is True
+
+				try:
+					auth.can(invalid, node, 'r')
+					assert False
+				except TypeError:
+					assert auth.can(7, node, 'r') is True
 
 			for invalid in ('x', 'rr', 'rwq', 1):
 				try:
-					auth.set(node, client, invalid)
+					auth.set(node, 7, invalid)
 					assert False
 				except ValueError:
-					assert auth.can(client, node, 'r') is True
+					assert auth.can(7, node, 'r') is True
 		finally:
 			o.TREE_MODE = old_mode
 			cls._restore_runtime(state)
