@@ -1,7 +1,7 @@
 # ==============================================================================
 # ONTOLOGY PERFORMANCE TEST
 # ==============================================================================
-# Measure complete workloads on an isolated store, with optional method timers.
+# Compare isolated workloads, with optional baseline and cProfile runs.
 # ==============================================================================
 
 import argparse
@@ -22,7 +22,7 @@ import time
 import o
 
 
-BEFORE_TREE_REF = '6b2d40532081342575259b194a4d4509c5f3436b'
+DEFAULT_BASELINE = '6b2d40532081342575259b194a4d4509c5f3436b'
 
 
 class TestPerformance(o.Tester):
@@ -155,7 +155,6 @@ class TestPerformance(o.Tester):
 
 		return (time.perf_counter_ns() - started) / 1e9
 
-
 	# Time each workload with fresh fixtures, optionally profiling one case.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -182,7 +181,7 @@ class TestPerformance(o.Tester):
 		o.Timer.reset()
 
 		if not quiet:
-			mode = getattr(o, 'TREE_MODE', 'before')
+			mode = getattr(o, 'TREE_MODE', 'baseline')
 			print(f'Python {sys.version.split()[0]}, {platform.platform()}, tree_mode={mode}, {workload}, n={size}')
 			print('Time per iteration (fixture construction excluded).')
 
@@ -227,15 +226,16 @@ if __name__ == '__main__':
 	parser.add_argument('--rounds', type=int, default=5)
 	parser.add_argument('--workload', choices=['legacy', 'expanded'], default='legacy')
 	parser.add_argument('--instrumented', action='store_true')
-	parser.add_argument('--mode', choices=['both', 'tree', 'graph', 'before'], default='both')
-	parser.add_argument('--baseline', action='store_true', help='Compare with the pre-tree commit using a temporary git archive')
-	parser.add_argument('--profile', action='store_true', help='Run cProfile separately after the timing rounds')
+	parser.add_argument('--mode', choices=['both', 'tree', 'graph'], default='both')
+	parser.add_argument('--baseline', nargs='?', const=DEFAULT_BASELINE, metavar='GIT_REF', help='Compare with a git revision (default: pre-tree)')
+	parser.add_argument('--profile', action='store_true', help='Run separate cProfile passes without affecting timing results')
 	parser.add_argument('--profile-case', choices=[
 		'list_getitem', 'list_setitem', 'dict_getitem', 'dict_setitem',
 		'object_attr_get_set', 'object_attr_get', 'object_attr_set',
 		'object_create', 'define', 'all',
 	], default='dict_setitem')
 	parser.add_argument('--profile-top', type=int, default=20)
+	parser.add_argument('--_mode', choices=['tree', 'graph', 'baseline'], help=argparse.SUPPRESS)
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	parser.add_argument('--_profile_only', action='store_true', help=argparse.SUPPRESS)
 	args = parser.parse_args()
@@ -243,20 +243,32 @@ if __name__ == '__main__':
 	if args.size <= 0 or args.rounds <= 0 or args.profile_top <= 0:
 		parser.error('--size, --rounds and --profile-top must be positive')
 
-	if args.baseline and args.mode != 'both':
+	if args.baseline is not None and args.mode != 'both':
 		parser.error('--baseline requires --mode both')
 
-	if args.mode == 'before' and not (args._json or args._profile_only):
-		parser.error('--mode before is reserved for the isolated baseline runner')
+	if args.instrumented and not (args.profile or args._profile_only):
+		parser.error('--instrumented requires --profile')
+
+	if args.profile and args.workload == 'legacy':
+		if args.profile_case in ('object_attr_get', 'object_attr_set', 'object_create'):
+			parser.error('selected --profile-case requires --workload expanded')
+
+	if args.profile and args.workload == 'expanded' and args.profile_case == 'object_attr_get_set':
+		parser.error('object_attr_get_set requires --workload legacy')
 
 	if args._json or args._profile_only:
-		with tempfile.TemporaryDirectory(prefix=f'o_perf_{args.mode}_') as directory:
-			if args.mode == 'before':
+		mode = args._mode
+
+		if mode is None:
+			parser.error('internal mode is required')
+
+		with tempfile.TemporaryDirectory(prefix=f'o_perf_{mode}_') as directory:
+			if mode == 'baseline':
 				o.start(os.path.join(directory, 'ontology'))
 			else:
-				o.start(os.path.join(directory, 'ontology'), tree_mode=args.mode == 'tree')
+				o.start(os.path.join(directory, 'ontology'), tree_mode=mode == 'tree')
 
-			o.Timer.enabled = args.instrumented
+			o.Timer.enabled = args.instrumented and args._profile_only
 
 			try:
 				results = TestPerformance.test_performance(
@@ -279,25 +291,25 @@ if __name__ == '__main__':
 			}
 			modes = ['tree', 'graph'] if args.mode == 'both' else [args.mode]
 
-			if args.baseline:
+			if args.baseline is not None:
 				repository = subprocess.check_output(
 					['git', '-C', os.path.dirname(__file__), 'rev-parse', '--show-toplevel'],
 					text = True,
 				).strip()
 				archive = subprocess.run(
-					['git', '-C', repository, 'archive', '--format=tar', BEFORE_TREE_REF],
+					['git', '-C', repository, 'archive', '--format=tar', args.baseline],
 					check          = True,
 					capture_output = True,
 				).stdout
-				baseline = os.path.join(directory, 'before')
+				baseline = os.path.join(directory, 'baseline')
 				os.mkdir(baseline)
 
 				with tarfile.open(fileobj=io.BytesIO(archive), mode='r:') as bundle:
 					bundle.extractall(baseline, filter='data')
 
-				runners['before'] = os.path.join(baseline, '_benchmark_runner.py')
-				shutil.copyfile(__file__, runners['before'])
-				modes.insert(0, 'before')
+				runners['baseline'] = os.path.join(baseline, '_benchmark_runner.py')
+				shutil.copyfile(__file__, runners['baseline'])
+				modes.insert(0, 'baseline')
 
 			measurements = {mode: {} for mode in modes}
 			print(f'{args.rounds} rounds × {args.size} iterations; independent LMDB per run.', flush=True)
@@ -311,24 +323,24 @@ if __name__ == '__main__':
 						sys.executable, runners[mode],
 						'--size', str(args.size),
 						'--workload', args.workload,
-						'--mode', mode,
+						'--_mode', mode,
 						'--_json',
 					]
 					environment = dict(os.environ)
 
-					if mode == 'before':
+					if mode == 'baseline':
 						environment['PYTHONPATH'] = baseline + os.pathsep + environment.get('PYTHONPATH', '')
-
-					if args.instrumented:
-						command.append('--instrumented')
 
 					completed = subprocess.run(
 						command,
-						check          = True,
 						capture_output = True,
 						text           = True,
 						env            = environment,
 					)
+
+					if completed.returncode:
+						raise RuntimeError(f'Benchmark {mode} failed:\n{completed.stderr}')
+
 					values = json.loads(completed.stdout)
 
 					for operation, microseconds in values.items():
@@ -336,7 +348,7 @@ if __name__ == '__main__':
 
 			print()
 			print('Microseconds per iteration: median [min..max]. Lower is faster.')
-			header = f'{"Operation":22}' + ''.join(f'{mode:>27}' for mode in modes)
+			header = 'Operation'.ljust(22) + ''.join(f'{mode:>29}' for mode in modes)
 			print(header)
 			print('-' * len(header))
 
@@ -365,14 +377,17 @@ if __name__ == '__main__':
 						sys.executable, runners[mode],
 						'--size', str(args.size),
 						'--workload', args.workload,
-						'--mode', mode,
+						'--_mode', mode,
 						'--profile-case', args.profile_case,
 						'--profile-top', str(args.profile_top),
 						'--_profile_only',
 					]
 					environment = dict(os.environ)
 
-					if mode == 'before':
+					if mode == 'baseline':
 						environment['PYTHONPATH'] = baseline + os.pathsep + environment.get('PYTHONPATH', '')
+
+					if args.instrumented:
+						command.append('--instrumented')
 
 					subprocess.run(command, check=True, env=environment)
