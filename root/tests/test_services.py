@@ -117,3 +117,69 @@ class TestServices(o.Tester):
 
 		assert o.__dict__['services'] is services
 		assert services.__dict__['Entity'] is entity
+
+	# Reload an atom from storage while preserving its identity.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_atom_invalidation(cls):
+		state = cls._patch_runtime()
+
+		try:
+			integer = o.Int(73)
+			id      = integer.id
+
+			o.services.Memory.set(f'{integer.__proto__}.__value__', 91)
+			integer.__invalidate__()
+
+			assert integer.id == id
+			assert integer.__value__ == 91
+			assert o.services.Cache.entities[id] is integer
+		finally:
+			cls._restore_runtime(state)
+
+	# Reload list and dictionary item indexes from persistent storage.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_collection_invalidation(cls):
+		state = cls._patch_runtime()
+
+		try:
+			items   = o.List([1, 2])
+			mapping = o.Dict({'first': 1})
+
+			items.__zone__.cache['__items__'] = b''
+			mapping.__zone__.cache['__items__'] = b''
+			items.__invalidate__()
+			mapping.__invalidate__()
+
+			assert list(items) == [1, 2]
+			assert dict(mapping.items()) == {'first': 1}
+			assert o.services.Cache.entities[items.id] is items
+			assert o.services.Cache.entities[mapping.id] is mapping
+		finally:
+			cls._restore_runtime(state)
+
+	# Clear registered entity caches without losing their registry identities.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_cache_invalidate_all(cls):
+		state = cls._patch_runtime()
+
+		try:
+			integer = o.Int(73)
+			items   = o.List([1, 2])
+			cache   = o.services.Cache
+
+			for entity in (integer, items, o.Int, o.List):
+				entity.__zone__.cache['stale'] = True
+
+			cache.invalidate_all()
+
+			for entity in (integer, items, o.Int, o.List):
+				assert cache.entities[entity.id] is entity
+				assert 'stale' not in entity.__zone__.cache
+
+			assert cache.entities[integer.__proto__] is integer
+			assert cache.entities[items.__proto__] is items
+		finally:
+			cls._restore_runtime(state)
