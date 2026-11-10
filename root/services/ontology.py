@@ -13,6 +13,18 @@ import o
 class Ontology(o.Service):
 
 	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
+
+	# Reinitialize services that have already completed startup.
+	# ----------------------------------------------------------------------
+	def _initialize(self, service, **kwargs):
+		if service.__dict__.get('_is_initialized'):
+			type(service).initialize(service, **kwargs)
+		else:
+			service.initialize(**kwargs)
+
+	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
 
@@ -29,8 +41,12 @@ class Ontology(o.Service):
 		if tree_mode is not None and type(tree_mode) is not bool:
 			raise TypeError('tree_mode must be bool or None')
 
-		o.services.Cache.initialize()
-		o.services.Memory.initialize(sync=sync)
+		is_reconnecting = 'env' in o.services.Memory.__dict__
+
+		if not is_reconnecting:
+			self._initialize(o.services.Cache)
+
+		self._initialize(o.services.Memory, sync=sync)
 
 		with o.services.Memory.read() as memory:
 			has_mode   = memory.has('system/tree_mode')
@@ -51,9 +67,12 @@ class Ontology(o.Service):
 
 		o.TREE_MODE = saved_mode
 
-		o.services.Id.initialize()
-		o.services.Route.initialize()
-		o.services.Garbage.initialize()
+		self._initialize(o.services.Id)
+		self._initialize(o.services.Route)
+		self._initialize(o.services.Garbage)
+
+		if is_reconnecting:
+			o.services.Cache.invalidate_all()
 
 		for item in o:
 			if not item.is_directory():
