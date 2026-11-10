@@ -265,6 +265,21 @@ class T(o.Module, metaclass=o.TMeta):
 		for name, value in kwargs.items():
 			setattr(self, name, value)
 
+	# Refresh cached data while preserving object identity.
+	# ----------------------------------------------------------------------
+	def __invalidate__(self):
+		self.__zone__.cache.clear()
+
+		for name in tuple(self.__dict__):
+			if name != 'id' and not name.startswith('_'):
+				object.__delattr__(self, name)
+
+		if isinstance(self, (o.List, o.Dict)):
+			self.__load_items__()
+		elif self.__class__.__is_atom__:
+			value = self.__zone__.get('__value__', UNDEFINED)
+			object.__setattr__(self, '__value__', value)
+
 	# Get retained dependants
 	# ----------------------------------------------------------------------
 	def __dependants__(self, path=None):
