@@ -227,20 +227,47 @@ class Tracker(o.Service):
 
 		type.__setattr__(cls, name, contains)
 
-	# Observe structural traversal, including an object with no children.
-	# A generator records at iteration time, inside the actual read scope.
+	# Observe public data conversion rather than internal garbage traversals.
 	# ----------------------------------------------------------------------
-	def _install_dependants_read(self):
+	def _install_public_data_read(self, name):
 		cls      = o.T
-		name     = '__dependants__'
 		original = cls.__dict__[name]
 		self._saved_reads[(cls, name)] = original
 
-		def dependants(instance, *args, **kwargs):
+		def convert(instance, *args, **kwargs):
 			self._record('r', instance)
-			yield from original(instance, *args, **kwargs)
+			return original(instance, *args, **kwargs)
 
-		type.__setattr__(cls, name, dependants)
+		type.__setattr__(cls, name, convert)
+
+	# Observe each entity serialized, including nested and empty objects.
+	# ----------------------------------------------------------------------
+	def _install_serialization_read(self):
+		cls      = o.Serializer
+		name     = '_serialize_instance'
+		original = cls.__dict__[name]
+		self._saved_reads[(cls, name)] = original
+
+		def serialize(serializer_cls, instance, context):
+			self._record('r', instance)
+			return original.__func__(serializer_cls, instance, context)
+
+		type.__setattr__(cls, name, classmethod(serialize))
+
+	# Observe each persistent node rendered by the public tree operation.
+	# ----------------------------------------------------------------------
+	def _install_tree_read(self):
+		cls      = o.Tree
+		name     = '_render_node'
+		original = cls.__dict__[name]
+		self._saved_reads[(cls, name)] = original
+
+		def render(tree, node, *args, **kwargs):
+			if isinstance(node, o.T):
+				self._record('r', node)
+			return original(tree, node, *args, **kwargs)
+
+		type.__setattr__(cls, name, render)
 
 	# Observe class membership even when enumeration yields no instances.
 	# ----------------------------------------------------------------------
@@ -307,7 +334,10 @@ class Tracker(o.Service):
 			self._install_property(cls, '__items__', False)
 
 		self._install_dict_membership()
-		self._install_dependants_read()
+		self._install_public_data_read('to_data')
+		self._install_public_data_read('to_data_shallow')
+		self._install_serialization_read()
+		self._install_tree_read()
 		self._install_class_enumeration_read()
 		self._install_existence_read()
 
@@ -323,7 +353,7 @@ class Tracker(o.Service):
 			result = original(owner, *args, **kwargs)
 			passed = args[0] if args else UNDEFINED
 
-			if result is not passed:
+			if result is not passed and not result.__class__.__is_atom__:
 				self._record('w', result)
 				self._record('w', result.__class__)
 
@@ -342,9 +372,11 @@ class Tracker(o.Service):
 		def unset(service, entity_id):
 			entity = o.services.Cache.entities.get(entity_id, UNDEFINED)
 			result = original(service, entity_id)
-			self._record_id('w', entity_id)
 
-			if entity is not UNDEFINED:
+			if entity is UNDEFINED or isinstance(entity, type) or not entity.__class__.__is_atom__:
+				self._record_id('w', entity_id)
+
+			if entity is not UNDEFINED and (isinstance(entity, type) or not entity.__class__.__is_atom__):
 				if isinstance(entity, type):
 					parent = entity.__parent__
 					if parent is not None:
