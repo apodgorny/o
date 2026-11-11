@@ -1,7 +1,7 @@
 # ==============================================================================
 # TRACKER PERFORMANCE TEST
 # ==============================================================================
-# Compare identical O workloads with tracking disabled or in r, w and rw mode.
+# Compare identical O workloads with tracking disabled or read-only.
 # Reuse the regular benchmark operations, with isolated storage per run.
 # ==============================================================================
 
@@ -31,17 +31,11 @@ class TestPerformanceTracker(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def measure(cls, size, workload, mode, profile_case=None, profile_top=20):
-		reads   = []
-		writes  = []
-		tracker = o.services.Tracker
-		scope   = nullcontext()
+		reads = []
+		scope = nullcontext()
 
 		if mode == 'r':
-			scope = tracker.track('r', reads)
-		elif mode == 'w':
-			scope = tracker.track('w', writes)
-		elif mode == 'rw':
-			scope = tracker.track('rw', reads, writes)
+			scope = o.services.Tracker.track('r', reads)
 
 		with scope:
 			results = TestPerformance.test_performance(
@@ -62,7 +56,7 @@ if __name__ == '__main__':
 	parser.add_argument('--size', type=int, default=10000)
 	parser.add_argument('--rounds', type=int, default=5)
 	parser.add_argument('--workload', choices=['legacy', 'expanded'], default='legacy')
-	parser.add_argument('--mode', choices=['all', 'none', 'r', 'w', 'rw'], default='all')
+	parser.add_argument('--mode', choices=['all', 'none', 'r'], default='all')
 	parser.add_argument('--tree-mode', choices=['graph', 'tree'], default='graph')
 	parser.add_argument('--profile', action='store_true')
 	parser.add_argument('--instrumented', action='store_true')
@@ -72,7 +66,7 @@ if __name__ == '__main__':
 		'object_create', 'define', 'all',
 	], default='dict_setitem')
 	parser.add_argument('--profile-top', type=int, default=20)
-	parser.add_argument('--_mode', choices=['none', 'r', 'w', 'rw'], help=argparse.SUPPRESS)
+	parser.add_argument('--_mode', choices=['none', 'r'], help=argparse.SUPPRESS)
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	parser.add_argument('--_profile_only', action='store_true', help=argparse.SUPPRESS)
 	args = parser.parse_args()
@@ -113,7 +107,7 @@ if __name__ == '__main__':
 			finally:
 				o.services.Memory.env.close()
 	else:
-		modes        = ['none', 'r', 'w', 'rw'] if args.mode == 'all' else [args.mode]
+		modes        = ['none', 'r'] if args.mode == 'all' else [args.mode]
 		measurements = {mode: {} for mode in modes}
 		runner       = os.path.abspath(__file__)
 
