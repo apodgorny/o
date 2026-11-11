@@ -178,12 +178,12 @@ class TestTrackerPublicApi(o.Tester):
 			assert o.T.__dict__['__dependants__'] is not original_traverse
 			assert o.TMeta.__dict__['__instances__'] is not original_instances
 			assert o.TMeta.__dict__['__call__'] is not original_create
-			assert o.services.Id.__dict__['unset'] is not original_remove
+			assert type(o.services.Id).__dict__['unset'] is not original_remove
 
 		assert o.T.__dict__['__dependants__'] is original_traverse
 		assert o.TMeta.__dict__['__instances__'] is original_instances
 		assert o.TMeta.__dict__['__call__'] is original_create
-		assert o.services.Id.__dict__['unset'] is original_remove
+		assert type(o.services.Id).__dict__['unset'] is original_remove
 
 
 if __name__ == '__main__':
