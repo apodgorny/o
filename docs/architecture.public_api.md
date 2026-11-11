@@ -95,17 +95,18 @@ A collection can contain references, and tree mode imposes additional ownership 
 
 ## Current Tracker coverage
 
-The following table describes what is actually intercepted by the current Tracker implementation, including the new experimental observation hooks.
+The following table describes what is actually intercepted by the current Tracker implementation, including the new experimental observation hooks. Atomic entity *membership enumeration* is not yet a fully reactive operation because births/deaths of atomic child values are deliberately excluded.
 
 | Operation family | Current observed dependency | Notes |
 | --- | --- | --- |
 | Instance field read/write/delete | Instance ID | Cached and uncached values; missing field behavior is not yet a complete schema dependency |
 | `o.List` / `o.Dict` reads and mutations | Collection ID | Normal indices, iteration, membership and structural saves |
-| Structural traversal through `__dependants__()` | Traversed object ID | Includes traversals yielding no children; used by `to_data()`, `to_json()` and `serialize()` |
+| Public `to_data()`, `to_data_shallow()`, `to_json()` | Converted object ID, including nested `to_data()` receivers | Empty objects and nested conversion are observed; internal `__dependants__()` is not patched |
+| Public `serialize()` and `to_tree()` | Each serialized or rendered O object ID | Observed at Serializer/Tree traversal boundaries; custom rendering logic may depend on external state |
 | Persisted class instance enumeration `Class.__instances__()` | Class ID on read; class ID on construction/drop | An empty enumeration is observable |
 | Subclass enumeration `Class.__subclasses__()` | Parent class ID | `Class.extend(...)` registers the parent on class extension |
 | Entity existence `Entity.exists(id/proto)` | Requested/prospective entity ID | Infrastructure-facing; route-style queries use a coarse global identity |
-| Successful entity creation and deletion | New/deleted entity ID and its class ID | Write trace includes extra IDs for entity births/deaths, including embedded values |
+| Successful non-atomic entity creation and deletion | New/deleted entity ID and its class ID | Atomic child births/deaths are intentionally excluded to protect common mutation performance |
 | Class extension / field definition mutations | Affected class ID | Broad write observation; complete class-schema *read* coverage is not established |
 
 **Interception does not imply that all possible code paths within a method are covered.** In particular, direct atomic-value reads, class schema reflection and administrative authorization APIs require further verification.
@@ -120,7 +121,7 @@ O exposes convenience APIs such as:
 - `SomeType.has_persistent_instances()`, `entity.drop()`
 - Python scalar operators on O atomic values
 
-These may be useful and public, **but their complete reactive semantics have not all been proven**. The structural traversal used by `to_data()` and `serialize()` is now observed; direct atom conversion, custom render callbacks, schema reflection, and operations that do not traverse ordinary tracked fields remain outside the verified guarantee. `drop()` is observed through ID removal, but lifecycle and reference effects beyond the deleted entity/class require dedicated tests.
+These may be useful and public, **but their complete reactive semantics have not all been proven**. Public `to_data()`, `serialize()` and `to_tree()` are observed through their own conversion/traversal boundaries, avoiding extra tracking work in internal garbage collection. Direct atom conversion, custom render callbacks, schema reflection, and operations that do not invoke these boundaries remain outside the verified guarantee. `drop()` is observed through ID removal, but lifecycle and reference effects beyond the deleted entity/class require dedicated tests.
 
 If a service wants a fully reactive result today, prefer reading and composing normal object fields and collections explicitly. If a higher-level public method is needed, add observation and a read/change/re-read regression test before depending on it for subscriptions.
 
