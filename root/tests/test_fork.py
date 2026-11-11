@@ -54,8 +54,8 @@ class TestFork(o.Tester):
 					alice.start(tree_mode=True)
 					bob.start(tree_mode=False)
 
-					assert alice.services.Memory.path == os.path.join(directory, 'ontology', alice.__fork_name__)
-					assert bob.services.Memory.path == os.path.join(directory, 'ontology', bob.__fork_name__)
+					assert alice.services.Memory.path == os.path.realpath(os.path.join(directory, 'ontology', alice.__fork_name__))
+					assert bob.services.Memory.path == os.path.realpath(os.path.join(directory, 'ontology', bob.__fork_name__))
 					assert alice.services.Memory is not bob.services.Memory
 					assert alice.T is not bob.T
 					assert alice.V is not bob.V
