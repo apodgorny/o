@@ -42,6 +42,14 @@ jobs:
         working-directory: o
         run: python root/test.py
 
-      - name: Sample Tracker performance (graph mode)
+      - name: Benchmark previous Tracker (master)
         working-directory: o
-        run: python root/tests/_test_performance_tracker.py --size 1000 --rounds 2
+        run: |
+          git fetch origin master
+          git show origin/master:root/services/tracker.py > root/services/tracker.py
+          python root/tests/_test_performance_tracker.py --size 2000 --rounds 3
+          git show HEAD:root/services/tracker.py > root/services/tracker.py
+
+      - name: Benchmark expanded Tracker (PR)
+        working-directory: o
+        run: python root/tests/_test_performance_tracker.py --size 2000 --rounds 3
