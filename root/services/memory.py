@@ -237,7 +237,12 @@ class Zone:
 		self.owner_id = None
 
 		if prefix.startswith('o.T.') and prefix.endswith('.'):
-			self.owner_id = o.String.hash(prefix[:-1], 15)
+			proto = prefix[:-1]
+
+			if proto.endswith('._'):
+				proto = proto[:-2]
+
+			self.owner_id = o.String.hash(proto, 15)
 
 	# Get memory key
 	# ----------------------------------------------------------------------
