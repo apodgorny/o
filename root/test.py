@@ -8,7 +8,8 @@ if os.path.isdir(almasi_root) and almasi_root not in sys.path:
 
 import o
 
-o.start(o.join(o.DATA_DIR))
+type(o).__app__ = o
+o.start()
 
 import tester
 o.tester.run()

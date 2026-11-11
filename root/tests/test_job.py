@@ -63,6 +63,7 @@ class Trial(o.Job):
 import os
 import sys
 from unittest.mock import patch
+from types import SimpleNamespace
 import a, o
 from lib.logger import LogRoute
 
@@ -74,7 +75,8 @@ def update(self, text):
 	original_update(self, text)
 
 a.Spinner.update = update
-o.start(os.path.join(sys.argv[1], 'ontology'))
+type(o).__app__ = SimpleNamespace(__lib_path__=sys.argv[1])
+o.start()
 import app
 
 Trial = app.Trial
