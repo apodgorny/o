@@ -145,8 +145,9 @@ class MemoryBatch:
 		cursor = self.tx.cursor()
 		ok     = cursor.set_range(prefix)
 
-		name = key_prefix.rstrip('.').rsplit('.', 1)[-1]
-		scan = owner_id is None or not (name.startswith('_') and name[1:].isdigit())
+		name    = key_prefix.rstrip('.').rsplit('.', 1)[-1]
+		instance_zone = name.startswith('_') and name[1:].isdigit()
+		scan    = owner_id is None or not instance_zone or key_prefix.startswith('o.T.V._')
 		removed = False
 
 		while ok:
@@ -158,7 +159,7 @@ class MemoryBatch:
 			cursor.delete()
 			removed = True
 
-			if self.write and (scan or b'.__auth__/' in key):
+			if self.write and scan:
 				self._record_key(key.decode('utf-8'))
 
 			ok = cursor.set_range(prefix)
