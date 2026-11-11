@@ -1,8 +1,8 @@
 # ==============================================================================
 # TRACKER SERVICE
 # ==============================================================================
-# Observe persistent ontology reads and writes within caller-owned scopes.
-# Install only the interception paths required by the active tracking modes.
+# Observe persistent ontology reads only within caller-owned scopes.
+# Restore ordinary class descriptors outside tracked computations.
 # ==============================================================================
 
 import asyncio
@@ -23,10 +23,7 @@ class Tracker(o.Service):
 	_thread       = threading.local()
 	_task_scopes  = weakref.WeakKeyDictionary()
 	_active_count = 0
-	_read_count   = 0
-	_write_count  = 0
 	_saved_reads  = {}
-	_saved_writes = {}
 
 	# ======================================================================
 	# PRIVATE METHODS
@@ -70,35 +67,28 @@ class Tracker(o.Service):
 
 		return scopes
 
-	# Append owner identities to each matching scope in access order.
+	# Append observed object identities to each active read scope.
 	# ----------------------------------------------------------------------
-	def _record(self, operation, instance):
-		for mode, reads, writes in self._scopes(False):
-			if operation == 'r' and 'r' in mode:
-				reads.append(instance.id)
-			elif operation == 'w' and 'w' in mode:
-				writes.append(instance.id)
+	def _record(self, instance):
+		for scope in self._scopes(False):
+			scope[0].append(instance.id)
 
-	# Append a known persistent identity without resolving an object.
+	# Observe prospective identities without resolving or loading the object.
 	# ----------------------------------------------------------------------
-	def _record_id(self, operation, entity_id):
-		for mode, reads, writes in self._scopes(False):
-			if operation == 'r' and 'r' in mode:
-				reads.append(entity_id)
-			elif operation == 'w' and 'w' in mode:
-				writes.append(entity_id)
+	def _record_id(self, entity_id):
+		for scope in self._scopes(False):
+			scope[0].append(entity_id)
 
 	# Install one temporary interception, retaining its original for restoration.
 	# ----------------------------------------------------------------------
-	def _install_interceptor(self, cls, name, replacement, mode):
-		saved = self._saved_reads if mode == 'r' else self._saved_writes
-		saved[(cls, name)] = cls.__dict__.get(name, UNDEFINED)
+	def _install_interceptor(self, cls, name, replacement):
+		self._saved_reads[(cls, name)] = cls.__dict__.get(name, UNDEFINED)
 		type.__setattr__(cls, name, replacement)
 
 	# Read a cached field or resolve it through the original cache-miss path.
 	# ----------------------------------------------------------------------
 	def _read_field(self, instance, name):
-		self._record('r', instance)
+		self._record(instance)
 
 		if name in instance.__dict__:
 			value = instance.__dict__[name]
@@ -113,7 +103,7 @@ class Tracker(o.Service):
 		if name not in instance.__dict__:
 			raise AttributeError(name)
 
-		self._record('r', instance)
+		self._record(instance)
 		value = instance.__dict__[name]
 
 		return value
@@ -142,7 +132,7 @@ class Tracker(o.Service):
 			def delete(instance):
 				instance.__dict__.pop(name, None)
 
-			self._install_interceptor(cls, name, DynamicClassAttribute(get, set, delete), 'r')
+			self._install_interceptor(cls, name, DynamicClassAttribute(get, set, delete))
 
 	# Instrument the persisted fields declared by one ontology class.
 	# ----------------------------------------------------------------------
@@ -160,47 +150,10 @@ class Tracker(o.Service):
 		def publish(cls, field_name, field):
 			original(cls, field_name, field)
 			with self._lock:
-				if self._read_count > 0:
+				if self._active_count > 0:
 					self._install_property(cls, field_name, True)
 
-		self._install_interceptor(meta, name, publish, 'r')
-
-	# Observe successful persistent field assignments and deletions.
-	# ----------------------------------------------------------------------
-	def _install_field_writes(self):
-		cls          = o.T
-		original_set = cls.__dict__['__setattr__']
-		original_del = cls.__dict__['__delattr__']
-
-		def assign(instance, field_name, value):
-			result = original_set(instance, field_name, value)
-			self._record('w', instance)
-			return result
-
-		def delete(instance, field_name):
-			result = original_del(instance, field_name)
-			self._record('w', instance)
-			return result
-
-		self._install_interceptor(cls, '__setattr__', assign, 'w')
-		self._install_interceptor(cls, '__delattr__', delete, 'w')
-
-	# Observe collection changes at their shared persistence boundary.
-	# ----------------------------------------------------------------------
-	def _install_collection_writer(self, cls):
-		name     = '__save_items__'
-		original = cls.__dict__[name]
-
-		def save(instance, items):
-			previous = instance.__dict__.get('__items__', UNDEFINED)
-			result   = original(instance, items)
-
-			if previous is UNDEFINED or previous != instance.__dict__['__items__']:
-				self._record('w', instance)
-
-			return result
-
-		self._install_interceptor(cls, name, save, 'w')
+		self._install_interceptor(meta, name, publish)
 
 	# Capture dictionary membership without observing the key index twice.
 	# ----------------------------------------------------------------------
@@ -211,11 +164,11 @@ class Tracker(o.Service):
 
 		def contains(instance, key):
 			result = original(instance, key)
-			self._record('r', instance)
+			self._record(instance)
 
 			return result
 
-		self._install_interceptor(cls, name, contains, 'r')
+		self._install_interceptor(cls, name, contains)
 
 	# Observe public data conversion rather than internal garbage traversals.
 	# ----------------------------------------------------------------------
@@ -224,10 +177,10 @@ class Tracker(o.Service):
 		original = cls.__dict__[name]
 
 		def convert(instance, *args, **kwargs):
-			self._record('r', instance)
+			self._record(instance)
 			return original(instance, *args, **kwargs)
 
-		self._install_interceptor(cls, name, convert, 'r')
+		self._install_interceptor(cls, name, convert)
 
 	# Observe each entity serialized, including nested and empty objects.
 	# ----------------------------------------------------------------------
@@ -237,10 +190,10 @@ class Tracker(o.Service):
 		original = cls.__dict__[name]
 
 		def serialize(serializer_cls, instance, context):
-			self._record('r', instance)
+			self._record(instance)
 			return original.__func__(serializer_cls, instance, context)
 
-		self._install_interceptor(cls, name, classmethod(serialize), 'r')
+		self._install_interceptor(cls, name, classmethod(serialize))
 
 	# Observe each persistent node rendered by the public tree operation.
 	# ----------------------------------------------------------------------
@@ -251,10 +204,10 @@ class Tracker(o.Service):
 
 		def render(tree, node, *args, **kwargs):
 			if isinstance(node, o.T):
-				self._record('r', node)
+				self._record(node)
 			return original(tree, node, *args, **kwargs)
 
-		self._install_interceptor(cls, name, render, 'r')
+		self._install_interceptor(cls, name, render)
 
 	# Observe class membership, including enumerations that yield no results.
 	# ----------------------------------------------------------------------
@@ -264,16 +217,16 @@ class Tracker(o.Service):
 		original_subclasses = cls.__dict__['__subclasses__']
 
 		def instances(owner):
-			self._record('r', owner)
+			self._record(owner)
 			yield from original_instances(owner)
 
 		def subclasses(owner):
 			result = original_subclasses(owner)
-			self._record('r', owner)
+			self._record(owner)
 			return result
 
-		self._install_interceptor(cls, '__instances__', instances, 'r')
-		self._install_interceptor(cls, '__subclasses__', subclasses, 'r')
+		self._install_interceptor(cls, '__instances__', instances)
+		self._install_interceptor(cls, '__subclasses__', subclasses)
 
 	# Observe existence checks without altering their results.
 	# An absent entity has no live object, so track its prospective identity.
@@ -293,10 +246,10 @@ class Tracker(o.Service):
 			else:
 				entity_id = o.T.id
 
-			self._record_id('r', entity_id)
+			self._record_id(entity_id)
 			return result
 
-		self._install_interceptor(cls, name, exists, 'r')
+		self._install_interceptor(cls, name, exists)
 
 	# Add read-side descriptors only while at least one scope needs reads.
 	# ----------------------------------------------------------------------
@@ -319,169 +272,46 @@ class Tracker(o.Service):
 		self._install_class_enumeration_read()
 		self._install_existence_read()
 
-	# Record new instances only after construction has completed successfully.
+	# Restore original descriptors after the last read scope closes.
 	# ----------------------------------------------------------------------
-	def _install_instance_creation_write(self):
-		cls      = o.TMeta
-		name     = '__call__'
-		original = cls.__dict__[name]
-
-		def construct(owner, *args, **kwargs):
-			result = original(owner, *args, **kwargs)
-			passed = args[0] if args else UNDEFINED
-
-			if result is not passed and not result.__class__.__is_atom__:
-				self._record('w', result)
-				self._record('w', result.__class__)
-
-			return result
-
-		self._install_interceptor(cls, name, construct, 'w')
-
-	# Record deletion of a persisted entity and change to its class membership.
-	# ----------------------------------------------------------------------
-	def _install_entity_deletion_write(self):
-		cls      = type(o.services.Id)
-		name     = 'unset'
-		original = cls.__dict__[name]
-
-		def unset(service, entity_id):
-			entity = o.services.Cache.entities.get(entity_id, UNDEFINED)
-			result = original(service, entity_id)
-
-			if entity is UNDEFINED or isinstance(entity, type) or not entity.__class__.__is_atom__:
-				self._record_id('w', entity_id)
-
-			if entity is not UNDEFINED and (isinstance(entity, type) or not entity.__class__.__is_atom__):
-				if isinstance(entity, type):
-					parent = entity.__parent__
-					if parent is not None:
-						self._record('w', parent)
-				else:
-					self._record('w', entity.__class__)
-
-			return result
-
-		self._install_interceptor(cls, name, unset, 'w')
-
-	# Register changes to the class registry and declared fields.
-	# ----------------------------------------------------------------------
-	def _install_class_mutation_write(self):
-		cls             = o.TMeta
-		original_extend = cls.__dict__['extend']
-
-		def extend(owner, *args, **kwargs):
-			result = original_extend(owner, *args, **kwargs)
-			self._record('w', owner)
-			self._record('w', result)
-			return result
-
-		self._install_interceptor(cls, 'extend', extend, 'w')
-
-		for name in ('__setattr__', '__delattr__'):
-			original = cls.__dict__[name]
-
-			def mutate(owner, field, *args, _original=original):
-				result = _original(owner, field, *args)
-
-				if not field.startswith('_') and field != 'id':
-					self._record('w', owner)
-
-				return result
-
-			self._install_interceptor(cls, name, mutate, 'w')
-
-	# Register changes to routes used by existence queries.
-	# ----------------------------------------------------------------------
-	def _install_route_write(self):
-		cls = type(o.services.Route)
-
-		for name in ('set', 'unset'):
-			original = cls.__dict__[name]
-
-			def mutate(service, *args, _original=original, **kwargs):
-				result = _original(service, *args, **kwargs)
-				self._record('w', o.T)
-				return result
-
-			self._install_interceptor(cls, name, mutate, 'w')
-
-	# Add write-side wrappers without affecting the read-only hot path.
-	# ----------------------------------------------------------------------
-	def _install_writes(self):
-		self._install_field_writes()
-
-		for cls in (o.List, o.Dict):
-			self._install_collection_writer(cls)
-
-		self._install_instance_creation_write()
-		self._install_entity_deletion_write()
-		self._install_class_mutation_write()
-		self._install_route_write()
-
-	# Restore only one direction of instrumentation in reverse order.
-	# ----------------------------------------------------------------------
-	def _uninstall(self, saved):
-		for (cls, name), original in reversed(tuple(saved.items())):
+	def _uninstall(self):
+		for (cls, name), original in reversed(tuple(self._saved_reads.items())):
 			if original is UNDEFINED:
 				type.__delattr__(cls, name)
 			else:
 				type.__setattr__(cls, name, original)
 
-		saved.clear()
+		self._saved_reads.clear()
 
-	# Activate the union of modes requested by all currently active scopes.
+	# Install read interceptors once for overlapping nested scopes.
 	# ----------------------------------------------------------------------
 	def _enter(self, scope):
-		mode = scope[0]
-
 		with self._lock:
-			need_reads  = 'r' in mode and self._read_count == 0
-			need_writes = 'w' in mode and self._write_count == 0
-
-			try:
-				if need_reads:
+			if self._active_count == 0:
+				try:
 					self._install_reads()
-				if need_writes:
-					self._install_writes()
-			except BaseException:
-				if need_writes:
-					self._uninstall(self._saved_writes)
-				if need_reads:
-					self._uninstall(self._saved_reads)
-				raise
+				except BaseException:
+					self._uninstall()
+					raise
 
 			self._scopes().append(scope)
 			self._active_count += 1
 
-			if 'r' in mode:
-				self._read_count += 1
-			if 'w' in mode:
-				self._write_count += 1
-
-	# Release only the interceptors no longer needed by any active scope.
+	# Restore original class behavior when the last observer exits.
 	# ----------------------------------------------------------------------
 	def _exit(self, scope):
-		mode = scope[0]
-
 		with self._lock:
 			scopes = self._scopes()
 			assert scopes[-1] is scope
 			scopes.pop()
 			self._active_count -= 1
 
-			if 'r' in mode:
-				self._read_count -= 1
-				if self._read_count == 0:
-					self._uninstall(self._saved_reads)
-
-			if 'w' in mode:
-				self._write_count -= 1
-				if self._write_count == 0:
-					self._uninstall(self._saved_writes)
+			if self._active_count == 0:
+				self._uninstall()
 
 			if not scopes:
 				task = self._current_task()
+
 				if task is not None:
 					del self._task_scopes[task]
 					self._thread.async_count -= 1
@@ -490,26 +320,19 @@ class Tracker(o.Service):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Record reads ('r'), writes ('w') or both ('rw') into caller-owned lists.
-	# Use the current ontology's Tracker: o.services.Tracker.track(...).
-	# Separate thread/async task scopes can overlap without sharing traces.
+	# Record persistent read identities in one caller-owned list.
+	# Use the current fork's Tracker: o.services.Tracker.track('r', reads).
+	# Nested calls, threads, and asynchronous tasks retain separate scopes.
 	# ----------------------------------------------------------------------
 	@contextmanager
-	def track(self, mode, reads=None, writes=None):
-		if mode not in ('r', 'w', 'rw'):
+	def track(self, mode, reads=None):
+		if mode != 'r':
 			raise ValueError(f'Invalid tracking mode: {mode!r}')
 
-		if mode == 'w' and writes is None:
-			writes = reads
-			reads  = None
-
-		if 'r' in mode and not isinstance(reads, list):
+		if not isinstance(reads, list):
 			raise TypeError('Read tracking requires a list')
 
-		if 'w' in mode and not isinstance(writes, list):
-			raise TypeError('Write tracking requires a list')
-
-		scope = (mode, reads, writes)
+		scope = (reads,)
 		self._enter(scope)
 
 		try:
