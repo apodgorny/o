@@ -2,8 +2,17 @@
 
 **Status:** Implemented in `o.services.Tracker`.
 **Source:** `root/services/tracker.py`.
-**Tests:** `root/tests/test_tracker.py`; existing transition regression in `root/tests/test_instance.py`.
+**Tests:** `root/tests/test_tracker.py`; existing transition regression in `root/tests/test_instance.py`; `root/tests/test_tracker_public_api.py`.
 **Benchmark:** `root/tests/_test_performance_tracker.py`.
+**Companion contract:** [Public O API](architecture.public_api.md).
+
+## Mandatory application API boundary
+
+> **APPLICATIONS MUST USE ONLY THE PUBLIC O API TO QUALIFY FOR TRACKER DEPENDENCY GUARANTEES. Direct access to internal Entity, Id, Cache, Route, Memory, Zone, LMDB, `__zone__`, `__items__`, or raw atomic storage BYPASSES THE GUARANTEE.**
+>
+> **The public API alone is not proof of complete reactive coverage:** only operations documented as observed and verified are eligible for automatic dependency-based subscriptions. Unsupported public transformations or reflection paths must be covered by Tracker and tested before use as reactive data sources.
+
+The authoritative list of application-facing operations, excluded internals, verified observation boundaries, and remaining limitations is in **[architecture.public_api.md](architecture.public_api.md)**. Both documents must be maintained together when Tracker's coverage changes.
 
 ## Purpose
 
@@ -145,6 +154,11 @@ except RuntimeError:
 - **List/Dict reads (`r`/`rw` only):** temporary descriptors on `__items__` capture list and dictionary item-index reads. Dictionary membership (`key in mapping`) uses a temporary `o.Dict.__contains__` wrapper, avoiding a second index descriptor on ordinary dictionary lookup.
 - **List/Dict writes (`w`/`rw` only):** a temporary wrapper around each class's existing `__save_items__` records structural changes. No patches to `append`, `pop`, `update`, `__setitem__`, or other individual operations are required.
 - **Dynamic class publication (`r`/`rw` only):** a temporary wrapper around `o.TMeta.__publish_field__` instruments fields defined while read tracking is active.
+- **Structural traversal (`r`/`rw` only):** a temporary generator wrapper around `o.T.__dependants__` records the object's ID even when it yields no children. This also covers traversal used by public serialization helpers; other data-conversion paths still require verification.
+- **Class enumeration (`r`/`rw` only):** temporary wrappers around `o.TMeta.__instances__` and `__subclasses__` record the class ID even for empty results.
+- **Entity existence (`r`/`rw` only):** a temporary wrapper around `Entity.exists` records the requested/prospective identity (or a coarse root identity for source routes).
+- **Birth/death (`w`/`rw` only):** a wrapper around `o.TMeta.__call__` records successfully constructed entity/class identities; an `Id.unset` wrapper records removal and class membership changes. These are candidate write events, not confirmed commits.
+- **Class mutation (`w`/`rw` only):** wrappers around `o.TMeta.extend`, `__setattr__` and `__delattr__` observe public class/field mutation. Route registration changes record a coarse root identity for source-route existence queries.
 
 Original class attributes and methods are stored separately for read and write interception, then restored when each group's reference count reaches zero. The previously existing `__on_change__` hook is not used.
 
@@ -157,6 +171,7 @@ Original class attributes and methods are stored separately for read and write i
 - **Collection writes:** the save wrapper compares before/after container indexes. A no-op save with unchanged indexes does not add a write ID.
 - **Atoms:** O stores atomic children as entities but exposes Python primitive values on normal field/collection access. The observation is associated with the owning field/container. Direct internal access to an atom's `__value__`, or direct calls to `Entity.value(id)`, are not individually tracked.
 - **Transactions:** this is an access trace, **not** a committed-change log. It does not automatically discard write events after a rollback. Consumers that publish changes should coordinate publication with successful transaction completion.
+- **Public API coverage:** direct access to internal storage or entity resolution can bypass observation. Construction, structural traversal and class membership are additionally observed, but class schema reflection, direct atomic conversion, authorization and other specialized public paths still require verification. See [architecture.public_api.md](architecture.public_api.md).
 - **Scope:** only operations executed while the context is active are added. The returned lists remain usable afterward.
 
 ## Forked ontologies
@@ -234,7 +249,7 @@ Tracker's functional contract is **observation without changes to ordinary ontol
 py root/test.py
 ```
 
-`root/tests/test_tracker.py` covers cached and uncached reads; field assignments and deletions; mode validation; class defaults/inheritance; dynamic class publication; list and dictionary reads/writes; cache reconstruction; mode-specific interception; mixed nested scopes; exception restoration; thread/async-task separation; and simultaneous tracking in independent ontology forks.
+`root/tests/test_tracker_public_api.py` covers structural traversal, nested serialization, empty enumeration, entity birth/death, and missing-entity existence.\n\n`root/tests/test_tracker.py` covers cached and uncached reads; field assignments and deletions; mode validation; class defaults/inheritance; dynamic class publication; list and dictionary reads/writes; cache reconstruction; mode-specific interception; mixed nested scopes; exception restoration; thread/async-task separation; and simultaneous tracking in independent ontology forks.
 
 See also: `root/tests/test_instance.py` for the replacement regression test of field transitions via `Tracker`.
 
