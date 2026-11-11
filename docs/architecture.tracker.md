@@ -249,7 +249,9 @@ Tracker's functional contract is **observation without changes to ordinary ontol
 py root/test.py
 ```
 
-`root/tests/test_tracker_public_api.py` covers structural traversal, nested serialization, empty enumeration, entity birth/death, and missing-entity existence.\n\n`root/tests/test_tracker.py` covers cached and uncached reads; field assignments and deletions; mode validation; class defaults/inheritance; dynamic class publication; list and dictionary reads/writes; cache reconstruction; mode-specific interception; mixed nested scopes; exception restoration; thread/async-task separation; and simultaneous tracking in independent ontology forks.
+`root/tests/test_tracker_public_api.py` covers structural traversal, nested serialization, empty enumeration, entity birth/death, and missing-entity existence.
+
+`root/tests/test_tracker.py` covers cached and uncached reads; field assignments and deletions; mode validation; class defaults/inheritance; dynamic class publication; list and dictionary reads/writes; cache reconstruction; mode-specific interception; mixed nested scopes; exception restoration; thread/async-task separation; and simultaneous tracking in independent ontology forks.
 
 See also: `root/tests/test_instance.py` for the replacement regression test of field transitions via `Tracker`.
 
