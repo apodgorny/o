@@ -112,8 +112,11 @@ class MemoryBatch:
 		elif key.startswith('tree/parents/'):
 			entity_id = key.rsplit('/', 1)[-1]
 			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
+
 			if type(value) is int:
 				ids.add(value)
+			else:
+				ids.add(0)
 		elif key.startswith('routes/'):
 			ids.add(self.memory.root_id)
 			if isinstance(value, dict) and type(value.get('id')) is int:
