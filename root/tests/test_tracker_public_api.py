@@ -1,0 +1,196 @@
+# ==============================================================================
+# TEST TRACKER PUBLIC API
+# ==============================================================================
+# Verify dependency completeness at public O object and discovery boundaries.
+# ==============================================================================
+
+import o
+
+
+class TestTrackerPublicApi(o.Tester):
+	RUNTIME_PREFIX = 'o_tracker_public_'
+
+	# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
+
+	# Serialization must observe objects reached through structural traversal.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_serialization_tracks_nested_objects(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Finance  = o.T.extend('TrackerPublicFinance', salary=int)
+			Employee = o.T.extend('TrackerPublicEmployee', finance=Finance)
+			finance  = Finance(salary=200)
+			employee = Employee(finance=finance)
+			reads    = []
+			writes   = []
+
+			with o.services.Tracker.track('r', reads):
+				assert employee.to_data() == {'finance': {'salary': 200}}
+				assert employee.to_json()
+				assert employee.serialize()
+
+			assert employee.id in reads
+			assert finance.id in reads
+
+			with o.services.Tracker.track('w', writes):
+				finance.salary = 250
+
+			assert finance.id in writes
+			assert set(reads) & set(writes)
+		finally:
+			cls._restore_runtime(state)
+
+	# Even an empty traversal depends on the object being traversed.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_empty_object_traversal_tracks_owner(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model = o.T.extend('TrackerPublicEmpty', value=o.F(int, default=None))
+			item  = Model()
+			reads = []
+
+			with o.services.Tracker.track('r', reads):
+				assert item.to_data() == {}
+
+			assert item.id in reads
+		finally:
+			cls._restore_runtime(state)
+
+	# An empty class enumeration must invalidate when an instance is born.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_empty_class_enumeration_and_creation(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model  = o.T.extend('TrackerPublicInstances', value=int)
+			reads  = []
+			writes = []
+
+			with o.services.Tracker.track('r', reads):
+				assert list(Model.__instances__()) == []
+
+			assert Model.id in reads
+
+			with o.services.Tracker.track('w', writes):
+				item = Model(value=1)
+
+			assert item.id in writes
+			assert Model.id in writes
+			assert set(reads) & set(writes)
+		finally:
+			cls._restore_runtime(state)
+
+	# Class membership must invalidate when an instance is dropped.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_class_enumeration_and_deletion(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model  = o.T.extend('TrackerPublicDrop', value=int)
+			item   = Model(value=1)
+			reads  = []
+			writes = []
+
+			with o.services.Tracker.track('r', reads):
+				assert item.id in [value.id for value in Model.__instances__()]
+
+			with o.services.Tracker.track('w', writes):
+				item.drop()
+
+			assert Model.id in reads
+			assert Model.id in writes
+			assert item.id in writes
+			assert set(reads) & set(writes)
+		finally:
+			cls._restore_runtime(state)
+
+	# Reading an absent entity records the identity that its birth will write.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_missing_entity_existence(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model  = o.T.extend('TrackerPublicExists', value=int)
+			proto  = f'{Model.__proto__}._{Model.__version__}'
+			reads  = []
+			writes = []
+
+			with o.services.Tracker.track('r', reads):
+				assert not o.services.Entity.exists(proto)
+
+			assert o.services.Id.hash(proto) in reads
+
+			with o.services.Tracker.track('w', writes):
+				item = Model(value=7)
+
+			assert item.__proto__ == proto
+			assert item.id in writes
+			assert set(reads) & set(writes)
+		finally:
+			cls._restore_runtime(state)
+
+	# Subclass membership uses the parent class as a dependency.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_subclass_enumeration_and_extension(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Base   = o.T.extend('TrackerPublicBase')
+			reads  = []
+			writes = []
+
+			with o.services.Tracker.track('r', reads):
+				assert Base.__subclasses__() == []
+
+			with o.services.Tracker.track('w', writes):
+				Child = Base.extend('TrackerPublicChild')
+
+			assert Child.__parent__ is Base
+			assert Base.id in reads
+			assert Base.id in writes
+			assert set(reads) & set(writes)
+		finally:
+			cls._restore_runtime(state)
+
+	# Newly introduced observation paths must restore their original methods.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_new_interceptors_are_reversible(cls):
+		tracker           = o.services.Tracker
+		original_data      = o.T.__dict__['to_data']
+		original_serialize = o.Serializer.__dict__['_serialize_instance']
+		original_tree      = o.Tree.__dict__['_render_node']
+		original_instances = o.TMeta.__dict__['__instances__']
+		original_create   = o.TMeta.__dict__['__call__']
+		original_remove   = type(o.services.Id).__dict__['unset']
+		reads             = []
+		writes            = []
+
+		with tracker.track('rw', reads, writes):
+			assert o.T.__dict__['to_data'] is not original_data
+			assert o.Serializer.__dict__['_serialize_instance'] is not original_serialize
+			assert o.Tree.__dict__['_render_node'] is not original_tree
+			assert o.TMeta.__dict__['__instances__'] is not original_instances
+			assert o.TMeta.__dict__['__call__'] is not original_create
+			assert type(o.services.Id).__dict__['unset'] is not original_remove
+
+		assert o.T.__dict__['to_data'] is original_data
+		assert o.Serializer.__dict__['_serialize_instance'] is original_serialize
+		assert o.Tree.__dict__['_render_node'] is original_tree
+		assert o.TMeta.__dict__['__instances__'] is original_instances
+		assert o.TMeta.__dict__['__call__'] is original_create
+		assert type(o.services.Id).__dict__['unset'] is original_remove
+
+
+if __name__ == '__main__':
+	TestTrackerPublicApi.run()

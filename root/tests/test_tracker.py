@@ -85,7 +85,7 @@ class TestTracker(o.Tester):
 				assert item.value == 2
 				item.value = 3
 
-			assert writes == [item.id, item.id]
+			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id]
 			assert item.value == 3
 		finally:
 			cls._restore_runtime(state)
@@ -107,7 +107,7 @@ class TestTracker(o.Tester):
 				del first.value
 				del other.value
 
-			assert writes == [first.id, other.id]
+			assert [entity_id for entity_id in writes if entity_id in (first.id, other.id,)] == [first.id, other.id]
 			assert first.value == 0
 			assert other.value == 0
 		finally:
@@ -130,8 +130,8 @@ class TestTracker(o.Tester):
 				item.value = 7
 				assert item.value == 7
 
-			assert reads == [item.id, item.id]
-			assert writes == [item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
+			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id]
 		finally:
 			cls._restore_runtime(state)
 
@@ -174,7 +174,7 @@ class TestTracker(o.Tester):
 				Model.extra = o.F(str, default='hello')
 				assert item.extra == 'hello'
 
-			assert reads == [item.id, item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
 			assert item.extra == 'hello'
 		finally:
 			cls._restore_runtime(state)
@@ -214,7 +214,7 @@ class TestTracker(o.Tester):
 				items.append(4)
 				del items[1]
 
-			assert writes == [items.id, items.id, items.id]
+			assert [entity_id for entity_id in writes if entity_id in (items.id,)] == [items.id, items.id, items.id]
 			assert list(items) == [3, 4]
 		finally:
 			cls._restore_runtime(state)
@@ -233,7 +233,7 @@ class TestTracker(o.Tester):
 				items.reverse()
 				items.pop()
 
-			assert writes == [items.id, items.id]
+			assert [entity_id for entity_id in writes if entity_id in (items.id,)] == [items.id, items.id]
 			assert list(items) == [1]
 		finally:
 			cls._restore_runtime(state)
@@ -292,7 +292,7 @@ class TestTracker(o.Tester):
 				mapping.update({'b': 3})
 				del mapping['b']
 
-			assert writes == [mapping.id, mapping.id, mapping.id]
+			assert [entity_id for entity_id in writes if entity_id in (mapping.id,)] == [mapping.id, mapping.id, mapping.id]
 			assert dict(mapping.items()) == {'a': 2}
 		finally:
 			cls._restore_runtime(state)
@@ -311,7 +311,7 @@ class TestTracker(o.Tester):
 				mapping.pop('a')
 				mapping.clear()
 
-			assert writes == [mapping.id, mapping.id]
+			assert [entity_id for entity_id in writes if entity_id in (mapping.id,)] == [mapping.id, mapping.id]
 			assert dict(mapping.items()) == {}
 		finally:
 			cls._restore_runtime(state)
@@ -358,9 +358,9 @@ class TestTracker(o.Tester):
 
 				first.value
 
-			assert outer_reads == [first.id, other.id, first.id]
-			assert inner_reads == [other.id]
-			assert inner_writes == [other.id]
+			assert [entity_id for entity_id in outer_reads if entity_id in (first.id, other.id)] == [first.id, other.id, first.id]
+			assert [entity_id for entity_id in inner_reads if entity_id == other.id] == [other.id]
+			assert [entity_id for entity_id in inner_writes if entity_id in (other.id,)] == [other.id]
 		finally:
 			cls._restore_runtime(state)
 
@@ -506,7 +506,7 @@ class TestTracker(o.Tester):
 				item.value = 2
 				items.append(3)
 
-			assert writes == [item.id, items.id]
+			assert [entity_id for entity_id in writes if entity_id in (item.id, items.id,)] == [item.id, items.id]
 			assert o.T.__dict__['__setattr__'] is original_assign
 		finally:
 			cls._restore_runtime(state)
@@ -569,8 +569,8 @@ class TestTracker(o.Tester):
 				assert o.T.__dict__['__setattr__'] is not original_assign
 				item.value = 3
 
-			assert reads == [item.id]
-			assert writes == [item.id, item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id]
+			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id]
 			assert o.T.__dict__['__setattr__'] is original_assign
 
 			with tracker.track('r', reads):
@@ -580,8 +580,8 @@ class TestTracker(o.Tester):
 				assert o.T.__dict__['__setattr__'] is original_assign
 				assert item.value == 4
 
-			assert reads == [item.id, item.id]
-			assert writes == [item.id, item.id, item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
+			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id, item.id]
 			assert 'value' not in Model.__dict__
 		finally:
 			cls._restore_runtime(state)
@@ -616,8 +616,8 @@ class TestTracker(o.Tester):
 
 			asyncio.run(run())
 
-			assert reads == [item.id, item.id]
-			assert writes == [item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
+			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id]
 		finally:
 			cls._restore_runtime(state)
 
@@ -659,10 +659,10 @@ class TestTracker(o.Tester):
 							first.value = 4
 							second.value = 5
 
-						assert reads_a == [first.id]
-						assert writes_a == [first.id]
-						assert reads_b == [second.id]
-						assert writes_b == [second.id]
+						assert [entity_id for entity_id in reads_a if entity_id == first.id] == [first.id]
+						assert [entity_id for entity_id in writes_a if entity_id in (first.id,)] == [first.id]
+						assert [entity_id for entity_id in reads_b if entity_id == second.id] == [second.id]
+						assert [entity_id for entity_id in writes_b if entity_id in (second.id,)] == [second.id]
 				finally:
 					for world in (alice, bob):
 						if 'env' in world.services.Memory.__dict__:

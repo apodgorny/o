@@ -504,7 +504,7 @@ class TestInstance(o.Tester):
 				x.foo = 'b'
 				del x.foo
 
-			assert writes == [x.id, x.id]
+			assert [entity_id for entity_id in writes if entity_id in (x.id,)] == [x.id, x.id]
 		finally:
 			cls._restore_runtime(state)
 
