@@ -13,6 +13,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 
 import o
 
@@ -196,7 +197,8 @@ def compare(size, include_create):
 	cases.append('define')
 
 	with tempfile.TemporaryDirectory(prefix='o_sqlite_compare_') as directory:
-		o.start(os.path.join(directory, 'ontology'), sync=False)
+		type(o).__app__ = SimpleNamespace(__lib_path__=directory)
+		o.start(sync=False)
 		env = o.services.Memory.env
 
 		try:

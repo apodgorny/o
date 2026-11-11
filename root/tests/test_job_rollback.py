@@ -57,10 +57,12 @@ class Trial(o.Job):
 			source = '''import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 import o
 
-o.start(os.path.join(sys.argv[1], 'ontology'))
+type(o).__app__ = SimpleNamespace(__lib_path__=sys.argv[1])
+o.start()
 import app
 
 async def verify():

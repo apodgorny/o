@@ -1,0 +1,75 @@
+{
+	"classes": {
+		"o.T.SearchWorld": {
+			"description": {
+				"type": "o.Str",
+				"default": "Tiny search world."
+			},
+
+			"food": {
+				"type": "o.T.Branch",
+				"description": "Food branch."
+			},
+
+			"machines": {
+				"type": "o.T.Branch",
+				"description": "Machines branch."
+			}
+		},
+
+		"o.T.Branch": {
+			"description": {
+				"type": "o.Str"
+			},
+
+			"a": {
+				"type": "o.T.Topic"
+			},
+
+			"b": {
+				"type": "o.T.Topic"
+			}
+		},
+
+		"o.T.Topic": {
+			"description": {
+				"type": "o.Str"
+			}
+		}
+	},
+
+	"instance": {
+		"__class__": "o.T.SearchWorld",
+		"description": "Tiny tree for testing semantic retrieval.",
+
+		"food": {
+			"__class__": "o.T.Branch",
+			"description": "Food branch with meals and cooking.",
+
+			"a": {
+				"__class__": "o.T.Topic",
+				"description": "Pizza with cheese tomato sauce and oven."
+			},
+
+			"b": {
+				"__class__": "o.T.Topic",
+				"description": "Soup with vegetables broth and warm bowl."
+			}
+		},
+
+		"machines": {
+			"__class__": "o.T.Branch",
+			"description": "Machine branch with tools and engines.",
+
+			"a": {
+				"__class__": "o.T.Topic",
+				"description": "Car engine with fuel pistons wheels and road."
+			},
+
+			"b": {
+				"__class__": "o.T.Topic",
+				"description": "Electric drill with battery motor screw and holes."
+			}
+		}
+	}
+}

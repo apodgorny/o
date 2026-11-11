@@ -5,6 +5,7 @@
 # ==============================================================================
 
 import tempfile
+from types import SimpleNamespace
 
 import o
 
@@ -128,7 +129,8 @@ class TestAuth(o.Tester):
 
 if __name__ == '__main__':
 	with tempfile.TemporaryDirectory(prefix='o_auth_test_') as directory:
-		o.start(directory, tree_mode=True)
+		type(o).__app__ = SimpleNamespace(__lib_path__=directory)
+		o.start(tree_mode=True)
 
 		try:
 			TestAuth.run()

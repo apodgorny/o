@@ -6,7 +6,6 @@
 
 import os
 
-import do
 import o
 
 
@@ -175,7 +174,7 @@ class TestSerializer(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			tree_dict = do.tests.fixtures.tree_small
+			tree_dict = o.tests.fixtures.tree_small
 			root_spec = tree_dict['instance']
 			tree      = o.T.deserialize(tree_dict)
 
@@ -193,7 +192,7 @@ class TestSerializer(o.Tester):
 		state = cls._patch_runtime()
 
 		try:
-			tree  = o.T.deserialize(do.tests.fixtures.tree_small)
+			tree  = o.T.deserialize(o.tests.fixtures.tree_small)
 			spec  = tree.serialize()
 			tree2 = o.T.deserialize(spec)
 

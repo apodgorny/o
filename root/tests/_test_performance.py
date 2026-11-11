@@ -16,6 +16,7 @@ import statistics
 import subprocess
 import sys
 import tarfile
+from types import SimpleNamespace
 import tempfile
 import time
 
@@ -263,10 +264,11 @@ if __name__ == '__main__':
 			parser.error('internal mode is required')
 
 		with tempfile.TemporaryDirectory(prefix=f'o_perf_{mode}_') as directory:
+			type(o).__app__ = SimpleNamespace(__lib_path__=directory)
 			if mode == 'baseline':
-				o.start(os.path.join(directory, 'ontology'))
+				o.start()
 			else:
-				o.start(os.path.join(directory, 'ontology'), tree_mode=mode == 'tree')
+				o.start(tree_mode=mode == 'tree')
 
 			o.Timer.enabled = args.instrumented and args._profile_only
 

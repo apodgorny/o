@@ -175,11 +175,13 @@ class TestTreeMode(o.Tester):
 		with tempfile.TemporaryDirectory() as path:
 			source = '''
 import sys
+from types import SimpleNamespace
 import o
 
+type(o).__app__ = SimpleNamespace(__lib_path__=sys.argv[1])
 mode = sys.argv[2]
 value = None if mode == 'load' else mode == 'tree'
-o.start(sys.argv[1], tree_mode=value)
+o.start(tree_mode=value)
 assert o.TREE_MODE is True
 '''
 			environment = dict(os.environ)
