@@ -201,6 +201,11 @@ class TestTrackerTransparency(o.Tester):
 			del Child.extra
 			missing = cls._error(lambda: getattr(instance, 'extra'))
 
+		# New classes have distinct proto names; compare the error's meaning.
+		# ----------------------------------------------------------------------
+		if missing is not None:
+			missing = (missing[0], missing[1].replace(Child.__proto__, '<Child>'))
+
 		result = (
 			before,
 			added,
@@ -300,7 +305,8 @@ class TestTrackerTransparency(o.Tester):
 			baseline = cls._run_schema_changes(None)
 
 			for mode in ('r', 'w', 'rw'):
-				assert cls._run_schema_changes(mode) == baseline, mode
+				observed = cls._run_schema_changes(mode)
+				assert observed == baseline, (mode, baseline, observed)
 		finally:
 			cls._restore_runtime(state)
 
