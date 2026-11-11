@@ -41,3 +41,7 @@ jobs:
       - name: Run ontology tests
         working-directory: o
         run: python root/test.py
+
+      - name: Sample Tracker performance (graph mode)
+        working-directory: o
+        run: python root/tests/_test_performance_tracker.py --size 1000 --rounds 2
