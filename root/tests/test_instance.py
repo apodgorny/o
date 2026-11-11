@@ -488,6 +488,7 @@ class TestInstance(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
+	# Track changes after assigning and deleting an ontology field.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_tracker_receives_attr_transitions(cls):
