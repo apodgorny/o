@@ -488,23 +488,24 @@ class TestInstance(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-	# Track changes after assigning and deleting an ontology field.
+	# Persist mutation identities after assigning and deleting a field.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_tracker_receives_attr_transitions(cls):
+	def test_write_journal_receives_attr_transitions(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name = os.path.basename(state['root'])
 			Tracked   = o.T.extend(f'Tracked_{root_name}', foo=str)
 			x         = Tracked(foo='a')
-			writes    = []
+			memory    = o.services.Memory
+			revision  = memory.revision()
 
-			with o.services.Tracker.track('w', writes):
-				x.foo = 'b'
-				del x.foo
+			x.foo = 'b'
+			del x.foo
 
-			assert [entity_id for entity_id in writes if entity_id in (x.id,)] == [x.id, x.id]
+			records = list(memory.changes(revision))
+			assert len([ids for _, ids in records if x.id in ids]) == 2
 		finally:
 			cls._restore_runtime(state)
 
