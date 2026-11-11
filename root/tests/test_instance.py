@@ -490,29 +490,20 @@ class TestInstance(o.Tester):
 
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_class_on_change_receives_attr_transitions(cls):
+	def test_tracker_receives_attr_transitions(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name = os.path.basename(state['root'])
-			events    = []
-			OnChange  = o.T.extend(f'OnChange_{root_name}', foo=str)
+			Tracked   = o.T.extend(f'Tracked_{root_name}', foo=str)
+			x         = Tracked(foo='a')
+			writes    = []
 
-			def on_change(instance):
-				events.append(instance)
+			with o.services.Tracker.track('w', writes):
+				x.foo = 'b'
+				del x.foo
 
-			OnChange.__on_change__ = on_change
-
-			x = OnChange(foo='a')
-			events.clear()
-
-			x.foo = 'b'
-
-			del x.foo
-
-			assert len(events) == 2
-			assert events[0] is x
-			assert events[1] is x
+			assert writes == [x.id, x.id]
 		finally:
 			cls._restore_runtime(state)
 
