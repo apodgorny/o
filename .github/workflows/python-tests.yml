@@ -2,7 +2,7 @@ name: O Python tests
 
 on:
   push:
-    branches: [master]
+    branches: [master, fork-validation-2026-11-10]
   workflow_dispatch:
 
 jobs:
