@@ -205,14 +205,13 @@ class MemoryBatch:
 			yield key_bytes.decode('utf-8'), cursor.value()
 			has_item = cursor.next()
 
-	# Stream committed changes after a transaction, without scanning older IDs.
-	# Read only journal entries newer than the given LMDB transaction ID.
+	# Seek to the first committed change after the given transaction ID.
 	# ----------------------------------------------------------------------
 	def changes(self, after_transaction=0):
 		start = f'changes/{after_transaction + 1:020d}'
 
 		for key, value in self._pairs('changes/', start):
-			yield int(key[8:]), set(self.memory.from_bytes(value))
+			yield int(key.removeprefix('changes/')), set(self.memory.from_bytes(value))
 
 	# Iterate stored items by prefix
 	# ----------------------------------------------------------------------
