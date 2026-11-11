@@ -576,10 +576,6 @@ class TMeta(type(o.Module)):
 		cls.__zone__.set('__version__', cls.__version__)
 		return version
 
-	# Instance change hook
-	# ----------------------------------------------------------------------
-	def __on_change__(cls, instance): pass
-
 	# ======================================================================
 	# PUBLIC CLASS METHODS
 	# ======================================================================
