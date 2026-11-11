@@ -42,14 +42,19 @@ jobs:
         working-directory: o
         run: python root/test.py
 
-      - name: Benchmark previous Tracker (master)
+      - name: Benchmark baseline Memory and Tracker (master)
         working-directory: o
         run: |
           git fetch origin master
+          git show origin/master:root/services/memory.py > root/services/memory.py
           git show origin/master:root/services/tracker.py > root/services/tracker.py
-          python root/tests/_test_performance_tracker.py --size 2000 --rounds 3
+          python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
+          python root/tests/_test_performance_tracker.py --size 1000 --rounds 3
+          git show HEAD:root/services/memory.py > root/services/memory.py
           git show HEAD:root/services/tracker.py > root/services/tracker.py
 
-      - name: Benchmark expanded Tracker (PR)
+      - name: Benchmark transactional journal and read-only Tracker (PR)
         working-directory: o
-        run: python root/tests/_test_performance_tracker.py --size 2000 --rounds 3
+        run: |
+          python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
+          python root/tests/_test_performance_tracker.py --size 1000 --rounds 3
