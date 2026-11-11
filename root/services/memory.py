@@ -18,23 +18,22 @@ class MemoryBatch:
 	# Create batch
 	# ----------------------------------------------------------------------
 	def __init__(self, memory, write=True):
-		self.memory = memory
-		self.write  = write
-		self.ctx    = None
-		self.tx     = None
+		self.memory      = memory
+		self.write       = write
+		self.ctx         = None
+		self.tx          = None
 		self.depth       = 0
 		self.changed_ids = set()
 
 	# If we are already in a transaction, just return ourselves
 	# ----------------------------------------------------------------------
 	def __enter__(self):
+		if self.tx is None:
+			self.ctx         = self.memory.env.begin(write=self.write)
+			self.tx          = self.ctx.__enter__()
+			self.changed_ids = set()
+
 		self.depth += 1
-		if self.tx is not None:
-			return self
-		
-		self.ctx         = self.memory.env.begin(write=self.write)
-		self.tx          = self.ctx.__enter__()
-		self.changed_ids = set()
 		return self
 
 	# Only the opener of the context manager should close it.
@@ -75,6 +74,7 @@ class MemoryBatch:
 	# Zero is reserved for a full-ontology invalidation when ownership is unknown.
 	# ----------------------------------------------------------------------
 	def _record_key(self, key, value=UNDEFINED):
+		key = str(key)
 		ids = self.changed_ids
 
 		if key.startswith('o.T.') or key == 'o.T':
@@ -118,9 +118,7 @@ class MemoryBatch:
 			ids.add(self.memory.root_id)
 			if isinstance(value, dict) and type(value.get('id')) is int:
 				ids.add(value['id'])
-		elif key.startswith('changes/'):
-			pass
-		else:
+		elif not key.startswith('changes/'):
 			ids.add(0)
 
 	# Store value and observe its owner only after the LMDB put succeeds.
