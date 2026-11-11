@@ -101,8 +101,10 @@ class Ontology(o.Service):
 		if is_reconnecting:
 			o.services.Cache.invalidate_all()
 
+		# Test carriers change the shared Tester class and stay outside fork startup.
+		# ----------------------------------------------------------------------
 		for item in o:
-			if not item.is_directory() and item.get_name() != 'test.py':
+			if not item.is_directory() and item.get_name() not in ('test.py', 'tester.py'):
 				item.load()
 
 		o.services.Entity.ensure_value()
