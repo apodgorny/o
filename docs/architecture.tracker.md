@@ -142,7 +142,7 @@ except RuntimeError:
 - **Field reads (`r`/`rw` only):** install `DynamicClassAttribute` data descriptors. `__get__` catches cached reads in `instance.__dict__` and cache misses. Their `__set__` and `__delete__` transparently preserve the usual Python cache behavior, without reporting writes.
 - **Field writes (`w`/`rw` only):** temporarily wrap `o.T.__setattr__`; successful assignments record the owning object's ID after normal persistence. Initial cache hydration uses `object.__setattr__` and is not counted as a write.
 - **Field deletion (`w`/`rw` only):** a temporary wrapper around `o.T.__delattr__` registers a successful deletion, including when the field was not cached.
-- **List/Dict reads (`r`/`rw` only):** temporary descriptors on `__items__` capture reads of the collections' backing in-memory ID indexes. `o.Dict.__key_ids__` is also instrumented for dictionary key lookup and membership.
+- **List/Dict reads (`r`/`rw` only):** temporary descriptors on `__items__` capture list and dictionary item-index reads. Dictionary membership (`key in mapping`) uses a temporary `o.Dict.__contains__` wrapper, avoiding a second index descriptor on ordinary dictionary lookup.
 - **List/Dict writes (`w`/`rw` only):** a temporary wrapper around each class's existing `__save_items__` records structural changes. No patches to `append`, `pop`, `update`, `__setitem__`, or other individual operations are required.
 - **Dynamic class publication (`r`/`rw` only):** a temporary wrapper around `o.TMeta.__publish_field__` instruments fields defined while read tracking is active.
 
@@ -219,6 +219,14 @@ py root/tests/_test_performance_tracker.py --mode rw --profile --profile-case di
 ```
 
 Tracking wraps the complete benchmark workload, while the original benchmark times operations independently of fixture construction. Results depend on hardware, Python version, and the selected workload; no speedup or slowdown should be assumed before measuring.
+
+## Behavior transparency and verification
+
+Tracker's functional contract is **observation without changes to ordinary ontology behavior**: when the same operations run with no tracking and with `r`, `w` or `rw`, they must return the same values, raise equivalent exceptions, mutate the same logical entities and persist the same data.
+
+`root/tests/test_tracker_transparency.py` verifies this contract by executing the same operation scenarios in all four modes and comparing their results. The differential tests cover persistent fields and defaults; cached and uncached reads; list/dictionary built-in methods and mutations; error classes and messages; dynamic schema definition/removal and inheritance; reconstruction; and the resulting persisted values and item-index sizes.
+
+**Introspection caveat:** the implementation deliberately replaces selected attributes of the Python class objects during a scope. Consequently, `Class.__dict__`, `inspect.getattr_static(...)`, method identity and performance are observably different until the scope ends. This is inherent to the temporary class-patching design and is **not** covered by the claim of functional transparency. No finite test suite proves equivalence for every conceivable Python operation or extension.
 
 ## Tests
 
