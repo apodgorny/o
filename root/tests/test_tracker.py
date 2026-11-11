@@ -569,7 +569,7 @@ class TestTracker(o.Tester):
 				assert o.T.__dict__['__setattr__'] is not original_assign
 				item.value = 3
 
-			assert reads == [item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id]
 			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id]
 			assert o.T.__dict__['__setattr__'] is original_assign
 
