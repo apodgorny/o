@@ -67,17 +67,17 @@ class Tracker(o.Service):
 
 		return scopes
 
-	# Append observed object identities to each active read scope.
+	# Append each observed owner ID to the active read lists.
 	# ----------------------------------------------------------------------
 	def _record(self, instance):
-		for scope in self._scopes(False):
-			scope[0].append(instance.id)
+		for reads in self._scopes(False):
+			reads.append(instance.id)
 
-	# Observe prospective identities without resolving or loading the object.
+	# Observe prospective identities without resolving or loading an object.
 	# ----------------------------------------------------------------------
 	def _record_id(self, entity_id):
-		for scope in self._scopes(False):
-			scope[0].append(entity_id)
+		for reads in self._scopes(False):
+			reads.append(entity_id)
 
 	# Install one temporary interception, retaining its original for restoration.
 	# ----------------------------------------------------------------------
@@ -283,9 +283,9 @@ class Tracker(o.Service):
 
 		self._saved_reads.clear()
 
-	# Install read interceptors once for overlapping nested scopes.
+	# Install read interceptors once for overlapping scopes.
 	# ----------------------------------------------------------------------
-	def _enter(self, scope):
+	def _enter(self, reads):
 		with self._lock:
 			if self._active_count == 0:
 				try:
@@ -294,15 +294,15 @@ class Tracker(o.Service):
 					self._uninstall()
 					raise
 
-			self._scopes().append(scope)
+			self._scopes().append(reads)
 			self._active_count += 1
 
 	# Restore original class behavior when the last observer exits.
 	# ----------------------------------------------------------------------
-	def _exit(self, scope):
+	def _exit(self, reads):
 		with self._lock:
 			scopes = self._scopes()
-			assert scopes[-1] is scope
+			assert scopes[-1] is reads
 			scopes.pop()
 			self._active_count -= 1
 
@@ -332,10 +332,9 @@ class Tracker(o.Service):
 		if not isinstance(reads, list):
 			raise TypeError('Read tracking requires a list')
 
-		scope = (reads,)
-		self._enter(scope)
+		self._enter(reads)
 
 		try:
 			yield
 		finally:
-			self._exit(scope)
+			self._exit(reads)
