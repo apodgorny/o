@@ -42,23 +42,31 @@ class Tracker(o.Service):
 
 		return task
 
-	# Resolve scopes belonging to the current task or ordinary thread.
+	# Avoid asynchronous task lookup on ordinary synchronous reads.
 	# ----------------------------------------------------------------------
 	def _scopes(self, create=True):
-		task = self._current_task()
+		thread = self._thread
+
+		if create:
+			task = self._current_task()
+		elif getattr(thread, 'async_count', 0):
+			task = asyncio.current_task()
+		else:
+			task = None
 
 		if task is None:
-			scopes = getattr(self._thread, 'scopes', None)
+			scopes = getattr(thread, 'scopes', None)
 			if scopes is None:
 				scopes = []
 				if create:
-					self._thread.scopes = scopes
+					thread.scopes = scopes
 		else:
 			scopes = self._task_scopes.get(task)
 			if scopes is None:
 				scopes = []
 				if create:
 					self._task_scopes[task] = scopes
+					thread.async_count = getattr(thread, 'async_count', 0) + 1
 
 		return scopes
 
@@ -194,6 +202,22 @@ class Tracker(o.Service):
 
 		type.__setattr__(cls, name, save)
 
+	# Capture dictionary membership without observing the key index twice.
+	# ----------------------------------------------------------------------
+	def _install_dict_membership(self):
+		cls      = o.Dict
+		name     = '__contains__'
+		original = cls.__dict__[name]
+		self._saved_reads[(cls, name)] = original
+
+		def contains(instance, key):
+			result = original(instance, key)
+			self._record('r', instance)
+
+			return result
+
+		type.__setattr__(cls, name, contains)
+
 	# Add read-side descriptors only while at least one scope needs reads.
 	# ----------------------------------------------------------------------
 	def _install_reads(self):
@@ -207,7 +231,7 @@ class Tracker(o.Service):
 		for cls in (o.List, o.Dict):
 			self._install_property(cls, '__items__', False)
 
-		self._install_property(o.Dict, '__key_ids__', False)
+		self._install_dict_membership()
 
 	# Add write-side wrappers without affecting the read-only hot path.
 	# ----------------------------------------------------------------------
@@ -283,6 +307,7 @@ class Tracker(o.Service):
 				task = self._current_task()
 				if task is not None:
 					del self._task_scopes[task]
+					self._thread.async_count -= 1
 
 	# ======================================================================
 	# PUBLIC METHODS
