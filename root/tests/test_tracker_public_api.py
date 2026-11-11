@@ -167,7 +167,9 @@ class TestTrackerPublicApi(o.Tester):
 	@classmethod
 	def test_new_interceptors_are_reversible(cls):
 		tracker           = o.services.Tracker
-		original_traverse = o.T.__dict__['__dependants__']
+		original_data      = o.T.__dict__['to_data']
+		original_serialize = o.Serializer.__dict__['_serialize_instance']
+		original_tree      = o.Tree.__dict__['_render_node']
 		original_instances = o.TMeta.__dict__['__instances__']
 		original_create   = o.TMeta.__dict__['__call__']
 		original_remove   = type(o.services.Id).__dict__['unset']
@@ -175,12 +177,16 @@ class TestTrackerPublicApi(o.Tester):
 		writes            = []
 
 		with tracker.track('rw', reads, writes):
-			assert o.T.__dict__['__dependants__'] is not original_traverse
+			assert o.T.__dict__['to_data'] is not original_data
+			assert o.Serializer.__dict__['_serialize_instance'] is not original_serialize
+			assert o.Tree.__dict__['_render_node'] is not original_tree
 			assert o.TMeta.__dict__['__instances__'] is not original_instances
 			assert o.TMeta.__dict__['__call__'] is not original_create
 			assert type(o.services.Id).__dict__['unset'] is not original_remove
 
-		assert o.T.__dict__['__dependants__'] is original_traverse
+		assert o.T.__dict__['to_data'] is original_data
+		assert o.Serializer.__dict__['_serialize_instance'] is original_serialize
+		assert o.Tree.__dict__['_render_node'] is original_tree
 		assert o.TMeta.__dict__['__instances__'] is original_instances
 		assert o.TMeta.__dict__['__call__'] is original_create
 		assert type(o.services.Id).__dict__['unset'] is original_remove
