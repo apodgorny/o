@@ -102,7 +102,7 @@ class Ontology(o.Service):
 			o.services.Cache.invalidate_all()
 
 		for item in o:
-			if not item.is_directory():
+			if not item.is_directory() and item.get_name() != 'test.py':
 				item.load()
 
 		o.services.Entity.ensure_value()
