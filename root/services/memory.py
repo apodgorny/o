@@ -71,26 +71,24 @@ class MemoryBatch:
 		return getattr(self.memory, name)
 
 	# Map a persisted key to the identities affected by its mutation.
-	# Zero is reserved for a full-ontology invalidation when ownership is unknown.
+	# Record the entity IDs affected by a direct memory write.
+	# An unknown storage key conservatively invalidates the whole ontology.
 	# ----------------------------------------------------------------------
 	def _record_key(self, key, value=UNDEFINED):
 		key = str(key)
 		ids = self.changed_ids
 
-		if key.startswith('o.T.') or key == 'o.T':
-			parts       = key.split('.')
+		if key == 'o.T' or key.startswith('o.T.'):
+			parts = key.split('.')
 			proto_parts = parts[:2]
 
 			for part in parts[2:]:
-				is_class    = bool(part) and part[0].isupper()
-				is_instance = part.startswith('_') and part[1:].isdigit()
-
-				if is_class or is_instance:
+				if part and (part[0].isupper() or part.startswith('_') and part[1:].isdigit()):
 					proto_parts.append(part)
-				else:
-					break
 
-				if is_instance:
+					if part.startswith('_'):
+						break
+				else:
 					break
 
 			proto = '.'.join(proto_parts)
@@ -101,26 +99,21 @@ class MemoryBatch:
 
 			if '.__auth__/' in key:
 				node_id = key.rsplit('/', 1)[-1]
-				if node_id.isdecimal():
-					ids.add(int(node_id))
-		elif key.startswith('ids/'):
-			entity_id = key[4:]
-			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
-		elif key.startswith('garbage/refcounts/') or key.startswith('garbage/items/'):
-			entity_id = key.rsplit('/', 1)[-1]
-			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
-		elif key.startswith('tree/parents/'):
+				ids.add(int(node_id) if node_id.isdecimal() else 0)
+
+		elif key.startswith(('ids/', 'garbage/refcounts/', 'garbage/items/', 'tree/parents/')):
 			entity_id = key.rsplit('/', 1)[-1]
 			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
 
-			if type(value) is int:
-				ids.add(value)
-			else:
-				ids.add(0)
+			if key.startswith('tree/parents/'):
+				ids.add(value if type(value) is int else 0)
+
 		elif key.startswith('routes/'):
 			ids.add(self.memory.root_id)
+
 			if isinstance(value, dict) and type(value.get('id')) is int:
 				ids.add(value['id'])
+
 		elif not key.startswith('changes/'):
 			ids.add(0)
 
@@ -146,12 +139,17 @@ class MemoryBatch:
 			else:
 				self.changed_ids.add(owner_id)
 
-	# Include every removed owner, including descendants of a class zone.
+	# Delete a prefix, reading individual owners only for mixed-owner zones.
+	# A root instance zone may also hold authorization keys for other objects.
 	# ----------------------------------------------------------------------
 	def unset_all(self, key_prefix, owner_id=None):
 		prefix = self.memory._key(key_prefix)
 		cursor = self.tx.cursor()
 		ok     = cursor.set_range(prefix)
+
+		name = key_prefix.rstrip('.').rsplit('.', 1)[-1]
+		scan = owner_id is None or not (name.startswith('_') and name[1:].isdigit())
+		removed = False
 
 		while ok:
 			key = cursor.key()
@@ -160,12 +158,15 @@ class MemoryBatch:
 				break
 
 			cursor.delete()
-			if self.write:
-				if owner_id is not None:
-					self.changed_ids.add(owner_id)
+			removed = True
+
+			if self.write and (scan or b'.__auth__/' in key):
 				self._record_key(key.decode('utf-8'))
 
 			ok = cursor.set_range(prefix)
+
+		if removed and self.write and owner_id is not None:
+			self.changed_ids.add(owner_id)
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
