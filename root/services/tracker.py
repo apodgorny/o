@@ -273,7 +273,7 @@ class Tracker(o.Service):
 	# An absent entity has no live object, so track its prospective identity.
 	# ----------------------------------------------------------------------
 	def _install_existence_read(self):
-		cls      = o.services.Entity
+		cls      = type(o.services.Entity)
 		name     = 'exists'
 		original = cls.__dict__[name]
 		self._saved_reads[(cls, name)] = original
@@ -334,7 +334,7 @@ class Tracker(o.Service):
 	# Record deletion of a persisted entity and change to its class membership.
 	# ----------------------------------------------------------------------
 	def _install_entity_deletion_write(self):
-		cls      = o.services.Id
+		cls      = type(o.services.Id)
 		name     = 'unset'
 		original = cls.__dict__[name]
 		self._saved_writes[(cls, name)] = original
@@ -398,7 +398,7 @@ class Tracker(o.Service):
 	# Register source-route updates for existence queries by route.
 	# ----------------------------------------------------------------------
 	def _install_route_write(self):
-		cls = o.services.Route
+		cls = type(o.services.Route)
 
 		for name in ('set', 'unset'):
 			original = cls.__dict__[name]
