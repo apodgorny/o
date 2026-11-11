@@ -106,3 +106,4 @@ class Ontology(o.Service):
 				item.load()
 
 		o.services.Entity.ensure_value()
+		o.__cached_names__.add('V')
