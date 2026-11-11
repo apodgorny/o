@@ -36,7 +36,7 @@ class MemoryBatch:
 		self.depth += 1
 		return self
 
-	# Only the opener of the context manager should close it.
+	# Commit change identities with data, or discard both after an error.
 	# ----------------------------------------------------------------------
 	def __exit__(self, exc_type, exc, tb):
 		self.depth -= 1
@@ -44,14 +44,13 @@ class MemoryBatch:
 		if self.ctx is not None and self.depth == 0:
 			try:
 				if self.write and exc_type is None and self.changed_ids:
-					try:
-						key   = f'changes/{self.tx.id():020d}'
-						value = self.memory.to_bytes(sorted(self.changed_ids))
-						self.tx.put(self.memory._key(key), value)
-					except BaseException as error:
-						self.ctx.__exit__(type(error), error, error.__traceback__)
-						raise
-
+					key   = f'changes/{self.tx.id():020d}'
+					value = self.memory.to_bytes(sorted(self.changed_ids))
+					self.tx.put(self.memory._key(key), value)
+			except BaseException as error:
+				self.ctx.__exit__(type(error), error, error.__traceback__)
+				raise
+			else:
 				self.ctx.__exit__(exc_type, exc, tb)
 			finally:
 				if self.write:
@@ -64,14 +63,13 @@ class MemoryBatch:
 				self.ctx = None
 
 		return False
-	
+
 	# Delegation
 	# ----------------------------------------------------------------------
 	def __getattr__(self, name):
 		return getattr(self.memory, name)
 
-	# Map a persisted key to the identities affected by its mutation.
-	# Record the entity IDs affected by a direct memory write.
+	# Record IDs affected by a direct memory write.
 	# An unknown storage key conservatively invalidates the whole ontology.
 	# ----------------------------------------------------------------------
 	def _record_key(self, key, value=UNDEFINED):
@@ -190,38 +188,31 @@ class MemoryBatch:
 
 		return result
 
-	# Iterate stored pairs by prefix
+	# Scan keys by prefix, optionally seeking past a known starting key.
 	# ----------------------------------------------------------------------
-	def _pairs(self, prefix=''):
+	def _pairs(self, prefix='', start=None):
 		key      = self.memory._key(prefix)
+		seek     = self.memory._key(start) if start is not None else key
 		cursor   = self.tx.cursor()
-		has_item = cursor.set_range(key) if key else cursor.first()
+		has_item = cursor.set_range(seek) if seek else cursor.first()
 
 		while has_item:
-			key_bytes   = cursor.key()
-			value_bytes = cursor.value()
+			key_bytes = cursor.key()
 
 			if not key_bytes.startswith(key):
 				break
 
-			yield key_bytes.decode('utf-8'), value_bytes
+			yield key_bytes.decode('utf-8'), cursor.value()
 			has_item = cursor.next()
 
 	# Stream committed changes after a transaction, without scanning older IDs.
-	# Each returned set contains a zero ID only for full invalidation.
+	# Read only journal entries newer than the given LMDB transaction ID.
 	# ----------------------------------------------------------------------
 	def changes(self, after_transaction=0):
-		prefix = b'changes/'
-		start  = self.memory._key(f'changes/{after_transaction + 1:020d}')
+		start = f'changes/{after_transaction + 1:020d}'
 
-		with self.tx.cursor() as cursor:
-			found = cursor.set_range(start)
-
-			while found and cursor.key().startswith(prefix):
-				transaction_id = int(cursor.key()[len(prefix):])
-				changed_ids    = set(self.memory.from_bytes(cursor.value()))
-				yield transaction_id, changed_ids
-				found = cursor.next()
+		for key, value in self._pairs('changes/', start):
+			yield int(key[8:]), set(self.memory.from_bytes(value))
 
 	# Iterate stored items by prefix
 	# ----------------------------------------------------------------------
