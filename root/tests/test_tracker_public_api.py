@@ -170,7 +170,7 @@ class TestTrackerPublicApi(o.Tester):
 		original_traverse = o.T.__dict__['__dependants__']
 		original_instances = o.TMeta.__dict__['__instances__']
 		original_create   = o.TMeta.__dict__['__call__']
-		original_remove   = o.services.Id.__dict__['unset']
+		original_remove   = type(o.services.Id).__dict__['unset']
 		reads             = []
 		writes            = []
 
