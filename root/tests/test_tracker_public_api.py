@@ -11,6 +11,21 @@ class TestTrackerPublicApi(o.Tester):
 	RUNTIME_PREFIX = 'o_tracker_public_'
 
 	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
+
+	# Collect committed write identities since one LMDB revision.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _writes_since(cls, revision):
+		writes = set()
+
+		for _, changed in o.services.Memory.changes(revision):
+			writes.update(changed)
+
+		return writes
+
+	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
 
@@ -36,8 +51,9 @@ class TestTrackerPublicApi(o.Tester):
 			assert employee.id in reads
 			assert finance.id in reads
 
-			with o.services.Tracker.track('w', writes):
-				finance.salary = 250
+			revision = o.services.Memory.revision()
+			finance.salary = 250
+			writes = cls._writes_since(revision)
 
 			assert finance.id in writes
 			assert set(reads) & set(writes)
@@ -78,8 +94,9 @@ class TestTrackerPublicApi(o.Tester):
 
 			assert Model.id in reads
 
-			with o.services.Tracker.track('w', writes):
-				item = Model(value=1)
+			revision = o.services.Memory.revision()
+			item     = Model(value=1)
+			writes   = cls._writes_since(revision)
 
 			assert item.id in writes
 			assert Model.id in writes
@@ -102,8 +119,9 @@ class TestTrackerPublicApi(o.Tester):
 			with o.services.Tracker.track('r', reads):
 				assert item.id in [value.id for value in Model.__instances__()]
 
-			with o.services.Tracker.track('w', writes):
-				item.drop()
+			revision = o.services.Memory.revision()
+			item.drop()
+			writes = cls._writes_since(revision)
 
 			assert Model.id in reads
 			assert Model.id in writes
@@ -129,8 +147,9 @@ class TestTrackerPublicApi(o.Tester):
 
 			assert o.services.Id.hash(proto) in reads
 
-			with o.services.Tracker.track('w', writes):
-				item = Model(value=7)
+			revision = o.services.Memory.revision()
+			item     = Model(value=7)
+			writes   = cls._writes_since(revision)
 
 			assert item.__proto__ == proto
 			assert item.id in writes
@@ -152,8 +171,9 @@ class TestTrackerPublicApi(o.Tester):
 			with o.services.Tracker.track('r', reads):
 				assert Base.__subclasses__() == []
 
-			with o.services.Tracker.track('w', writes):
-				Child = Base.extend('TrackerPublicChild')
+			revision = o.services.Memory.revision()
+			Child    = Base.extend('TrackerPublicChild')
+			writes   = cls._writes_since(revision)
 
 			assert Child.__parent__ is Base
 			assert Base.id in reads
@@ -176,13 +196,13 @@ class TestTrackerPublicApi(o.Tester):
 		reads             = []
 		writes            = []
 
-		with tracker.track('rw', reads, writes):
+		with tracker.track('r', reads):
 			assert o.T.__dict__['to_data'] is not original_data
 			assert o.Serializer.__dict__['_serialize_instance'] is not original_serialize
 			assert o.Tree.__dict__['_render_node'] is not original_tree
 			assert o.TMeta.__dict__['__instances__'] is not original_instances
-			assert o.TMeta.__dict__['__call__'] is not original_create
-			assert type(o.services.Id).__dict__['unset'] is not original_remove
+			assert o.TMeta.__dict__['__call__'] is original_create
+			assert type(o.services.Id).__dict__['unset'] is original_remove
 
 		assert o.T.__dict__['to_data'] is original_data
 		assert o.Serializer.__dict__['_serialize_instance'] is original_serialize
