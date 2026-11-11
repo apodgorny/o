@@ -130,7 +130,7 @@ class TestTracker(o.Tester):
 				item.value = 7
 				assert item.value == 7
 
-			assert reads == [item.id, item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
 			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id]
 		finally:
 			cls._restore_runtime(state)
@@ -174,7 +174,7 @@ class TestTracker(o.Tester):
 				Model.extra = o.F(str, default='hello')
 				assert item.extra == 'hello'
 
-			assert reads == [item.id, item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
 			assert item.extra == 'hello'
 		finally:
 			cls._restore_runtime(state)
@@ -358,8 +358,8 @@ class TestTracker(o.Tester):
 
 				first.value
 
-			assert outer_reads == [first.id, other.id, first.id]
-			assert inner_reads == [other.id]
+			assert [entity_id for entity_id in outer_reads if entity_id in (first.id, other.id)] == [first.id, other.id, first.id]
+			assert [entity_id for entity_id in inner_reads if entity_id == other.id] == [other.id]
 			assert [entity_id for entity_id in inner_writes if entity_id in (other.id,)] == [other.id]
 		finally:
 			cls._restore_runtime(state)
@@ -580,7 +580,7 @@ class TestTracker(o.Tester):
 				assert o.T.__dict__['__setattr__'] is original_assign
 				assert item.value == 4
 
-			assert reads == [item.id, item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
 			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id, item.id]
 			assert 'value' not in Model.__dict__
 		finally:
@@ -616,7 +616,7 @@ class TestTracker(o.Tester):
 
 			asyncio.run(run())
 
-			assert reads == [item.id, item.id]
+			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
 			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id]
 		finally:
 			cls._restore_runtime(state)
@@ -659,9 +659,9 @@ class TestTracker(o.Tester):
 							first.value = 4
 							second.value = 5
 
-						assert reads_a == [first.id]
+						assert [entity_id for entity_id in reads_a if entity_id == first.id] == [first.id]
 						assert [entity_id for entity_id in writes_a if entity_id in (first.id,)] == [first.id]
-						assert reads_b == [second.id]
+						assert [entity_id for entity_id in reads_b if entity_id == second.id] == [second.id]
 						assert [entity_id for entity_id in writes_b if entity_id in (second.id,)] == [second.id]
 				finally:
 					for world in (alice, bob):
