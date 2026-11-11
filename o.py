@@ -9,10 +9,11 @@ import a
 
 o = a.extend('o')
 
-o.DATA_DIR    = '__memory__'
+o.DATA_DIR    = None
 o.MEMORY_SIZE = 1073741824
 o.TREE_MODE   = False
 
-# Explicit startup: o.start(path=None, sync=False, tree_mode=None).
-# sync=True asks LMDB to flush each commit; False favors throughput over durability.
+# Each ontology starts explicitly; fork() only selects its isolated world.
+# sync=True flushes LMDB commits; False favors throughput over durability.
 o.start = o.services.Ontology.start
+o.fork  = o.services.Ontology.fork

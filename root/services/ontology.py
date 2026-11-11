@@ -4,7 +4,6 @@
 # Start persistence and load ontology classes after the library has been created.
 # ==============================================================================
 
-import inspect
 import os
 
 import o
@@ -15,6 +14,16 @@ class Ontology(o.Service):
 	# ======================================================================
 	# PRIVATE METHODS
 	# ======================================================================
+
+	# Require a single safe directory name for each ontology.
+	# ----------------------------------------------------------------------
+	def _is_valid_fork_name(self, name):
+		return (
+			isinstance(name, str)
+			and name not in ('', '.', '..')
+			and os.path.basename(name) == name
+			and '\\' not in name
+		)
 
 	# Reinitialize services that have already completed startup.
 	# ----------------------------------------------------------------------
@@ -28,15 +37,33 @@ class Ontology(o.Service):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Start once; path defaults to the caller's ontology/ directory.
-	# sync=False favors fast commits, but a crash may lose data or corrupt LMDB.
-	# sync=True flushes each commit to disk for stronger durability.
+	# Allocate an isolated runtime namespace without opening its LMDB.
 	# ----------------------------------------------------------------------
-	def start(self, path: str | None = None, sync: bool = False, tree_mode: bool | None = None):
-		if path is None:
-			path = os.path.join(os.path.dirname(inspect.currentframe().f_back.f_globals['__file__']), 'ontology')
+	def fork(self, name):
+		if not self._is_valid_fork_name(name):
+			raise ValueError(f'Invalid ontology name: {name}')
 
-		o.DATA_DIR = path
+		library = o.__dict__.get('__fork_source__', o)
+
+		try:
+			result = library[name]
+		except KeyError:
+			result       = type(library).fork(library, name)
+			result.start = result.services.Ontology.start
+			result.fork  = result.services.Ontology.fork
+
+		return result
+
+	# Open or create this ontology under the application-owned ontology folder.
+	# sync=False favors throughput; sync=True favors crash durability.
+	# ----------------------------------------------------------------------
+	def start(self, sync: bool = False, tree_mode: bool | None = None):
+		app = o.__app__
+		if app is None:
+			raise RuntimeError('O requires an active Almasi application before start()')
+
+		name       = o.__dict__.get('__fork_name__', 'default')
+		o.DATA_DIR = os.path.join(app.__lib_path__, 'ontology', name)
 
 		if tree_mode is not None and type(tree_mode) is not bool:
 			raise TypeError('tree_mode must be bool or None')
