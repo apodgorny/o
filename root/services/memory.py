@@ -1,3 +1,9 @@
+# ==============================================================================
+# MEMORY SERVICE
+# ==============================================================================
+# Persist ontology state and its committed change identities in one LMDB store.
+# ==============================================================================
+
 import os
 import lmdb
 import msgpack
@@ -16,7 +22,8 @@ class MemoryBatch:
 		self.write  = write
 		self.ctx    = None
 		self.tx     = None
-		self.depth  = 0
+		self.depth       = 0
+		self.changed_ids = set()
 
 	# If we are already in a transaction, just return ourselves
 	# ----------------------------------------------------------------------
@@ -25,23 +32,38 @@ class MemoryBatch:
 		if self.tx is not None:
 			return self
 		
-		self.ctx = self.memory.env.begin(write=self.write)
-		self.tx  = self.ctx.__enter__()
+		self.ctx         = self.memory.env.begin(write=self.write)
+		self.tx          = self.ctx.__enter__()
+		self.changed_ids = set()
 		return self
 
 	# Only the opener of the context manager should close it.
 	# ----------------------------------------------------------------------
 	def __exit__(self, exc_type, exc, tb):
 		self.depth -= 1
-		if self.ctx and self.depth == 0:
+
+		if self.ctx is not None and self.depth == 0:
 			try:
+				if self.write and exc_type is None and self.changed_ids:
+					try:
+						key   = f'changes/{self.tx.id():020d}'
+						value = self.memory.to_bytes(sorted(self.changed_ids))
+						self.tx.put(self.memory._key(key), value)
+					except BaseException as error:
+						self.ctx.__exit__(type(error), error, error.__traceback__)
+						raise
+
 				self.ctx.__exit__(exc_type, exc, tb)
 			finally:
-				if self.write : self.memory._write = None
-				else          : self.memory._read  = None
+				if self.write:
+					self.memory._write = None
+				else:
+					self.memory._read = None
 
+				self.changed_ids.clear()
 				self.tx  = None
 				self.ctx = None
+
 		return False
 	
 	# Delegation
@@ -49,19 +71,83 @@ class MemoryBatch:
 	def __getattr__(self, name):
 		return getattr(self.memory, name)
 
-	# Store value
+	# Map a persisted key to the identities affected by its mutation.
+	# Zero is reserved for a full-ontology invalidation when ownership is unknown.
 	# ----------------------------------------------------------------------
-	def set(self, key, value):
+	def _record_key(self, key, value=UNDEFINED):
+		ids = self.changed_ids
+
+		if key.startswith('o.T.') or key == 'o.T':
+			parts       = key.split('.')
+			proto_parts = parts[:2]
+
+			for part in parts[2:]:
+				is_class    = bool(part) and part[0].isupper()
+				is_instance = part.startswith('_') and part[1:].isdigit()
+
+				if is_class or is_instance:
+					proto_parts.append(part)
+				else:
+					break
+
+				if is_instance:
+					break
+
+			proto = '.'.join(proto_parts)
+			ids.add(o.String.hash(proto, 15))
+
+			if key == proto and len(proto_parts) > 2:
+				ids.add(o.String.hash('.'.join(proto_parts[:-1]), 15))
+
+			if '.__auth__/' in key:
+				node_id = key.rsplit('/', 1)[-1]
+				if node_id.isdecimal():
+					ids.add(int(node_id))
+		elif key.startswith('ids/'):
+			entity_id = key[4:]
+			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
+		elif key.startswith('garbage/refcounts/') or key.startswith('garbage/items/'):
+			entity_id = key.rsplit('/', 1)[-1]
+			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
+		elif key.startswith('tree/parents/'):
+			entity_id = key.rsplit('/', 1)[-1]
+			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
+			if type(value) is int:
+				ids.add(value)
+		elif key.startswith('routes/'):
+			ids.add(self.memory.root_id)
+			if isinstance(value, dict) and type(value.get('id')) is int:
+				ids.add(value['id'])
+		elif key.startswith('changes/'):
+			pass
+		else:
+			ids.add(0)
+
+	# Store value and observe its owner only after the LMDB put succeeds.
+	# ----------------------------------------------------------------------
+	def set(self, key, value, owner_id=None):
 		self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
-	# Remove key
-	# ----------------------------------------------------------------------
-	def unset(self, key):
-		self.tx.delete(self.memory._key(key))
+		if self.write:
+			if owner_id is None:
+				self._record_key(key, value)
+			else:
+				self.changed_ids.add(owner_id)
 
-	# Unset all keys by prefix
+	# Remove a key and record its owner only if it existed.
 	# ----------------------------------------------------------------------
-	def unset_all(self, key_prefix):
+	def unset(self, key, owner_id=None):
+		deleted = self.tx.delete(self.memory._key(key))
+
+		if deleted and self.write:
+			if owner_id is None:
+				self._record_key(key)
+			else:
+				self.changed_ids.add(owner_id)
+
+	# Include every removed owner, including descendants of a class zone.
+	# ----------------------------------------------------------------------
+	def unset_all(self, key_prefix, owner_id=None):
 		prefix = self.memory._key(key_prefix)
 		cursor = self.tx.cursor()
 		ok     = cursor.set_range(prefix)
@@ -73,6 +159,11 @@ class MemoryBatch:
 				break
 
 			cursor.delete()
+			if self.write:
+				if owner_id is not None:
+					self.changed_ids.add(owner_id)
+				self._record_key(key.decode('utf-8'))
+
 			ok = cursor.set_range(prefix)
 
 	# Resolve stored value
@@ -114,6 +205,22 @@ class MemoryBatch:
 			yield key_bytes.decode('utf-8'), value_bytes
 			has_item = cursor.next()
 
+	# Stream committed changes after a transaction, without scanning older IDs.
+	# Each returned set contains a zero ID only for full invalidation.
+	# ----------------------------------------------------------------------
+	def changes(self, after_transaction=0):
+		prefix = b'changes/'
+		start  = self.memory._key(f'changes/{after_transaction + 1:020d}')
+
+		with self.tx.cursor() as cursor:
+			found = cursor.set_range(start)
+
+			while found and cursor.key().startswith(prefix):
+				transaction_id = int(cursor.key()[len(prefix):])
+				changed_ids    = set(self.memory.from_bytes(cursor.value()))
+				yield transaction_id, changed_ids
+				found = cursor.next()
+
 	# Iterate stored items by prefix
 	# ----------------------------------------------------------------------
 	def items(self, prefix=''):
@@ -132,9 +239,13 @@ class Zone:
 	# Constructor
 	# ----------------------------------------------------------------------
 	def __init__(self, prefix):
-		self.prefix = prefix
-		self.cache  = {}
-		self.memory = o.services.Memory
+		self.prefix   = prefix
+		self.cache    = {}
+		self.memory   = o.services.Memory
+		self.owner_id = None
+
+		if prefix.startswith('o.T.') and prefix.endswith('.'):
+			self.owner_id = o.String.hash(prefix[:-1], 15)
 
 	# Get memory key
 	# ----------------------------------------------------------------------
@@ -166,19 +277,19 @@ class Zone:
 	# ----------------------------------------------------------------------
 	def set(self, key, value=None):
 		self.cache[key] = value
-		self.memory.set(self._key(key), value)
+		self.memory.set(self._key(key), value, self.owner_id)
 
 	# Remove value
 	# ----------------------------------------------------------------------
 	def unset(self, key):
 		self.cache[key] = UNDEFINED
-		self.memory.unset(self._key(key))
+		self.memory.unset(self._key(key), self.owner_id)
 
 	# Clear zone
 	# ----------------------------------------------------------------------
 	def clear(self):
 		self.cache.clear()
-		self.memory.unset_all(self.prefix)
+		self.memory.unset_all(self.prefix, self.owner_id)
 
 	# Iterate zone items
 	# ----------------------------------------------------------------------
@@ -255,8 +366,9 @@ class Memory(o.Service):
 			sync     = sync,
 		)
 
-		self._read  = None
-		self._write = None
+		self._read   = None
+		self._write  = None
+		self.root_id = o.String.hash('o.T', 15)
 
 	# Open read batch
 	# ----------------------------------------------------------------------
@@ -279,21 +391,21 @@ class Memory(o.Service):
 
 	# Store value
 	# ----------------------------------------------------------------------
-	def set(self, key, value=None):
+	def set(self, key, value=None, owner_id=None):
 		with self.write() as batch:
-			batch.set(key, value)
+			batch.set(key, value, owner_id)
 
 	# Remove key
 	# ----------------------------------------------------------------------
-	def unset(self, key):
+	def unset(self, key, owner_id=None):
 		with self.write() as batch:
-			batch.unset(key)
+			batch.unset(key, owner_id)
 
 	# Unset all keys by prefix
 	# ----------------------------------------------------------------------
-	def unset_all(self, key_prefix):
+	def unset_all(self, key_prefix, owner_id=None):
 		with self.write() as batch:
-			batch.unset_all(key_prefix)
+			batch.unset_all(key_prefix, owner_id)
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
@@ -322,3 +434,15 @@ class Memory(o.Service):
 	def keys(self, prefix=''):
 		with self.read() as batch:
 			yield from batch.keys(prefix)
+
+	# Return committed transaction changes, ordered by LMDB transaction ID.
+	# ID zero is a conservative full-ontology invalidation signal.
+	# ----------------------------------------------------------------------
+	def changes(self, after_transaction=0):
+		with self.read() as batch:
+			yield from batch.changes(after_transaction)
+
+	# Read the latest committed LMDB transaction ID for incremental polling.
+	# ----------------------------------------------------------------------
+	def revision(self):
+		return self.env.info()['last_txnid']
