@@ -331,5 +331,62 @@ env.close()
 			cls._restore_runtime(state)
 
 
+	# A mixed-owner prefix must report every deleted entity's identity.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_mixed_owner_prefix_deletion(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			memory.set('o.T.WriteMixed._1.left', 1)
+			memory.set('o.T.WriteMixed._2.right', 2)
+			revision = memory.revision()
+
+			memory.unset_all('o.T.WriteMixed.')
+			_, changed = cls._changes(revision)
+
+			assert o.services.Id.hash('o.T.WriteMixed._1') in changed
+			assert o.services.Id.hash('o.T.WriteMixed._2') in changed
+		finally:
+			cls._restore_runtime(state)
+
+	# Clearing the root zone also reports changes to referenced auth targets.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_root_zone_auth_target_deletion(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			zone = memory.zone('o.T.V._99.')
+			zone.set('__auth__/12345', {5: 'rw'})
+			revision = memory.revision()
+
+			zone.clear()
+			_, changed = cls._changes(revision)
+
+			assert zone.owner_id in changed
+			assert 12345 in changed
+		finally:
+			cls._restore_runtime(state)
+
+	# Explicit owner IDs eliminate key parsing even for opaque storage keys.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_explicit_owner_for_direct_memory_writes(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			revision = memory.revision()
+			memory.set('custom/opaque', 'updated', owner_id=13579)
+			_, changed = cls._changes(revision)
+
+			assert changed == {13579}
+		finally:
+			cls._restore_runtime(state)
+
+
 if __name__ == '__main__':
 	TestWriteTracking.run()
