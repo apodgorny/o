@@ -137,33 +137,58 @@ except RuntimeError:
 
 ## Mechanism
 
-At the entrance of the **first** active scope, `Tracker` temporarily instruments the O class dictionaries. Additional overlapping scopes share the same instrumentation. At the exit of the **last** active scope, the originals are restored exactly, including attributes that were originally absent.
+`Tracker` maintains separate read and write instrumentation groups. A group is installed when the first scope requesting that direction begins and removed when its last such scope ends. Overlapping `r`, `w`, and `rw` scopes therefore install the **union** of required interceptions. Restoring a group leaves the other direction active, and originally absent class attributes are deleted on cleanup.
 
-- **Persistent object fields:** install `DynamicClassAttribute` data descriptors. `__get__` catches cached reads in `instance.__dict__` and cache misses; `__set__` observes assignments while preserving the underlying `T.__setattr__` persistence path. The descriptor also implements `__delete__` to preserve deletion behavior.
-- **Cache hydration:** initial field loads populate the Python cache without recording a write.
-- **Field deletion:** a temporary wrapper around `o.T.__delattr__` registers a successful deletion, including when the field was not cached.
-- **List/Dict reads:** temporary descriptors on `__items__` capture reads of the collections' backing in-memory ID indexes. `o.Dict.__key_ids__` is also instrumented for dictionary key lookup and membership.
-- **List/Dict writes:** a temporary wrapper around each class's existing `__save_items__` records structural changes. No patches to `append`, `pop`, `update`, `__setitem__`, or other individual operations are required.
-- **Dynamic class publication:** a temporary wrapper around `o.TMeta.__publish_field__` instruments fields defined while tracking is already active.
+- **Field reads (`r`/`rw` only):** install `DynamicClassAttribute` data descriptors. `__get__` catches cached reads in `instance.__dict__` and cache misses. Their `__set__` and `__delete__` transparently preserve the usual Python cache behavior, without reporting writes.
+- **Field writes (`w`/`rw` only):** temporarily wrap `o.T.__setattr__`; successful assignments record the owning object's ID after normal persistence. Initial cache hydration uses `object.__setattr__` and is not counted as a write.
+- **Field deletion (`w`/`rw` only):** a temporary wrapper around `o.T.__delattr__` registers a successful deletion, including when the field was not cached.
+- **List/Dict reads (`r`/`rw` only):** temporary descriptors on `__items__` capture reads of the collections' backing in-memory ID indexes. `o.Dict.__key_ids__` is also instrumented for dictionary key lookup and membership.
+- **List/Dict writes (`w`/`rw` only):** a temporary wrapper around each class's existing `__save_items__` records structural changes. No patches to `append`, `pop`, `update`, `__setitem__`, or other individual operations are required.
+- **Dynamic class publication (`r`/`rw` only):** a temporary wrapper around `o.TMeta.__publish_field__` instruments fields defined while read tracking is active.
 
-All original class attributes and methods are kept in the service's saved-attribute map until cleanup. The previously existing `__on_change__` hook is not used by this system.
+Original class attributes and methods are stored separately for read and write interception, then restored when each group's reference count reaches zero. The previously existing `__on_change__` hook is not used.
 
 ## Event semantics and boundaries
 
 - **Identity:** the lists contain `instance.id`, not a field name, key, index, value, or full change record.
 - **Order and repetitions:** repeated operations remain in the result. No sorting or deduplication occurs.
 - **Reads:** these are instrumented Python accesses to O field/collection indexes, including accesses performed internally by O. For example, an operation that writes a collection may also read its existing index in `'r'` or `'rw'` mode. Therefore read traces describe accesses, not necessarily only explicit application-level reads.
-- **Field writes:** assignments are recorded when their descriptor setter is invoked, even if the assigned value equals the previous value. Successful field deletions are also recorded.
+- **Field writes:** successful assignments are recorded by the temporary `T.__setattr__` wrapper, even if the assigned value equals the previous value. Successful field deletions are also recorded.
 - **Collection writes:** the save wrapper compares before/after container indexes. A no-op save with unchanged indexes does not add a write ID.
 - **Atoms:** O stores atomic children as entities but exposes Python primitive values on normal field/collection access. The observation is associated with the owning field/container. Direct internal access to an atom's `__value__`, or direct calls to `Entity.value(id)`, are not individually tracked.
 - **Transactions:** this is an access trace, **not** a committed-change log. It does not automatically discard write events after a rollback. Consumers that publish changes should coordinate publication with successful transaction completion.
 - **Scope:** only operations executed while the context is active are added. The returned lists remain usable afterward.
 
+## Forked ontologies
+
+Each started O fork has its own ontology classes, services, caches, and LMDB. Use the Tracker **from the same fork** as the objects being observed:
+
+```python
+import o
+
+alice = o.fork('alice')
+bob   = o.fork('bob')
+
+alice.start()
+bob.start()
+
+Person = alice.T.extend('TrackForkPerson', age=int)
+person = Person(age=20)
+reads  = []
+
+with alice.services.Tracker.track('r', reads):
+	age = person.age
+
+assert reads == [person.id]
+```
+
+Scopes from two forks can be active simultaneously; a fork's Tracker instruments its own Python classes and does not observe objects belonging to another fork. Numeric entity IDs are meaningful **within** an ontology; if traces from multiple forks are aggregated, identify the world alongside each ID.
+
 ## Concurrency
 
-Instrumentation is installed on shared Python classes under an `RLock`, and stays installed as long as any scope remains active. Individual lists are selected by **thread-local storage** for ordinary threaded execution, or by the current **`asyncio.Task`** for async execution; the service uses no `ContextVar`.
+Each direction of instrumentation is installed on shared Python classes under an `RLock`, and stays installed only while at least one scope requests that direction. Individual output lists are selected by **thread-local storage** for ordinary threaded execution, or by the current **`asyncio.Task`** for async execution; the service uses no `ContextVar`.
 
-Each async task that needs its own trace should open its own `track(...)` context. Opening a context in a parent task does not implicitly subscribe child tasks. Because instrumented class attributes are shared, code executing without its own scope may still pay descriptor dispatch overhead while another task/thread is tracking, but it will not append to another task's lists.
+Each async task that needs its own trace should open its own `track(...)` context. Opening a context in a parent task does not implicitly subscribe child tasks. Because instrumented class attributes are shared, code executing without its own scope may still pay descriptor dispatch overhead while another task/thread is tracking reads, but it will not append to another task's lists. A write-only scope does not install read descriptors.
 
 ## Performance benchmark
 
@@ -174,6 +199,8 @@ py root/tests/_test_performance_tracker.py
 ```
 
 Defaults: **5 rounds**, **10,000 iterations per workload**, the original **`legacy` workload**, **graph mode**, and **all four tracking modes**: `none`, `r`, `w`, `rw`. The benchmark executes each measurement in a separate Python process with an independent LMDB and alternates mode order between rounds. It reports median and min/max microseconds per iteration plus percentage overhead relative to `none`.
+
+**Mode specialization:** `w` now installs **no read descriptors**, so its read-only workloads should approach `none`; `r` installs no write wrappers. These are predictions for the new implementation and require a fresh run to verify.
 
 Optional commands:
 
@@ -199,7 +226,7 @@ Tracking wraps the complete benchmark workload, while the original benchmark tim
 py root/test.py
 ```
 
-`root/tests/test_tracker.py` covers cached and uncached reads; field assignments and deletions; mode validation; class defaults/inheritance; new class publication inside a scope; list and dictionary reads/writes (including inherited built-in mutations); cache reconstruction; nested scopes; cleanup after exceptions; concurrent threads; and interleaved async tasks.
+`root/tests/test_tracker.py` covers cached and uncached reads; field assignments and deletions; mode validation; class defaults/inheritance; dynamic class publication; list and dictionary reads/writes; cache reconstruction; mode-specific interception; mixed nested scopes; exception restoration; thread/async-task separation; and simultaneous tracking in independent ontology forks.
 
 See also: `root/tests/test_instance.py` for the replacement regression test of field transitions via `Tracker`.
 

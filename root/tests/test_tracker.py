@@ -5,10 +5,13 @@
 # ==============================================================================
 
 import asyncio
+import tempfile
 import threading
+import time
 
 from concurrent.futures import ThreadPoolExecutor
-from types import DynamicClassAttribute
+from types import DynamicClassAttribute, SimpleNamespace
+from unittest.mock import patch
 
 import o
 
@@ -478,6 +481,193 @@ class TestTracker(o.Tester):
 			assert reads_b == [other.id, other.id]
 		finally:
 			cls._restore_runtime(state)
+
+	# Ensure write-only observation leaves the read-side fast path untouched.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_write_only_does_not_patch_reads(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model            = o.T.extend('TrackerWriteOnly', value=int)
+			item             = Model(value=1)
+			items            = o.List([1])
+			original_assign  = o.T.__dict__['__setattr__']
+			original_publish = o.TMeta.__dict__['__publish_field__']
+			writes           = []
+
+			with o.services.Tracker.track('w', writes):
+				assert 'value' not in Model.__dict__
+				assert '__items__' not in o.List.__dict__
+				assert o.TMeta.__dict__['__publish_field__'] is original_publish
+				assert o.T.__dict__['__setattr__'] is not original_assign
+				assert item.value == 1
+				assert items[0] == 1
+				item.value = 2
+				items.append(3)
+
+			assert writes == [item.id, items.id]
+			assert o.T.__dict__['__setattr__'] is original_assign
+		finally:
+			cls._restore_runtime(state)
+
+	# Ensure read-only observation leaves write hooks uninstalled.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_read_only_does_not_patch_writes(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model           = o.T.extend('TrackerReadOnly', value=int)
+			item            = Model(value=1)
+			items           = o.List([1])
+			original_assign = o.T.__dict__['__setattr__']
+			original_save   = o.List.__dict__['__save_items__']
+			reads           = []
+
+			with o.services.Tracker.track('r', reads):
+				assert isinstance(Model.__dict__['value'], DynamicClassAttribute)
+				assert isinstance(o.List.__dict__['__items__'], DynamicClassAttribute)
+				assert o.T.__dict__['__setattr__'] is original_assign
+				assert o.List.__dict__['__save_items__'] is original_save
+				assert item.value == 1
+				assert items[0] == 1
+				item.value = 2
+				items.append(3)
+
+			assert reads.count(item.id) >= 1
+			assert reads.count(items.id) >= 1
+			assert o.List.__dict__['__save_items__'] is original_save
+		finally:
+			cls._restore_runtime(state)
+
+	# Install and release each direction independently for nested mixed modes.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_nested_mixed_modes_release_independently(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model           = o.T.extend('TrackerModeSwitch', value=int)
+			item            = Model(value=1)
+			tracker         = o.services.Tracker
+			original_assign = o.T.__dict__['__setattr__']
+			reads           = []
+			writes          = []
+
+			with tracker.track('w', writes):
+				assert 'value' not in Model.__dict__
+				item.value
+
+				with tracker.track('r', reads):
+					assert isinstance(Model.__dict__['value'], DynamicClassAttribute)
+					assert o.T.__dict__['__setattr__'] is not original_assign
+					assert item.value == 1
+					item.value = 2
+
+				assert 'value' not in Model.__dict__
+				assert o.T.__dict__['__setattr__'] is not original_assign
+				item.value = 3
+
+			assert reads == [item.id]
+			assert writes == [item.id, item.id]
+			assert o.T.__dict__['__setattr__'] is original_assign
+
+			with tracker.track('r', reads):
+				assert isinstance(Model.__dict__['value'], DynamicClassAttribute)
+				with tracker.track('w', writes):
+					item.value = 4
+				assert o.T.__dict__['__setattr__'] is original_assign
+				assert item.value == 4
+
+			assert reads == [item.id, item.id]
+			assert writes == [item.id, item.id, item.id]
+			assert 'value' not in Model.__dict__
+		finally:
+			cls._restore_runtime(state)
+
+	# Keep different tracking modes isolated when asyncio tasks interleave.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_concurrent_mixed_async_modes(cls):
+		state = cls._patch_runtime()
+
+		try:
+			Model  = o.T.extend('TrackerAsyncMixed', value=int)
+			item   = Model(value=1)
+			reads  = []
+			writes = []
+
+			async def read_task():
+				with o.services.Tracker.track('r', reads):
+					assert item.value == 1
+					await asyncio.sleep(0)
+					await asyncio.sleep(0)
+					assert item.value == 2
+
+			async def write_task():
+				with o.services.Tracker.track('w', writes):
+					await asyncio.sleep(0)
+					item.value = 2
+					await asyncio.sleep(0)
+
+			async def run():
+				await asyncio.gather(read_task(), write_task())
+
+			asyncio.run(run())
+
+			assert reads == [item.id, item.id]
+			assert writes == [item.id]
+		finally:
+			cls._restore_runtime(state)
+
+	# A fork's tracker must observe only its own ontology objects.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_forked_ontologies_keep_trackers_isolated(cls):
+		with tempfile.TemporaryDirectory(prefix='o_tracker_forks_') as directory:
+			app   = SimpleNamespace(__lib_path__=directory)
+			alice = o.fork(f'tracker_alice_{time.time_ns()}')
+			bob   = o.fork(f'tracker_bob_{time.time_ns()}')
+
+			with patch.object(type(o), '__app__', app):
+				try:
+					alice.start()
+					bob.start()
+
+					Alice  = alice.T.extend('TrackerForkPerson', value=int)
+					Bob    = bob.T.extend('TrackerForkPerson', value=int)
+					first  = Alice(value=1)
+					second = Bob(value=2)
+					reads_a  = []
+					writes_a = []
+					reads_b  = []
+					writes_b = []
+
+					assert alice.T is not bob.T
+					assert alice.services.Tracker is not bob.services.Tracker
+
+					with alice.services.Tracker.track('rw', reads_a, writes_a):
+						assert second.value == 2
+						second.value = 3
+						assert reads_a == []
+						assert writes_a == []
+
+						with bob.services.Tracker.track('rw', reads_b, writes_b):
+							assert first.value == 1
+							assert second.value == 3
+							first.value = 4
+							second.value = 5
+
+						assert reads_a == [first.id]
+						assert writes_a == [first.id]
+						assert reads_b == [second.id]
+						assert writes_b == [second.id]
+				finally:
+					for world in (alice, bob):
+						if 'env' in world.services.Memory.__dict__:
+							world.services.Memory.env.close()
+
 
 
 if __name__ == '__main__':

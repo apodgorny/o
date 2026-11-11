@@ -1,8 +1,8 @@
 # ==============================================================================
 # TRACKER SERVICE
 # ==============================================================================
-# Observe ontology reads and writes only while a tracking scope is active.
-# Install temporary Python descriptors without modifying the tracked classes.
+# Observe persistent ontology reads and writes within caller-owned scopes.
+# Install only the interception paths required by the active tracking modes.
 # ==============================================================================
 
 import asyncio
@@ -19,11 +19,14 @@ UNDEFINED = o.Undefined
 
 
 class Tracker(o.Service):
-	_lock          = threading.RLock()
-	_thread        = threading.local()
-	_task_scopes   = weakref.WeakKeyDictionary()
-	_active_count  = 0
-	_saved_attrs   = {}
+	_lock         = threading.RLock()
+	_thread       = threading.local()
+	_task_scopes  = weakref.WeakKeyDictionary()
+	_active_count = 0
+	_read_count   = 0
+	_write_count  = 0
+	_saved_reads  = {}
+	_saved_writes = {}
 
 	# ======================================================================
 	# PRIVATE METHODS
@@ -59,7 +62,7 @@ class Tracker(o.Service):
 
 		return scopes
 
-	# Append owner identities in access order to every matching active scope.
+	# Append owner identities to each matching scope in access order.
 	# ----------------------------------------------------------------------
 	def _record(self, operation, instance):
 		for mode, reads, writes in self._scopes(False):
@@ -68,7 +71,7 @@ class Tracker(o.Service):
 			elif operation == 'w' and 'w' in mode:
 				writes.append(instance.id)
 
-	# Read a cached field without losing observations on the first cache miss.
+	# Read a cached field or resolve it through the original cache-miss path.
 	# ----------------------------------------------------------------------
 	def _read_field(self, instance, name):
 		self._record('r', instance)
@@ -76,30 +79,11 @@ class Tracker(o.Service):
 		if name in instance.__dict__:
 			value = instance.__dict__[name]
 		else:
-			previous             = getattr(self._thread, 'loading', None)
-			self._thread.loading = (instance, name)
-
-			try:
-				value = instance.__getattr__(name)
-			finally:
-				self._thread.loading = previous
+			value = instance.__getattr__(name)
 
 		return value
 
-	# Cache the visible field value and distinguish hydration from assignment.
-	# ----------------------------------------------------------------------
-	def _write_field(self, instance, name, value):
-		instance.__dict__[name] = value
-
-		if getattr(self._thread, 'loading', None) != (instance, name):
-			self._record('w', instance)
-
-	# Remove a cached field without altering its persisted deletion behavior.
-	# ----------------------------------------------------------------------
-	def _delete_field(self, instance, name):
-		instance.__dict__.pop(name, None)
-
-	# Read an internal collection slot, preserving its normal storage semantics.
+	# Read a collection index without changing its storage semantics.
 	# ----------------------------------------------------------------------
 	def _read_slot(self, instance, name):
 		if name not in instance.__dict__:
@@ -110,69 +94,79 @@ class Tracker(o.Service):
 
 		return value
 
-	# Update an internal slot without treating reconstruction as a mutation.
+	# Keep a data descriptor transparent to ordinary field assignments.
 	# ----------------------------------------------------------------------
 	def _write_slot(self, instance, name, value):
 		instance.__dict__[name] = value
 
-	# Install one property while remembering whether the class owned its name.
+	# Install a read descriptor, preserving the original class attribute.
 	# ----------------------------------------------------------------------
 	def _install_property(self, cls, name, is_field):
 		key = (cls, name)
 
-		if key not in self._saved_attrs:
-			self._saved_attrs[key] = cls.__dict__.get(name, UNDEFINED)
+		if key not in self._saved_reads:
+			self._saved_reads[key] = cls.__dict__.get(name, UNDEFINED)
 
 			if is_field:
 				def get(instance):
 					return self._read_field(instance, name)
-
-				def set(instance, value):
-					self._write_field(instance, name, value)
-
-				def delete(instance):
-					self._delete_field(instance, name)
 			else:
 				def get(instance):
 					return self._read_slot(instance, name)
 
-				def set(instance, value):
-					self._write_slot(instance, name, value)
+			def set(instance, value):
+				self._write_slot(instance, name, value)
 
-				def delete(instance):
-					instance.__dict__.pop(name, None)
+			def delete(instance):
+				instance.__dict__.pop(name, None)
 
 			type.__setattr__(cls, name, DynamicClassAttribute(get, set, delete))
 
 	# Instrument the persisted fields declared by one ontology class.
 	# ----------------------------------------------------------------------
 	def _install_fields(self, cls):
-		for name, field in cls._.items():
+		for name, _ in cls._.items():
 			self._install_property(cls, name, True)
 
-	# Preserve future field publication, including classes born inside a scope.
+	# Include fields published after read tracking has already begun.
 	# ----------------------------------------------------------------------
 	def _install_field_publication(self):
 		meta     = o.TMeta
 		name     = '__publish_field__'
 		original = meta.__dict__[name]
-		self._saved_attrs[(meta, name)] = original
+		self._saved_reads[(meta, name)] = original
 
 		def publish(cls, field_name, field):
 			original(cls, field_name, field)
 			with self._lock:
-				if self._active_count > 0:
+				if self._read_count > 0:
 					self._install_property(cls, field_name, True)
 
 		type.__setattr__(meta, name, publish)
 
-	# Count successful field deletion even when its value was never cached.
+	# Observe successful field assignments after normal persistence completes.
+	# ----------------------------------------------------------------------
+	def _install_field_writer(self):
+		cls      = o.T
+		name     = '__setattr__'
+		original = cls.__dict__[name]
+		self._saved_writes[(cls, name)] = original
+
+		def assign(instance, field_name, value):
+			result = original(instance, field_name, value)
+			self._record('w', instance)
+
+			return result
+
+		type.__setattr__(cls, name, assign)
+
+	# Observe successful field deletion even for uncached fields.
 	# ----------------------------------------------------------------------
 	def _install_field_deletion(self):
 		cls      = o.T
 		name     = '__delattr__'
 		original = cls.__dict__[name]
-		self._saved_attrs[(cls, name)] = original
+		self._saved_writes[(cls, name)] = original
 
 		def delete(instance, field_name):
 			result = original(instance, field_name)
@@ -182,12 +176,12 @@ class Tracker(o.Service):
 
 		type.__setattr__(cls, name, delete)
 
-	# Record successful changes through the shared collection save operation.
+	# Observe collection changes at their shared persistence boundary.
 	# ----------------------------------------------------------------------
 	def _install_collection_writer(self, cls):
 		name     = '__save_items__'
 		original = cls.__dict__[name]
-		self._saved_attrs[(cls, name)] = original
+		self._saved_writes[(cls, name)] = original
 
 		def save(instance, items):
 			previous = instance.__dict__.get('__items__', UNDEFINED)
@@ -200,11 +194,10 @@ class Tracker(o.Service):
 
 		type.__setattr__(cls, name, save)
 
-	# Patch class dictionaries once, leaving the untracked fast path intact.
+	# Add read-side descriptors only while at least one scope needs reads.
 	# ----------------------------------------------------------------------
-	def _install(self):
+	def _install_reads(self):
 		self._install_field_publication()
-		self._install_field_deletion()
 
 		for entity_id, entity in tuple(o.services.Cache.entities.items()):
 			if isinstance(entity_id, int) and isinstance(entity, type):
@@ -213,60 +206,91 @@ class Tracker(o.Service):
 
 		for cls in (o.List, o.Dict):
 			self._install_property(cls, '__items__', False)
-			self._install_collection_writer(cls)
 
 		self._install_property(o.Dict, '__key_ids__', False)
 
-	# Restore the original class dictionaries, including newly created classes.
+	# Add write-side wrappers without affecting the read-only hot path.
 	# ----------------------------------------------------------------------
-	def _uninstall(self):
-		for (cls, name), original in reversed(tuple(self._saved_attrs.items())):
+	def _install_writes(self):
+		self._install_field_writer()
+		self._install_field_deletion()
+
+		for cls in (o.List, o.Dict):
+			self._install_collection_writer(cls)
+
+	# Restore only one direction of instrumentation in reverse order.
+	# ----------------------------------------------------------------------
+	def _uninstall(self, saved):
+		for (cls, name), original in reversed(tuple(saved.items())):
 			if original is UNDEFINED:
 				type.__delattr__(cls, name)
 			else:
 				type.__setattr__(cls, name, original)
 
-		self._saved_attrs.clear()
+		saved.clear()
 
-	# Enter a tracking scope while patching shared classes only once.
+	# Activate the union of modes requested by all currently active scopes.
 	# ----------------------------------------------------------------------
 	def _enter(self, scope):
+		mode = scope[0]
+
 		with self._lock:
-			if self._active_count == 0:
-				try:
-					self._install()
-				except BaseException:
-					self._uninstall()
-					raise
+			need_reads  = 'r' in mode and self._read_count == 0
+			need_writes = 'w' in mode and self._write_count == 0
+
+			try:
+				if need_reads:
+					self._install_reads()
+				if need_writes:
+					self._install_writes()
+			except BaseException:
+				if need_writes:
+					self._uninstall(self._saved_writes)
+				if need_reads:
+					self._uninstall(self._saved_reads)
+				raise
 
 			self._scopes().append(scope)
 			self._active_count += 1
 
-	# Leave one scope and restore classes when the last observer exits.
+			if 'r' in mode:
+				self._read_count += 1
+			if 'w' in mode:
+				self._write_count += 1
+
+	# Release only the interceptors no longer needed by any active scope.
 	# ----------------------------------------------------------------------
 	def _exit(self, scope):
+		mode = scope[0]
+
 		with self._lock:
 			scopes = self._scopes()
 			assert scopes[-1] is scope
 			scopes.pop()
 			self._active_count -= 1
 
+			if 'r' in mode:
+				self._read_count -= 1
+				if self._read_count == 0:
+					self._uninstall(self._saved_reads)
+
+			if 'w' in mode:
+				self._write_count -= 1
+				if self._write_count == 0:
+					self._uninstall(self._saved_writes)
+
 			if not scopes:
 				task = self._current_task()
 				if task is not None:
 					del self._task_scopes[task]
 
-			if self._active_count == 0:
-				self._uninstall()
-
 	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Track reads ('r'), writes ('w') or both ('rw') in caller-owned lists.
-	# Usage: with o.services.Tracker.track('rw', reads, writes): ...
-	# For 'r' or 'w', the one output list is the second positional argument.
-	# Calls from concurrent asyncio tasks and threads keep separate scopes.
+	# Record reads ('r'), writes ('w') or both ('rw') into caller-owned lists.
+	# Use the current ontology's Tracker: o.services.Tracker.track(...).
+	# Separate thread/async task scopes can overlap without sharing traces.
 	# ----------------------------------------------------------------------
 	@contextmanager
 	def track(self, mode, reads=None, writes=None):
