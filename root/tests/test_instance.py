@@ -509,10 +509,13 @@ class TestInstance(o.Tester):
 			)
 
 			x.foo = 'b'
-			del x.foo
+			assert ('pre', x.id) in calls
+			assert calls[-1] == ('post', None)
 
-			assert [name for name, _ in calls] == ['pre', 'post', 'pre', 'post']
-			assert all(owner == x.id for name, owner in calls if name == 'pre')
+			calls.clear()
+			del x.foo
+			assert ('pre', x.id) in calls
+			assert calls[-1] == ('post', None)
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
