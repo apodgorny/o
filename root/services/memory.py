@@ -69,95 +69,51 @@ class MemoryBatch:
 	def __getattr__(self, name):
 		return getattr(self.memory, name)
 
-	# Notify the owner of a direct storage write and any affected parent.
-	# Unknown keys invalidate the entire ontology through ID zero.
-	# ----------------------------------------------------------------------
-	def _record_key(self, key, value=UNDEFINED):
-		key    = str(key)
-		notify = self.ipl.pre_invalidate
-
-		if key == 'o.T' or key.startswith('o.T.'):
-			parts = key.split('.')
-			owner = parts[:2]
-
-			for part in parts[2:]:
-				if part[:1].isupper():
-					owner.append(part)
-				elif part.startswith('_') and part[1:].isdigit():
-					owner.append(part)
-					break
-				else:
-					break
-
-			proto = '.'.join(owner)
-			notify(o.String.hash(proto, 15))
-
-			if key == proto and len(owner) > 2:
-				notify(o.String.hash('.'.join(owner[:-1]), 15))
-
-			if '.__auth__/' in key:
-				entity_id = key.rsplit('/', 1)[-1]
-				notify(int(entity_id) if entity_id.isdecimal() else 0)
-
-		elif key.startswith(('ids/', 'garbage/refcounts/', 'garbage/items/', 'tree/parents/')):
-			entity_id = key.rsplit('/', 1)[-1]
-			notify(int(entity_id) if entity_id.isdecimal() else 0)
-
-			if key.startswith('tree/parents/'):
-				notify(value if type(value) is int else 0)
-
-		elif key.startswith('routes/'):
-			notify(self.memory.root_id)
-
-			if isinstance(value, dict) and type(value.get('id')) is int:
-				notify(value['id'])
-
-		else:
-			notify(0)
-
 	# Store value and notify IPL after LMDB accepts the write.
+	# owner_id is one ID or a tuple of IDs for multi-owner changes.
 	# ----------------------------------------------------------------------
-	def set(self, key, value, owner_id=None):
+	def set(self, key, value, owner_id):
 		self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
 		if self.ipl is not None:
 			self.notified = True
 
-			if owner_id is None:
-				self._record_key(key, value)
-			else:
+			if type(owner_id) is int:
 				self.ipl.pre_invalidate(owner_id)
+			else:
+				for id in owner_id:
+					self.ipl.pre_invalidate(id)
 
 	# Notify IPL only when a key was actually removed.
 	# ----------------------------------------------------------------------
-	def unset(self, key, owner_id=None):
+	def unset(self, key, owner_id):
 		deleted = self.tx.delete(self.memory._key(key))
 
 		if deleted and self.ipl is not None:
 			self.notified = True
 
-			if owner_id is None:
-				self._record_key(key)
-			else:
+			if type(owner_id) is int:
 				self.ipl.pre_invalidate(owner_id)
+			else:
+				for id in owner_id:
+					self.ipl.pre_invalidate(id)
 
-	# Delete a prefix; notify its owner before scanning any removed keys.
+	# Delete a prefix and notify its known owners once before removal.
 	# ----------------------------------------------------------------------
-	def unset_all(self, key_prefix, owner_id=None):
+	def unset_all(self, key_prefix, owner_id):
 		prefix = self.memory._key(key_prefix)
 		cursor = self.tx.cursor()
 		ok     = cursor.set_range(prefix)
 		ipl    = self.ipl
 
-		if ipl is not None:
-			name = key_prefix.rstrip('.').rsplit('.', 1)[-1]
-			scan = owner_id is None or not (name.startswith('_') and name[1:].isdigit()) or key_prefix.startswith('o.T.V._')
+		if ok and cursor.key().startswith(prefix) and ipl is not None:
+			self.notified = True
 
-			if ok and cursor.key().startswith(prefix) and owner_id is not None:
-				self.notified = True
+			if type(owner_id) is int:
 				ipl.pre_invalidate(owner_id)
-		else:
-			scan = False
+			else:
+				for id in owner_id:
+					ipl.pre_invalidate(id)
 
 		while ok:
 			key = cursor.key()
@@ -166,13 +122,6 @@ class MemoryBatch:
 				break
 
 			cursor.delete()
-
-			if ipl is not None:
-				self.notified = True
-
-				if scan:
-					self._record_key(key.decode('utf-8'))
-
 			ok = cursor.set_range(prefix)
 
 	# Resolve stored value
@@ -234,7 +183,7 @@ class Zone:
 		self.prefix   = prefix
 		self.cache    = {}
 		self.memory   = o.services.Memory
-		self.owner_id = None
+		self.owner_id = 0
 
 		if prefix.startswith('o.T.') and prefix.endswith('.'):
 			proto = prefix[:-1]
@@ -272,21 +221,21 @@ class Zone:
 
 	# Set value
 	# ----------------------------------------------------------------------
-	def set(self, key, value=None):
+	def set(self, key, value=None, owner_id=None):
 		self.cache[key] = value
-		self.memory.set(self._key(key), value, self.owner_id)
+		self.memory.set(self._key(key), value, self.owner_id if owner_id is None else owner_id)
 
 	# Remove value
 	# ----------------------------------------------------------------------
-	def unset(self, key):
+	def unset(self, key, owner_id=None):
 		self.cache[key] = UNDEFINED
-		self.memory.unset(self._key(key), self.owner_id)
+		self.memory.unset(self._key(key), self.owner_id if owner_id is None else owner_id)
 
 	# Clear zone
 	# ----------------------------------------------------------------------
-	def clear(self):
+	def clear(self, owner_id=None):
 		self.cache.clear()
-		self.memory.unset_all(self.prefix, self.owner_id)
+		self.memory.unset_all(self.prefix, self.owner_id if owner_id is None else owner_id)
 
 	# Iterate zone items
 	# ----------------------------------------------------------------------
@@ -389,19 +338,19 @@ class Memory(o.Service):
 
 	# Store value
 	# ----------------------------------------------------------------------
-	def set(self, key, value=None, owner_id=None):
+	def set(self, key, value, owner_id):
 		with self.write() as batch:
 			batch.set(key, value, owner_id)
 
 	# Remove key
 	# ----------------------------------------------------------------------
-	def unset(self, key, owner_id=None):
+	def unset(self, key, owner_id):
 		with self.write() as batch:
 			batch.unset(key, owner_id)
 
 	# Unset all keys by prefix
 	# ----------------------------------------------------------------------
-	def unset_all(self, key_prefix, owner_id=None):
+	def unset_all(self, key_prefix, owner_id):
 		with self.write() as batch:
 			batch.unset_all(key_prefix, owner_id)
 
