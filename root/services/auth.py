@@ -32,9 +32,9 @@ class Auth(o.Service):
 								rules[client_id] = permissions
 
 							if rules:
-								memory.set(key, rules)
+								memory.set(key, rules, (o.V.__class__.id, node.id))
 							else:
-								memory.unset(key)
+								memory.unset(key, (o.V.__class__.id, node.id))
 					else:
 						raise ValueError('permissions must be r, w, rw, or empty')
 				else:
