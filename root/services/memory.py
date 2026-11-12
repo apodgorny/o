@@ -1,7 +1,7 @@
 # ==============================================================================
 # MEMORY SERVICE
 # ==============================================================================
-# Persist ontology state and its committed change identities in one LMDB store.
+# Collect write identities and notify IPL around successful LMDB commits.
 # ==============================================================================
 
 import os
@@ -36,22 +36,25 @@ class MemoryBatch:
 		self.depth += 1
 		return self
 
-	# Commit change identities with data, or discard both after an error.
+	# Notify IPL before committing and after a successful commit.
 	# ----------------------------------------------------------------------
 	def __exit__(self, exc_type, exc, tb):
 		self.depth -= 1
 
 		if self.ctx is not None and self.depth == 0:
+			ipl = self.memory.ipl if self.write and exc_type is None and self.changed_ids else None
+
 			try:
-				if self.write and exc_type is None and self.changed_ids:
-					key   = f'changes/{self.tx.id():020d}'
-					value = self.memory.to_bytes(sorted(self.changed_ids))
-					self.tx.put(self.memory._key(key), value)
+				if ipl is not None:
+					ipl.pre_invalidate(self.changed_ids)
 			except BaseException as error:
 				self.ctx.__exit__(type(error), error, error.__traceback__)
 				raise
 			else:
 				self.ctx.__exit__(exc_type, exc, tb)
+
+				if ipl is not None:
+					ipl.invalidate(self.changed_ids)
 			finally:
 				if self.write:
 					self.memory._write = None
@@ -112,7 +115,7 @@ class MemoryBatch:
 			if isinstance(value, dict) and type(value.get('id')) is int:
 				ids.add(value['id'])
 
-		elif not key.startswith('changes/'):
+		else:
 			ids.add(0)
 
 	# Store value and observe its owner only after the LMDB put succeeds.
@@ -189,13 +192,12 @@ class MemoryBatch:
 
 		return result
 
-	# Scan keys by prefix, optionally seeking past a known starting key.
+	# Iterate stored keys by prefix.
 	# ----------------------------------------------------------------------
-	def _pairs(self, prefix='', start=None):
+	def _pairs(self, prefix=''):
 		key      = self.memory._key(prefix)
-		seek     = self.memory._key(start) if start is not None else key
 		cursor   = self.tx.cursor()
-		has_item = cursor.set_range(seek) if seek else cursor.first()
+		has_item = cursor.set_range(key) if key else cursor.first()
 
 		while has_item:
 			key_bytes = cursor.key()
@@ -205,14 +207,6 @@ class MemoryBatch:
 
 			yield key_bytes.decode('utf-8'), cursor.value()
 			has_item = cursor.next()
-
-	# Seek to the first committed change after the given transaction ID.
-	# ----------------------------------------------------------------------
-	def changes(self, after_transaction=0):
-		start = f'changes/{after_transaction + 1:020d}'
-
-		for key, value in self._pairs('changes/', start):
-			yield int(key.removeprefix('changes/')), set(self.memory.from_bytes(value))
 
 	# Iterate stored items by prefix
 	# ----------------------------------------------------------------------
@@ -310,6 +304,7 @@ class Zone:
 
 
 class Memory(o.Service):
+	ipl = None
 
 	# ======================================================================
 	# CLASS PUBLIC METHODS
@@ -433,14 +428,3 @@ class Memory(o.Service):
 		with self.read() as batch:
 			yield from batch.keys(prefix)
 
-	# Return committed transaction changes, ordered by LMDB transaction ID.
-	# ID zero is a conservative full-ontology invalidation signal.
-	# ----------------------------------------------------------------------
-	def changes(self, after_transaction=0):
-		with self.read() as batch:
-			yield from batch.changes(after_transaction)
-
-	# Read the latest committed LMDB transaction ID for incremental polling.
-	# ----------------------------------------------------------------------
-	def revision(self):
-		return self.env.info()['last_txnid']
