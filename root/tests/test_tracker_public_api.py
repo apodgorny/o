@@ -22,8 +22,8 @@ class TestTrackerPublicApi(o.Tester):
 	def _observe_writes(cls):
 		writes = set()
 		o.services.Memory.ipl = SimpleNamespace(
-			pre_invalidate = lambda ids: None,
-			invalidate     = lambda ids: writes.update(ids),
+			pre_invalidate = lambda owner_id: writes.add(owner_id),
+			invalidate     = lambda: None,
 		)
 
 		return writes
