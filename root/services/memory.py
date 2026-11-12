@@ -1,7 +1,7 @@
 # ==============================================================================
 # MEMORY SERVICE
 # ==============================================================================
-# Collect write identities and notify IPL around successful LMDB commits.
+# Notify IPL immediately for writes and once after committed transactions.
 # ==============================================================================
 
 import os
@@ -23,7 +23,8 @@ class MemoryBatch:
 		self.ctx         = None
 		self.tx          = None
 		self.depth       = 0
-		self.changed_ids = set()
+		self.ipl         = None
+		self.notified    = False
 
 	# If we are already in a transaction, just return ourselves
 	# ----------------------------------------------------------------------
@@ -31,37 +32,31 @@ class MemoryBatch:
 		if self.tx is None:
 			self.ctx         = self.memory.env.begin(write=self.write)
 			self.tx          = self.ctx.__enter__()
-			self.changed_ids = set()
+			self.ipl         = self.memory.ipl if self.write else None
+			self.notified    = False
 
 		self.depth += 1
 		return self
 
-	# Notify IPL before committing and after a successful commit.
+	# Confirm the transaction after its successful commit.
 	# ----------------------------------------------------------------------
 	def __exit__(self, exc_type, exc, tb):
 		self.depth -= 1
 
 		if self.ctx is not None and self.depth == 0:
-			ipl = self.memory.ipl if self.write and exc_type is None and self.changed_ids else None
-
 			try:
-				if ipl is not None:
-					ipl.pre_invalidate(self.changed_ids)
-			except BaseException as error:
-				self.ctx.__exit__(type(error), error, error.__traceback__)
-				raise
-			else:
 				self.ctx.__exit__(exc_type, exc, tb)
 
-				if ipl is not None:
-					ipl.invalidate(self.changed_ids)
+				if exc_type is None and self.notified:
+					self.ipl.invalidate()
 			finally:
 				if self.write:
 					self.memory._write = None
 				else:
 					self.memory._read = None
 
-				self.changed_ids.clear()
+				self.ipl = None
+				self.notified = False
 				self.tx  = None
 				self.ctx = None
 
@@ -77,7 +72,7 @@ class MemoryBatch:
 	# ----------------------------------------------------------------------
 	def _record_key(self, key, value=UNDEFINED):
 		key = str(key)
-		ids = self.changed_ids
+		ipl = self.ipl
 
 		if key == 'o.T' or key.startswith('o.T.'):
 			parts = key.split('.')
@@ -93,64 +88,70 @@ class MemoryBatch:
 					break
 
 			proto = '.'.join(proto_parts)
-			ids.add(o.String.hash(proto, 15))
+			ipl.pre_invalidate(o.String.hash(proto, 15))
 
 			if key == proto and len(proto_parts) > 2:
-				ids.add(o.String.hash('.'.join(proto_parts[:-1]), 15))
+				ipl.pre_invalidate(o.String.hash('.'.join(proto_parts[:-1]), 15))
 
 			if '.__auth__/' in key:
 				node_id = key.rsplit('/', 1)[-1]
-				ids.add(int(node_id) if node_id.isdecimal() else 0)
+				ipl.pre_invalidate(int(node_id) if node_id.isdecimal() else 0)
 
 		elif key.startswith(('ids/', 'garbage/refcounts/', 'garbage/items/', 'tree/parents/')):
 			entity_id = key.rsplit('/', 1)[-1]
-			ids.add(int(entity_id) if entity_id.isdecimal() else 0)
+			ipl.pre_invalidate(int(entity_id) if entity_id.isdecimal() else 0)
 
 			if key.startswith('tree/parents/'):
-				ids.add(value if type(value) is int else 0)
+				ipl.pre_invalidate(value if type(value) is int else 0)
 
 		elif key.startswith('routes/'):
-			ids.add(self.memory.root_id)
+			ipl.pre_invalidate(self.memory.root_id)
 
 			if isinstance(value, dict) and type(value.get('id')) is int:
-				ids.add(value['id'])
+				ipl.pre_invalidate(value['id'])
 
 		else:
-			ids.add(0)
+			ipl.pre_invalidate(0)
 
-	# Store value and observe its owner only after the LMDB put succeeds.
+	# Store value and notify IPL after LMDB accepts the write.
 	# ----------------------------------------------------------------------
 	def set(self, key, value, owner_id=None):
 		self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
-		if self.write:
+		if self.ipl is not None:
+			self.notified = True
+
 			if owner_id is None:
 				self._record_key(key, value)
 			else:
-				self.changed_ids.add(owner_id)
+				self.ipl.pre_invalidate(owner_id)
 
-	# Remove a key and record its owner only if it existed.
+	# Notify IPL only when a key was actually removed.
 	# ----------------------------------------------------------------------
 	def unset(self, key, owner_id=None):
 		deleted = self.tx.delete(self.memory._key(key))
 
-		if deleted and self.write:
+		if deleted and self.ipl is not None:
+			self.notified = True
+
 			if owner_id is None:
 				self._record_key(key)
 			else:
-				self.changed_ids.add(owner_id)
+				self.ipl.pre_invalidate(owner_id)
 
-	# Delete a prefix, reading individual owners only for mixed-owner zones.
-	# A root instance zone may also hold authorization keys for other objects.
+	# Delete a prefix; send each affected ID immediately.
 	# ----------------------------------------------------------------------
 	def unset_all(self, key_prefix, owner_id=None):
 		prefix = self.memory._key(key_prefix)
 		cursor = self.tx.cursor()
 		ok     = cursor.set_range(prefix)
 
-		name    = key_prefix.rstrip('.').rsplit('.', 1)[-1]
-		instance_zone = name.startswith('_') and name[1:].isdigit()
-		scan    = owner_id is None or not instance_zone or key_prefix.startswith('o.T.V._')
+		if self.ipl is not None:
+			name = key_prefix.rstrip('.').rsplit('.', 1)[-1]
+			scan = owner_id is None or not (name.startswith('_') and name[1:].isdigit()) or key_prefix.startswith('o.T.V._')
+		else:
+			scan = False
+
 		removed = False
 
 		while ok:
@@ -162,13 +163,16 @@ class MemoryBatch:
 			cursor.delete()
 			removed = True
 
-			if self.write and scan:
-				self._record_key(key.decode('utf-8'))
+			if self.ipl is not None:
+				self.notified = True
+
+				if scan:
+					self._record_key(key.decode('utf-8'))
 
 			ok = cursor.set_range(prefix)
 
-		if removed and self.write and owner_id is not None:
-			self.changed_ids.add(owner_id)
+		if removed and self.ipl is not None and owner_id is not None:
+			self.ipl.pre_invalidate(owner_id)
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
