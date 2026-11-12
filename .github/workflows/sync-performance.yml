@@ -33,6 +33,7 @@ jobs:
         run: |
           python -m pip install -e ./almasi
           python -m pip install -e ./o
+          python -m pip install jsonschema
 
       - name: 'Benchmark 10000 writes: stub vs Sync'
         working-directory: o
