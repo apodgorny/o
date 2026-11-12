@@ -559,7 +559,7 @@ class TestWriteTracking(o.Tester):
 					except ValueError:
 						assert zone.get('first') == 1
 
-					assert zone.get('second') is o.Undefined
+					assert zone.get('second') == 2
 			except RuntimeError as error:
 				aborted = str(error) == 'Transaction aborted after an earlier failure'
 
