@@ -42,7 +42,7 @@ class TestPerformanceWriteTracking(o.Tester):
 
 		result['zone_set_single'] = (time.perf_counter_ns() - started) / (1000 * size)
 
-		# Many updates to one owner share a single notification pair.
+		# Many updates send immediate per-owner notifications, then one commit.
 		# ----------------------------------------------------------------------
 		started = time.perf_counter_ns()
 
@@ -60,6 +60,17 @@ class TestPerformanceWriteTracking(o.Tester):
 			memory.set('o.T.WriteBench._2.value', index)
 
 		result['memory_set_single'] = (time.perf_counter_ns() - started) / (1000 * size)
+
+		# The same direct write with owner_id skips key parsing entirely.
+		# ----------------------------------------------------------------------
+		if hasattr(memory, 'ipl'):
+			owner_id = o.services.Id.hash('o.T.WriteBench._3')
+			started = time.perf_counter_ns()
+
+			for index in range(size):
+				memory.set('o.T.WriteBench._3.value', index, owner_id)
+
+			result['memory_set_owned'] = (time.perf_counter_ns() - started) / (1000 * size)
 
 		# A cached zone read must not pay any IPL notification cost.
 		# ----------------------------------------------------------------------
@@ -103,8 +114,8 @@ if __name__ == '__main__':
 
 			if args.ipl == 'stub':
 				o.services.Memory.ipl = SimpleNamespace(
-					pre_invalidate = lambda ids: None,
-					invalidate     = lambda ids: None,
+					pre_invalidate = lambda owner_id: None,
+					invalidate     = lambda: None,
 				)
 
 			try:
