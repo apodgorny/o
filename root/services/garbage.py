@@ -71,6 +71,4 @@ class Garbage(o.Service):
 	# Clear garbage storage
 	# ----------------------------------------------------------------------
 	def clear(self):
-		with o.services.Memory.write():
-			for id in self.garbage.keys():
-				self.garbage.unset(id, int(id))
+		self.garbage.clear(int(id) for id in self.garbage.keys())
