@@ -504,15 +504,15 @@ class TestInstance(o.Tester):
 
 			memory = o.services.Memory
 			memory.ipl = SimpleNamespace(
-				pre_invalidate = lambda ids: calls.append(('pre', frozenset(ids))),
-				invalidate     = lambda ids: calls.append(('post', frozenset(ids))),
+				pre_invalidate = lambda owner_id: calls.append(('pre', owner_id)),
+				invalidate     = lambda: calls.append(('post', None)),
 			)
 
 			x.foo = 'b'
 			del x.foo
 
 			assert [name for name, _ in calls] == ['pre', 'post', 'pre', 'post']
-			assert all(x.id in ids for _, ids in calls)
+			assert all(owner == x.id for name, owner in calls if name == 'pre')
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
