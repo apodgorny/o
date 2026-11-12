@@ -81,6 +81,8 @@ class TestWriteTracking(o.Tester):
 				events.append(('pre_invalidate', entity_id))
 
 			def invalidate():
+				assert memory._write is None
+
 				with memory.env.begin() as tx:
 					assert memory.from_bytes(tx.get(memory._key(key))) == 17
 
