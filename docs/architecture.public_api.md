@@ -27,7 +27,7 @@ O internals                      Entity, Id, Cache, Route, Memory, Zone, LMDB
 Persistent storage
 ```
 
-Application controllers orchestrate services. Application services read and modify O through public objects. The web framework owns tracking scopes, dependency bookkeeping and subscriptions. The underlying O services are implementation details except for explicitly documented infrastructure interfaces such as `o.services.Tracker.track(...)`.
+Application controllers orchestrate services. Application services read and modify O through public objects. The web framework owns tracking scopes, dependency bookkeeping and subscriptions. The underlying O services are implementation details except for explicitly documented infrastructure interfaces such as `o.services.Tracker.track_reads(ids)`.
 
 Trusted server infrastructure may require administrative APIs (authorization, migrations, storage operations). **Administrative use must not be mistaken for dependency-safe application data access.**
 
@@ -95,7 +95,7 @@ A collection can contain references, and tree mode imposes additional ownership 
 
 ## Read dependencies and committed write notifications
 
-`Tracker.track('r', reads)` collects read-owner IDs only. Write-owner IDs are supplied explicitly by O at persistence boundaries and passed to an optional IPL callback. These are distinct mechanisms; their identities must agree for a reactive result to become invalidated correctly.
+`Tracker.track_reads(ids)` collects read-owner IDs only. Write-owner IDs are supplied explicitly by O at persistence boundaries and passed to an optional IPL callback. These are distinct mechanisms; their identities must agree for a reactive result to become invalidated correctly.
 
 | Operation family | Read dependencies via Tracker | Write invalidation via O persistence |
 | --- | --- | --- |

@@ -26,18 +26,18 @@ The intended coherence relationship is **read dependency ID ↔ committed write 
 ```python
 import o
 
-reads = []
+ids = []
 
-with o.services.Tracker.track('r', reads):
+with o.services.Tracker.track_reads(ids):
 	result = o.V.some_field
 
-print(reads)
+print(ids)
 ```
 
-- `'r'` is the **only** supported mode. `'w'` and `'rw'` raise `ValueError`.
-- `reads` must be a Python `list`, otherwise a `TypeError` is raised.
-- IDs are **appended** in access order with duplicates retained. The list is owned by the caller; the tracker neither clears nor deduplicates it.
-- Tracking is opt-in; only accesses inside the scope are recorded. There is no `o.track(...)` shortcut.
+- `track_reads(ids)` is the only read-tracking entry point; it has no `mode` parameter and no write-tracking counterpart.
+- `ids` must be a Python `list`, otherwise a `TypeError` is raised.
+- IDs are **appended** in access order with duplicates retained. The `ids` list is owned by the caller; the tracker neither clears nor deduplicates it.
+- Tracking is opt-in; only accesses inside the scope are recorded. There is no `o.track_reads(...)` shortcut.
 - Normal usage requires an already started ontology (`o.start()`).
 
 ### Fields and collections
@@ -47,15 +47,15 @@ Person = o.T.extend('TrackerDocPerson', name=str)
 person = Person(name='Alex')
 items  = o.List([1, 2])
 prefs  = o.Dict({'theme': 'light'})
-reads  = []
+ids    = []
 
-with o.services.Tracker.track('r', reads):
+with o.services.Tracker.track_reads(ids):
 	person.name
 	items[0]
 	len(items)
 	prefs['theme']
 
-# The owning person, list and dict IDs can appear in reads.
+# The owning person, list and dict IDs can appear in ids.
 ```
 
 A field read records the owning instance ID. List/dictionary item-index operations record the collection ID rather than the ID of an atomic child. Reading a nested child's own field also records that child's ID.
@@ -68,10 +68,10 @@ Assignments may occur inside a read scope, but **there is no separate write trac
 outer = []
 inner = []
 
-with o.services.Tracker.track('r', outer):
+with o.services.Tracker.track_reads(outer):
 	person.name
 
-	with o.services.Tracker.track('r', inner):
+	with o.services.Tracker.track_reads(inner):
 		person.name
 
 # outer sees both reads; inner sees its nested read.
@@ -149,12 +149,12 @@ alice.start()
 
 Person = alice.T.extend('TrackForkPerson', age=int)
 person = Person(age=20)
-reads  = []
+ids    = []
 
-with alice.services.Tracker.track('r', reads):
+with alice.services.Tracker.track_reads(ids):
 	age = person.age
 
-assert reads == [person.id]
+assert ids == [person.id]
 ```
 
 Numeric IDs must be qualified by ontology identity when aggregating dependencies across forks. A tracker for one world does not observe another world's entities.
@@ -180,7 +180,7 @@ py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
 py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --ipl stub
 ```
 
-Tracker benchmark modes are `none` and `r` (or `all` to compare both); `w` and `rw` are not accepted. Measurements use fresh storage per run. The IPL stub measures Python callback overhead, **not network IPC latency**. Do not assume a performance result carries across workloads or Python versions.
+The benchmarking harness retains `none` and `r` as **measurement labels** (or `all` to compare both), not as arguments to `Tracker.track_reads(ids)`. There is no `w`/`rw` tracker mode. Measurements use fresh storage per run. The IPL stub measures Python callback overhead, **not network IPC latency**. Do not assume a performance result carries across workloads or Python versions.
 
 ## Verification and limits
 

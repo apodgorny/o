@@ -26,7 +26,7 @@ class TestTrackerTransparency(o.Tester):
 		scope = nullcontext()
 
 		if mode == 'r':
-			scope = o.services.Tracker.track('r', reads)
+			scope = o.services.Tracker.track_reads(reads)
 
 		return scope
 

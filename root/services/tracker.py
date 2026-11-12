@@ -321,20 +321,17 @@ class Tracker(o.Service):
 	# ======================================================================
 
 	# Record persistent read identities in one caller-owned list.
-	# Use the current fork's Tracker: o.services.Tracker.track('r', reads).
+	# Use the current fork's Tracker: o.services.Tracker.track_reads(ids).
 	# Nested calls, threads, and asynchronous tasks retain separate scopes.
 	# ----------------------------------------------------------------------
 	@contextmanager
-	def track(self, mode, reads=None):
-		if mode != 'r':
-			raise ValueError(f'Invalid tracking mode: {mode!r}')
-
-		if not isinstance(reads, list):
+	def track_reads(self, ids):
+		if not isinstance(ids, list):
 			raise TypeError('Read tracking requires a list')
 
-		self._enter(reads)
+		self._enter(ids)
 
 		try:
 			yield
 		finally:
-			self._exit(reads)
+			self._exit(ids)
