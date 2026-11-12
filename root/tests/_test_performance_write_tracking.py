@@ -1,7 +1,7 @@
 # ==============================================================================
 # TRANSACTIONAL WRITE TRACKING PERFORMANCE
 # ==============================================================================
-# Compare master writes against explicit-owner writes and IPL notifications.
+# Measure writes with the native Sync service and a stub subscriber.
 # Each timing run starts with fresh storage; use median microseconds per operation.
 # ==============================================================================
 
@@ -57,16 +57,12 @@ class TestPerformanceWriteTracking(o.Tester):
 		started  = time.perf_counter_ns()
 		owner_id = o.services.Id.hash('o.T.WriteBench._2')
 
-		if hasattr(memory, 'ipl'):
-			for index in range(size):
-				memory.set('o.T.WriteBench._2.value', index, owner_id)
-		else:
-			for index in range(size):
-				memory.set('o.T.WriteBench._2.value', index)
+		for index in range(size):
+			memory.set('o.T.WriteBench._2.value', index, owner_id)
 
 		result['memory_set_single'] = (time.perf_counter_ns() - started) / (1000 * size)
 
-		# A cached zone read must not pay any IPL notification cost.
+		# A cached zone read must not pay any Sync notification cost.
 		# ----------------------------------------------------------------------
 		started = time.perf_counter_ns()
 
@@ -94,7 +90,7 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--size', type=int, default=2000)
 	parser.add_argument('--rounds', type=int, default=5)
-	parser.add_argument('--ipl', choices=['none', 'stub'], default='none')
+	parser.add_argument('--sync', choices=['native', 'stub'], default='native')
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	args = parser.parse_args()
 
@@ -106,10 +102,11 @@ if __name__ == '__main__':
 			type(o).__app__ = SimpleNamespace(__lib_path__=directory)
 			o.start()
 
-			if args.ipl == 'stub':
-				o.services.Memory.ipl = SimpleNamespace(
-					pre_invalidate = lambda owner_id: None,
-					invalidate     = lambda: None,
+			if args.sync == 'stub':
+				o.services.Memory.sync = SimpleNamespace(
+					on_change  = lambda txn, owner_id: None,
+					on_changed = lambda txn: None,
+					on_aborted = lambda txn: None,
 				)
 
 			try:
@@ -121,11 +118,11 @@ if __name__ == '__main__':
 		measurements = {}
 		runner       = os.path.abspath(__file__)
 
-		print(f'{args.rounds} rounds × {args.size} operations; IPL: {args.ipl}.', flush=True)
+		print(f'{args.rounds} rounds × {args.size} operations; Sync: {args.sync}.', flush=True)
 
 		for index in range(args.rounds):
 			completed = subprocess.run(
-				[sys.executable, runner, '--size', str(args.size), '--ipl', args.ipl, '--_json'],
+				[sys.executable, runner, '--size', str(args.size), '--sync', args.sync, '--_json'],
 				capture_output = True,
 				text           = True,
 			)

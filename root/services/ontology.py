@@ -72,6 +72,7 @@ class Ontology(o.Service):
 
 		if not is_reconnecting:
 			self._initialize_service(o.services.Cache)
+			self._initialize_service(o.services.Sync)
 
 		self._initialize_service(o.services.Memory, sync=sync)
 

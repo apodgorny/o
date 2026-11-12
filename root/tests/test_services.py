@@ -26,6 +26,7 @@ class TestServices(o.Tester):
 		assert type(o.services.Entity).__name__ == 'Entity'
 		assert type(o.services.Id).__name__ == 'Id'
 		assert type(o.services.Route).__name__ == 'Route'
+		assert type(o.services.Sync).__name__ == 'Sync'
 		assert type(o.services.Migration).__name__ == 'Migration'
 		assert o.start.__self__ is o.services.Ontology
 

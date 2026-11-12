@@ -1,7 +1,7 @@
 # ==============================================================================
 # MEMORY SERVICE
 # ==============================================================================
-# Notify IPL immediately for writes and once after committed transactions.
+# Record changed owner IDs during writes; confirm after LMDB commits.
 # ==============================================================================
 
 import os
@@ -25,7 +25,8 @@ class MemoryBatch:
 		self.ctx      = None
 		self.tx       = None
 		self.depth    = 0
-		self.ipl      = None
+		self.sync     = None
+		self.txn_id   = None
 		self.notified = False
 		self.failed   = False
 		self.zones    = None
@@ -36,7 +37,8 @@ class MemoryBatch:
 		if self.tx is None:
 			self.ctx      = self.memory.env.begin(write=self.write)
 			self.tx       = self.ctx.__enter__()
-			self.ipl      = self.memory.ipl if self.write else None
+			self.txn_id   = self.tx.id() if self.write else None
+			self.sync     = self.memory.sync if self.write else None
 			self.notified = False
 			self.failed   = False
 			self.zones    = None
@@ -56,7 +58,8 @@ class MemoryBatch:
 		if self.ctx is not None and self.depth == 0:
 			aborted   = self.failed
 			committed = False
-			ipl       = self.ipl if self.notified else None
+			sync      = self.sync if self.notified else None
+			txn_id    = self.txn_id
 
 			try:
 				if aborted:
@@ -74,18 +77,22 @@ class MemoryBatch:
 				else:
 					self.memory._read = None
 
-				self.ipl      = None
+				self.sync     = None
+				self.txn_id   = None
 				self.notified = False
 				self.failed   = False
 				self.zones    = None
-				self.tx  = None
-				self.ctx = None
+				self.tx       = None
+				self.ctx      = None
 
-			if committed and ipl is not None:
+				if not committed and sync is not None:
+					sync.on_aborted(txn_id)
+
+			if committed and sync is not None:
 				try:
-					ipl.invalidate()
+					sync.on_changed(txn_id)
 				except Exception as error:
-					raise RuntimeError('LMDB committed; IPL confirmation failed') from error
+					raise RuntimeError('LMDB committed; Sync confirmation failed') from error
 
 			if aborted and exc_type is None:
 				raise RuntimeError('Transaction aborted after an earlier failure')
@@ -112,12 +119,12 @@ class MemoryBatch:
 		self.notified = True
 
 		if type(owner_id) is int:
-			self.ipl.pre_invalidate(owner_id)
+			self.sync.on_change(self.txn_id, owner_id)
 		else:
 			sent = False
 
 			for id in owner_id:
-				self.ipl.pre_invalidate(id)
+				self.sync.on_change(self.txn_id, id)
 				sent = True
 
 			if not sent:
@@ -129,19 +136,19 @@ class MemoryBatch:
 		try:
 			self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
-			if self.ipl is not None:
+			if self.sync is not None:
 				self._notify(owner_id)
 		except Exception:
 			self.failed = True
 			raise
 
-	# Remove an existing key and notify IPL about its changed owner.
+	# Remove an existing key and notify Sync about its changed owner.
 	# ----------------------------------------------------------------------
 	def unset(self, key, owner_id):
 		try:
 			deleted = self.tx.delete(self.memory._key(key))
 
-			if deleted and self.ipl is not None:
+			if deleted and self.sync is not None:
 				self._notify(owner_id)
 		except Exception:
 			self.failed = True
@@ -155,7 +162,7 @@ class MemoryBatch:
 			cursor = self.tx.cursor()
 			ok     = cursor.set_range(prefix)
 
-			if ok and cursor.key().startswith(prefix) and self.ipl is not None:
+			if ok and cursor.key().startswith(prefix) and self.sync is not None:
 				self._notify(owner_id)
 
 			while ok:
@@ -328,7 +335,6 @@ class Zone:
 
 
 class Memory(o.Service):
-	ipl = None
 
 	# ======================================================================
 	# CLASS PUBLIC METHODS
@@ -386,6 +392,7 @@ class Memory(o.Service):
 		self._read   = None
 		self._write  = None
 		self.root_id = o.String.hash('o.T', 15)
+		self.sync    = o.services.Sync
 
 	# Open read batch
 	# ----------------------------------------------------------------------
@@ -407,7 +414,7 @@ class Memory(o.Service):
 		return Zone(prefix)
 
 	# Store a value with its affected ID or iterable of IDs.
-	# ID zero requests full IPL invalidation for unknown owners.
+	# ID zero requests full Sync invalidation for unknown owners.
 	# ----------------------------------------------------------------------
 	def set(self, key, value, owner_id):
 		with self.write() as batch:
