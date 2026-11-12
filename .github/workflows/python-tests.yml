@@ -53,8 +53,12 @@ jobs:
           git show HEAD:root/services/memory.py > root/services/memory.py
           git show HEAD:root/services/tracker.py > root/services/tracker.py
 
-      - name: Benchmark transactional journal and read-only Tracker (PR)
+      - name: Benchmark Memory without IPL and read-only Tracker (PR)
         working-directory: o
         run: |
           python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
           python root/tests/_test_performance_tracker.py --size 1000 --rounds 3
+
+      - name: Benchmark two IPL calls per commit (PR)
+        working-directory: o
+        run: python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --ipl stub
