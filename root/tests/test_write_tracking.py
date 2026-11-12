@@ -49,7 +49,7 @@ class TestWriteTracking(o.Tester):
 			assert schema.owner_id == class_id
 			assert fields.owner_id == class_id
 			assert instance.owner_id == item_id
-			assert memory.zone('garbage/items/').owner_id is None
+			assert memory.zone('garbage/items/').owner_id == 0
 
 			events = cls._observe()
 			schema.set('field.type', 123)
@@ -246,7 +246,7 @@ class TestWriteTracking(o.Tester):
 
 			try:
 				with memory.write():
-					memory.set('o.T.WriteRollback._1.value', 7)
+					memory.set('o.T.WriteRollback._1.value', 7, o.services.Id.hash('o.T.WriteRollback._1'))
 					raise ValueError('rollback')
 			except ValueError:
 				failed = True
@@ -255,7 +255,7 @@ class TestWriteTracking(o.Tester):
 			assert events == [('pre_invalidate', o.services.Id.hash('o.T.WriteRollback._1'))]
 			assert memory.get('o.T.WriteRollback._1.value') is o.Undefined
 
-			memory.set('o.T.WriteRollback._2.value', 8)
+			memory.set('o.T.WriteRollback._2.value', 8, o.services.Id.hash('o.T.WriteRollback._2'))
 			assert events[-2:] == [
 				('pre_invalidate', o.services.Id.hash('o.T.WriteRollback._2')),
 				('invalidate', None),
@@ -286,7 +286,7 @@ class TestWriteTracking(o.Tester):
 			failed = False
 
 			try:
-				memory.set('o.T.WriteFailure._1.value', 3)
+				memory.set('o.T.WriteFailure._1.value', 3, o.services.Id.hash('o.T.WriteFailure._1'))
 			except RuntimeError:
 				failed = True
 
@@ -297,7 +297,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Unknown and administrative keys preserve their earlier ID mapping.
+	# Every administrative change explicitly supplies its affected IDs.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_unknown_and_administrative_keys(cls):
@@ -306,15 +306,15 @@ class TestWriteTracking(o.Tester):
 		try:
 			memory = o.services.Memory
 			events = cls._observe()
-			memory.set('custom/unknown', 1)
+			memory.set('custom/unknown', 1, 0)
 
 			assert events == [('pre_invalidate', 0), ('invalidate', None)]
 
 			events.clear()
-			memory.set('ids/12345', 'o.T.Unknown')
-			memory.set('garbage/items/23456', 'o.T.Old')
-			memory.set('routes/example', {'id': 34567})
-			memory.set('tree/parents/45678', 56789)
+			memory.set('ids/12345', 'o.T.Unknown', 12345)
+			memory.set('garbage/items/23456', 'o.T.Old', 23456)
+			memory.set('routes/example', {'id': 34567}, (memory.root_id, 34567))
+			memory.set('tree/parents/45678', 56789, (45678, 56789))
 
 			written = {owner for name, owner in events if name == 'pre_invalidate'}
 			assert {12345, 23456, 34567, 45678, 56789, memory.root_id} <= written
@@ -346,7 +346,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Mixed-owner prefix removal emits a pre-invalidation for each owner.
+	# Mixed-owner prefix removal uses caller-provided IDs, not key parsing.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_mixed_owner_prefix_deletion(cls):
@@ -354,11 +354,14 @@ class TestWriteTracking(o.Tester):
 
 		try:
 			memory = o.services.Memory
-			memory.set('o.T.WriteMixed._1.left', 1)
-			memory.set('o.T.WriteMixed._2.right', 2)
+			memory.set('o.T.WriteMixed._1.left', 1, o.services.Id.hash('o.T.WriteMixed._1'))
+			memory.set('o.T.WriteMixed._2.right', 2, o.services.Id.hash('o.T.WriteMixed._2'))
 			events = cls._observe()
 
-			memory.unset_all('o.T.WriteMixed.')
+			memory.unset_all('o.T.WriteMixed.', (
+				o.services.Id.hash('o.T.WriteMixed._1'),
+				o.services.Id.hash('o.T.WriteMixed._2'),
+			))
 
 			written = {owner for name, owner in events if name == 'pre_invalidate'}
 			assert o.services.Id.hash('o.T.WriteMixed._1') in written
@@ -368,7 +371,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Root auth keys reference other objects, which must be notified too.
+	# Bulk deletion can explicitly notify the owner and referenced targets.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_root_zone_auth_target_deletion(cls):
@@ -380,7 +383,7 @@ class TestWriteTracking(o.Tester):
 			zone.set('__auth__/12345', {5: 'rw'})
 			events = cls._observe()
 
-			zone.clear()
+			zone.clear((zone.owner_id, 12345))
 
 			written = {owner for name, owner in events if name == 'pre_invalidate'}
 			assert zone.owner_id in written
@@ -409,6 +412,27 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
+	# Direct memory writes require an ID even when IPL is disconnected.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_owner_id_is_required(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			failed = False
+
+			try:
+				memory.set('custom/no_owner', 3)
+			except TypeError:
+				failed = True
+
+			assert failed
+			assert memory.get('custom/no_owner') is o.Undefined
+		finally:
+			o.services.Memory.ipl = None
+			cls._restore_runtime(state)
+
 	# Neither missing deletes nor empty write batches emit notifications.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -420,7 +444,7 @@ class TestWriteTracking(o.Tester):
 			events = cls._observe()
 
 			assert memory.get('o.T.Absent') is o.Undefined
-			memory.unset('o.T.Absent')
+			memory.unset('o.T.Absent', 0)
 
 			with memory.write():
 				pass
@@ -430,7 +454,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# When IPL is disconnected, writes work without any ownership parsing.
+	# Disconnected IPL does not change the explicit owner-ID contract.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_writes_without_ipl(cls):
@@ -439,7 +463,7 @@ class TestWriteTracking(o.Tester):
 		try:
 			memory = o.services.Memory
 			assert memory.ipl is None
-			memory.set('o.T.WriteStandalone._1.value', 10)
+			memory.set('o.T.WriteStandalone._1.value', 10, o.services.Id.hash('o.T.WriteStandalone._1'))
 
 			assert memory.get('o.T.WriteStandalone._1.value') == 10
 			assert list(memory.keys('changes/')) == []
