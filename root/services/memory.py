@@ -16,7 +16,8 @@ UNDEFINED = o.Undefined
 class MemoryBatch:
 
 
-	# Create batch with explicit rollback and zone-cache ownership.
+
+	# Create batch with lazily tracked rollback caches.
 	# ----------------------------------------------------------------------
 	def __init__(self, memory, write=True):
 		self.memory   = memory
@@ -27,7 +28,7 @@ class MemoryBatch:
 		self.ipl      = None
 		self.notified = False
 		self.failed   = False
-		self.zones    = set()
+		self.zones    = None
 
 	# Join an existing transaction or open a new outer transaction.
 	# ----------------------------------------------------------------------
@@ -38,7 +39,7 @@ class MemoryBatch:
 			self.ipl      = self.memory.ipl if self.write else None
 			self.notified = False
 			self.failed   = False
-			self.zones.clear()
+			self.zones    = None
 
 		self.depth += 1
 		return self
@@ -64,7 +65,7 @@ class MemoryBatch:
 					self.ctx.__exit__(exc_type, exc, tb)
 					committed = exc_type is None
 			finally:
-				if not committed:
+				if not committed and self.zones is not None:
 					for zone in self.zones:
 						zone.cache.clear()
 
@@ -76,7 +77,7 @@ class MemoryBatch:
 				self.ipl      = None
 				self.notified = False
 				self.failed   = False
-				self.zones.clear()
+				self.zones    = None
 				self.tx  = None
 				self.ctx = None
 
@@ -90,6 +91,14 @@ class MemoryBatch:
 				raise RuntimeError('Transaction aborted after an earlier failure')
 
 		return False
+
+	# Track a zone only when another scope owns the open write transaction.
+	# ----------------------------------------------------------------------
+	def _track_zone(self, zone):
+		if self.zones is None:
+			self.zones = set()
+
+		self.zones.add(zone)
 
 	# Delegation
 	# ----------------------------------------------------------------------
@@ -257,28 +266,45 @@ class Zone:
 		return self.cache[key] is not UNDEFINED
 
 
-	# Store a zone key and reconcile its cache with transaction outcome.
+
+	# Store a zone value, preserving its cache through commit confirmation.
 	# ----------------------------------------------------------------------
 	def set(self, key, value=None, owner_id=None):
-		with self.memory.write() as batch:
-			batch.zones.add(self)
-			batch.set(self._key(key), value, self.owner_id if owner_id is None else owner_id)
-			self.cache[key] = value
+		try:
+			with self.memory.write() as batch:
+				if batch.depth > 1:
+					batch._track_zone(self)
 
-	# Remove a zone key; rollback discards its speculative cache.
+				batch.set(self._key(key), value, self.owner_id if owner_id is None else owner_id)
+				self.cache[key] = value
+		except Exception:
+			self.cache.pop(key, None)
+			raise
+
+	# Remove a zone key; failed writes cannot leave a stale cached value.
 	# ----------------------------------------------------------------------
 	def unset(self, key, owner_id=None):
-		with self.memory.write() as batch:
-			batch.zones.add(self)
-			batch.unset(self._key(key), self.owner_id if owner_id is None else owner_id)
-			self.cache[key] = UNDEFINED
+		try:
+			with self.memory.write() as batch:
+				if batch.depth > 1:
+					batch._track_zone(self)
 
-	# Clear a zone and reconcile its cache when the outer transaction finishes.
+				batch.unset(self._key(key), self.owner_id if owner_id is None else owner_id)
+				self.cache[key] = UNDEFINED
+		except Exception:
+			self.cache.pop(key, None)
+			raise
+
+	# Clear a zone prefix and discard cached reads of its former contents.
 	# ----------------------------------------------------------------------
 	def clear(self, owner_id=None):
-		with self.memory.write() as batch:
-			batch.zones.add(self)
-			batch.unset_all(self.prefix, self.owner_id if owner_id is None else owner_id)
+		try:
+			with self.memory.write() as batch:
+				if batch.depth > 1:
+					batch._track_zone(self)
+
+				batch.unset_all(self.prefix, self.owner_id if owner_id is None else owner_id)
+		finally:
 			self.cache.clear()
 
 	# Iterate zone items
