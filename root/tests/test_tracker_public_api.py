@@ -4,6 +4,8 @@
 # Verify dependency completeness at public O object and discovery boundaries.
 # ==============================================================================
 
+from types import SimpleNamespace
+
 import o
 
 
@@ -14,14 +16,15 @@ class TestTrackerPublicApi(o.Tester):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Collect committed write identities since one LMDB revision.
+	# Observe identities confirmed after successful commits.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def _writes_since(cls, revision):
+	def _observe_writes(cls):
 		writes = set()
-
-		for _, changed in o.services.Memory.changes(revision):
-			writes.update(changed)
+		o.services.Memory.ipl = SimpleNamespace(
+			pre_invalidate = lambda ids: None,
+			invalidate     = lambda ids: writes.update(ids),
+		)
 
 		return writes
 
@@ -51,13 +54,13 @@ class TestTrackerPublicApi(o.Tester):
 			assert employee.id in reads
 			assert finance.id in reads
 
-			revision = o.services.Memory.revision()
+			writes   = cls._observe_writes()
 			finance.salary = 250
-			writes = cls._writes_since(revision)
-
+			
 			assert finance.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Even an empty traversal depends on the object being traversed.
@@ -94,14 +97,14 @@ class TestTrackerPublicApi(o.Tester):
 
 			assert Model.id in reads
 
-			revision = o.services.Memory.revision()
+			writes   = cls._observe_writes()
 			item     = Model(value=1)
-			writes   = cls._writes_since(revision)
-
+			
 			assert item.id in writes
 			assert Model.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Class membership must invalidate when an instance is dropped.
@@ -119,15 +122,15 @@ class TestTrackerPublicApi(o.Tester):
 			with o.services.Tracker.track('r', reads):
 				assert item.id in [value.id for value in Model.__instances__()]
 
-			revision = o.services.Memory.revision()
+			writes   = cls._observe_writes()
 			item.drop()
-			writes = cls._writes_since(revision)
-
+			
 			assert Model.id in reads
 			assert Model.id in writes
 			assert item.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Reading an absent entity records the identity that its birth will write.
@@ -147,14 +150,14 @@ class TestTrackerPublicApi(o.Tester):
 
 			assert o.services.Id.hash(proto) in reads
 
-			revision = o.services.Memory.revision()
+			writes   = cls._observe_writes()
 			item     = Model(value=7)
-			writes   = cls._writes_since(revision)
-
+			
 			assert item.__proto__ == proto
 			assert item.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Subclass membership uses the parent class as a dependency.
@@ -171,15 +174,15 @@ class TestTrackerPublicApi(o.Tester):
 			with o.services.Tracker.track('r', reads):
 				assert Base.__subclasses__() == []
 
-			revision = o.services.Memory.revision()
+			writes   = cls._observe_writes()
 			Child    = Base.extend('TrackerPublicChild')
-			writes   = cls._writes_since(revision)
-
+			
 			assert Child.__parent__ is Base
 			assert Base.id in reads
 			assert Base.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Newly introduced observation paths must restore their original methods.
