@@ -69,51 +69,51 @@ class MemoryBatch:
 	def __getattr__(self, name):
 		return getattr(self.memory, name)
 
-	# Record IDs affected by a direct memory write.
-	# An unknown storage key conservatively invalidates the whole ontology.
+	# Notify the owner of a direct storage write and any affected parent.
+	# Unknown keys invalidate the entire ontology through ID zero.
 	# ----------------------------------------------------------------------
 	def _record_key(self, key, value=UNDEFINED):
-		key = str(key)
-		ipl = self.ipl
+		key    = str(key)
+		notify = self.ipl.pre_invalidate
 
 		if key == 'o.T' or key.startswith('o.T.'):
 			parts = key.split('.')
-			proto_parts = parts[:2]
+			owner = parts[:2]
 
 			for part in parts[2:]:
-				if part and (part[0].isupper() or part.startswith('_') and part[1:].isdigit()):
-					proto_parts.append(part)
-
-					if part.startswith('_'):
-						break
+				if part[:1].isupper():
+					owner.append(part)
+				elif part.startswith('_') and part[1:].isdigit():
+					owner.append(part)
+					break
 				else:
 					break
 
-			proto = '.'.join(proto_parts)
-			ipl.pre_invalidate(o.String.hash(proto, 15))
+			proto = '.'.join(owner)
+			notify(o.String.hash(proto, 15))
 
-			if key == proto and len(proto_parts) > 2:
-				ipl.pre_invalidate(o.String.hash('.'.join(proto_parts[:-1]), 15))
+			if key == proto and len(owner) > 2:
+				notify(o.String.hash('.'.join(owner[:-1]), 15))
 
 			if '.__auth__/' in key:
-				node_id = key.rsplit('/', 1)[-1]
-				ipl.pre_invalidate(int(node_id) if node_id.isdecimal() else 0)
+				entity_id = key.rsplit('/', 1)[-1]
+				notify(int(entity_id) if entity_id.isdecimal() else 0)
 
 		elif key.startswith(('ids/', 'garbage/refcounts/', 'garbage/items/', 'tree/parents/')):
 			entity_id = key.rsplit('/', 1)[-1]
-			ipl.pre_invalidate(int(entity_id) if entity_id.isdecimal() else 0)
+			notify(int(entity_id) if entity_id.isdecimal() else 0)
 
 			if key.startswith('tree/parents/'):
-				ipl.pre_invalidate(value if type(value) is int else 0)
+				notify(value if type(value) is int else 0)
 
 		elif key.startswith('routes/'):
-			ipl.pre_invalidate(self.memory.root_id)
+			notify(self.memory.root_id)
 
 			if isinstance(value, dict) and type(value.get('id')) is int:
-				ipl.pre_invalidate(value['id'])
+				notify(value['id'])
 
 		else:
-			ipl.pre_invalidate(0)
+			notify(0)
 
 	# Store value and notify IPL after LMDB accepts the write.
 	# ----------------------------------------------------------------------
