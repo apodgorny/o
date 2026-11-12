@@ -42,14 +42,21 @@ jobs:
         working-directory: o
         run: python root/test.py
 
-      - name: Benchmark previous Tracker (master)
+      - name: Benchmark baseline Memory and Tracker (master)
         working-directory: o
         run: |
           git fetch origin master
-          git show origin/master:root/services/tracker.py > root/services/tracker.py
-          python root/tests/_test_performance_tracker.py --size 2000 --rounds 3
-          git show HEAD:root/services/tracker.py > root/services/tracker.py
+          git restore --source=origin/master --worktree root/services root/t.py root/t_meta.py
+          python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
+          python root/tests/_test_performance_tracker.py --size 1000 --rounds 3
+          git restore --source=HEAD --worktree root/services root/t.py root/t_meta.py
 
-      - name: Benchmark expanded Tracker (PR)
+      - name: Benchmark Memory without IPL and read-only Tracker (PR)
         working-directory: o
-        run: python root/tests/_test_performance_tracker.py --size 2000 --rounds 3
+        run: |
+          python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
+          python root/tests/_test_performance_tracker.py --size 1000 --rounds 3
+
+      - name: Benchmark immediate per-ID notifications and commit confirmation (PR)
+        working-directory: o
+        run: python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --ipl stub

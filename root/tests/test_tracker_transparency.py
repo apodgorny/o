@@ -1,8 +1,8 @@
 # ==============================================================================
 # TRACKER BEHAVIOR TRANSPARENCY TEST
 # ==============================================================================
-# Compare the same ontology operations with no tracker and with r, w and rw.
-# Observation may change the trace, but not object behavior or persistence.
+# Compare ontology behavior with and without read dependency observation.
+# Read tracking must preserve object behavior and persistence.
 # ==============================================================================
 
 import time
@@ -27,10 +27,6 @@ class TestTrackerTransparency(o.Tester):
 
 		if mode == 'r':
 			scope = o.services.Tracker.track('r', reads)
-		elif mode == 'w':
-			scope = o.services.Tracker.track('w', writes)
-		elif mode == 'rw':
-			scope = o.services.Tracker.track('rw', reads, writes)
 
 		return scope
 
@@ -273,7 +269,7 @@ class TestTrackerTransparency(o.Tester):
 			Holder   = o.T.extend(f'{name}Holder', member=Model)
 			baseline = cls._run_operations(None, Model, Holder)
 
-			for mode in ('r', 'w', 'rw'):
+			for mode in ('r',):
 				assert cls._run_operations(mode, Model, Holder) == baseline, mode
 		finally:
 			cls._restore_runtime(state)
@@ -290,7 +286,7 @@ class TestTrackerTransparency(o.Tester):
 
 			assert all(error is not None for error in baseline[0])
 
-			for mode in ('r', 'w', 'rw'):
+			for mode in ('r',):
 				assert cls._run_failures(mode, Model) == baseline, mode
 		finally:
 			cls._restore_runtime(state)
@@ -304,7 +300,7 @@ class TestTrackerTransparency(o.Tester):
 		try:
 			baseline = cls._run_schema_changes(None)
 
-			for mode in ('r', 'w', 'rw'):
+			for mode in ('r',):
 				observed = cls._run_schema_changes(mode)
 				assert observed == baseline, (mode, baseline, observed)
 		finally:
@@ -324,7 +320,7 @@ class TestTrackerTransparency(o.Tester):
 			)
 			baseline = cls._run_reconstruction(None, Model)
 
-			for mode in ('r', 'w', 'rw'):
+			for mode in ('r',):
 				assert cls._run_reconstruction(mode, Model) == baseline, mode
 		finally:
 			cls._restore_runtime(state)

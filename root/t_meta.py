@@ -338,7 +338,8 @@ class TMeta(type(o.Module)):
 		written_fields = {}
 
 		with o.services.Memory.write() as memory:
-			memory.set(proto, True)
+			parent = cls.__parent__
+			memory.set(proto, True, parent.id if parent is not None else cls_id)
 			o.services.Id.set(proto)
 			cls.__zone__.set('__version__', cls.__version__)
 

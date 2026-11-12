@@ -1,3 +1,9 @@
+# ==============================================================================
+# MEMORY SERVICE
+# ==============================================================================
+# Notify IPL immediately for writes and once after committed transactions.
+# ==============================================================================
+
 import os
 import lmdb
 import msgpack
@@ -9,71 +15,160 @@ UNDEFINED = o.Undefined
 
 class MemoryBatch:
 
-	# Create batch
+
+
+	# Create batch with lazily tracked rollback caches.
 	# ----------------------------------------------------------------------
 	def __init__(self, memory, write=True):
-		self.memory = memory
-		self.write  = write
-		self.ctx    = None
-		self.tx     = None
-		self.depth  = 0
+		self.memory   = memory
+		self.write    = write
+		self.ctx      = None
+		self.tx       = None
+		self.depth    = 0
+		self.ipl      = None
+		self.notified = False
+		self.failed   = False
+		self.zones    = None
 
-	# If we are already in a transaction, just return ourselves
+	# Join an existing transaction or open a new outer transaction.
 	# ----------------------------------------------------------------------
 	def __enter__(self):
+		if self.tx is None:
+			self.ctx      = self.memory.env.begin(write=self.write)
+			self.tx       = self.ctx.__enter__()
+			self.ipl      = self.memory.ipl if self.write else None
+			self.notified = False
+			self.failed   = False
+			self.zones    = None
+
 		self.depth += 1
-		if self.tx is not None:
-			return self
-		
-		self.ctx = self.memory.env.begin(write=self.write)
-		self.tx  = self.ctx.__enter__()
 		return self
 
-	# Only the opener of the context manager should close it.
+	# Commit once, or roll back every change after any nested failure.
+	# Clear cached zone values whenever LMDB does not commit.
 	# ----------------------------------------------------------------------
 	def __exit__(self, exc_type, exc, tb):
 		self.depth -= 1
-		if self.ctx and self.depth == 0:
-			try:
-				self.ctx.__exit__(exc_type, exc, tb)
-			finally:
-				if self.write : self.memory._write = None
-				else          : self.memory._read  = None
 
+		if exc_type is not None:
+			self.failed = True
+
+		if self.ctx is not None and self.depth == 0:
+			aborted   = self.failed
+			committed = False
+			ipl       = self.ipl if self.notified else None
+
+			try:
+				if aborted:
+					self.ctx.__exit__(RuntimeError, RuntimeError('Transaction aborted'), None)
+				else:
+					self.ctx.__exit__(exc_type, exc, tb)
+					committed = exc_type is None
+			finally:
+				if not committed and self.zones is not None:
+					for zone in self.zones:
+						zone.cache.clear()
+
+				if self.write:
+					self.memory._write = None
+				else:
+					self.memory._read = None
+
+				self.ipl      = None
+				self.notified = False
+				self.failed   = False
+				self.zones    = None
 				self.tx  = None
 				self.ctx = None
+
+			if committed and ipl is not None:
+				try:
+					ipl.invalidate()
+				except Exception as error:
+					raise RuntimeError('LMDB committed; IPL confirmation failed') from error
+
+			if aborted and exc_type is None:
+				raise RuntimeError('Transaction aborted after an earlier failure')
+
 		return False
-	
+
+	# Track a zone only when another scope owns the open write transaction.
+	# ----------------------------------------------------------------------
+	def _track_zone(self, zone):
+		if self.zones is None:
+			self.zones = set()
+
+		self.zones.add(zone)
+
 	# Delegation
 	# ----------------------------------------------------------------------
 	def __getattr__(self, name):
 		return getattr(self.memory, name)
 
-	# Store value
+
+	# Send every affected ID; each write operation owns its notification.
 	# ----------------------------------------------------------------------
-	def set(self, key, value):
-		self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
+	def _notify(self, owner_id):
+		self.notified = True
 
-	# Remove key
+		if type(owner_id) is int:
+			self.ipl.pre_invalidate(owner_id)
+		else:
+			sent = False
+
+			for id in owner_id:
+				self.ipl.pre_invalidate(id)
+				sent = True
+
+			if not sent:
+				raise ValueError('owner_id iterable must contain at least one ID')
+
+	# Store a value, aborting the transaction when a write or notification fails.
 	# ----------------------------------------------------------------------
-	def unset(self, key):
-		self.tx.delete(self.memory._key(key))
+	def set(self, key, value, owner_id):
+		try:
+			self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
-	# Unset all keys by prefix
+			if self.ipl is not None:
+				self._notify(owner_id)
+		except Exception:
+			self.failed = True
+			raise
+
+	# Remove an existing key and notify IPL about its changed owner.
 	# ----------------------------------------------------------------------
-	def unset_all(self, key_prefix):
-		prefix = self.memory._key(key_prefix)
-		cursor = self.tx.cursor()
-		ok     = cursor.set_range(prefix)
+	def unset(self, key, owner_id):
+		try:
+			deleted = self.tx.delete(self.memory._key(key))
 
-		while ok:
-			key = cursor.key()
+			if deleted and self.ipl is not None:
+				self._notify(owner_id)
+		except Exception:
+			self.failed = True
+			raise
 
-			if not key.startswith(prefix):
-				break
+	# Notify all known owners before deleting their stored prefix.
+	# ----------------------------------------------------------------------
+	def unset_all(self, key_prefix, owner_id):
+		try:
+			prefix = self.memory._key(key_prefix)
+			cursor = self.tx.cursor()
+			ok     = cursor.set_range(prefix)
 
-			cursor.delete()
-			ok = cursor.set_range(prefix)
+			if ok and cursor.key().startswith(prefix) and self.ipl is not None:
+				self._notify(owner_id)
+
+			while ok:
+				key = cursor.key()
+
+				if not key.startswith(prefix):
+					break
+
+				cursor.delete()
+				ok = cursor.set_range(prefix)
+		except Exception:
+			self.failed = True
+			raise
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
@@ -97,7 +192,7 @@ class MemoryBatch:
 
 		return result
 
-	# Iterate stored pairs by prefix
+	# Iterate stored keys by prefix.
 	# ----------------------------------------------------------------------
 	def _pairs(self, prefix=''):
 		key      = self.memory._key(prefix)
@@ -105,13 +200,12 @@ class MemoryBatch:
 		has_item = cursor.set_range(key) if key else cursor.first()
 
 		while has_item:
-			key_bytes   = cursor.key()
-			value_bytes = cursor.value()
+			key_bytes = cursor.key()
 
 			if not key_bytes.startswith(key):
 				break
 
-			yield key_bytes.decode('utf-8'), value_bytes
+			yield key_bytes.decode('utf-8'), cursor.value()
 			has_item = cursor.next()
 
 	# Iterate stored items by prefix
@@ -132,9 +226,18 @@ class Zone:
 	# Constructor
 	# ----------------------------------------------------------------------
 	def __init__(self, prefix):
-		self.prefix = prefix
-		self.cache  = {}
-		self.memory = o.services.Memory
+		self.prefix   = prefix
+		self.cache    = {}
+		self.memory   = o.services.Memory
+		self.owner_id = 0
+
+		if prefix.startswith('o.T.') and prefix.endswith('.'):
+			proto = prefix[:-1]
+
+			if proto.endswith('._'):
+				proto = proto[:-2]
+
+			self.owner_id = o.String.hash(proto, 15)
 
 	# Get memory key
 	# ----------------------------------------------------------------------
@@ -162,23 +265,47 @@ class Zone:
 
 		return self.cache[key] is not UNDEFINED
 
-	# Set value
-	# ----------------------------------------------------------------------
-	def set(self, key, value=None):
-		self.cache[key] = value
-		self.memory.set(self._key(key), value)
 
-	# Remove value
-	# ----------------------------------------------------------------------
-	def unset(self, key):
-		self.cache[key] = UNDEFINED
-		self.memory.unset(self._key(key))
 
-	# Clear zone
+	# Store a zone value, preserving its cache through commit confirmation.
 	# ----------------------------------------------------------------------
-	def clear(self):
-		self.cache.clear()
-		self.memory.unset_all(self.prefix)
+	def set(self, key, value=None, owner_id=None):
+		try:
+			with self.memory.write() as batch:
+				if batch.depth > 1:
+					batch._track_zone(self)
+
+				batch.set(self._key(key), value, self.owner_id if owner_id is None else owner_id)
+				self.cache[key] = value
+		except Exception:
+			self.cache.pop(key, None)
+			raise
+
+	# Remove a zone key; failed writes cannot leave a stale cached value.
+	# ----------------------------------------------------------------------
+	def unset(self, key, owner_id=None):
+		try:
+			with self.memory.write() as batch:
+				if batch.depth > 1:
+					batch._track_zone(self)
+
+				batch.unset(self._key(key), self.owner_id if owner_id is None else owner_id)
+				self.cache[key] = UNDEFINED
+		except Exception:
+			self.cache.pop(key, None)
+			raise
+
+	# Clear a zone prefix and discard cached reads of its former contents.
+	# ----------------------------------------------------------------------
+	def clear(self, owner_id=None):
+		try:
+			with self.memory.write() as batch:
+				if batch.depth > 1:
+					batch._track_zone(self)
+
+				batch.unset_all(self.prefix, self.owner_id if owner_id is None else owner_id)
+		finally:
+			self.cache.clear()
 
 	# Iterate zone items
 	# ----------------------------------------------------------------------
@@ -201,6 +328,7 @@ class Zone:
 
 
 class Memory(o.Service):
+	ipl = None
 
 	# ======================================================================
 	# CLASS PUBLIC METHODS
@@ -255,8 +383,9 @@ class Memory(o.Service):
 			sync     = sync,
 		)
 
-		self._read  = None
-		self._write = None
+		self._read   = None
+		self._write  = None
+		self.root_id = o.String.hash('o.T', 15)
 
 	# Open read batch
 	# ----------------------------------------------------------------------
@@ -277,48 +406,71 @@ class Memory(o.Service):
 	def zone(self, prefix):
 		return Zone(prefix)
 
-	# Store value
+	# Store a value with its affected ID or iterable of IDs.
+	# ID zero requests full IPL invalidation for unknown owners.
 	# ----------------------------------------------------------------------
-	def set(self, key, value=None):
+	def set(self, key, value, owner_id):
 		with self.write() as batch:
-			batch.set(key, value)
+			batch.set(key, value, owner_id)
 
-	# Remove key
+	# Remove a key and notify its affected owners when present.
 	# ----------------------------------------------------------------------
-	def unset(self, key):
+	def unset(self, key, owner_id):
 		with self.write() as batch:
-			batch.unset(key)
+			batch.unset(key, owner_id)
 
-	# Unset all keys by prefix
+	# Delete a prefix; report every affected owner or ID zero.
 	# ----------------------------------------------------------------------
-	def unset_all(self, key_prefix):
+	def unset_all(self, key_prefix, owner_id):
 		with self.write() as batch:
-			batch.unset_all(key_prefix)
+			batch.unset_all(key_prefix, owner_id)
 
-	# Resolve stored value
+
+	# Resolve the current transaction's value, including pending writes.
 	# ----------------------------------------------------------------------
 	def get(self, key, default=UNDEFINED):
-		with self.read() as batch:
+		batch = self._write
+
+		if batch is not None and batch.tx is not None:
 			value = batch.get(key, default)
-		
+		else:
+			with self.read() as batch:
+				value = batch.get(key, default)
+
 		return value
 
-	# Check whether key exists
+	# Check existence against pending writes before committed storage.
 	# ----------------------------------------------------------------------
 	def has(self, key):
-		with self.read() as batch:
+		batch = self._write
+
+		if batch is not None and batch.tx is not None:
 			result = batch.has(key)
+		else:
+			with self.read() as batch:
+				result = batch.has(key)
 
 		return result
 
-	# Iterate stored items by prefix
+	# Iterate stored items with read-your-writes consistency.
 	# ----------------------------------------------------------------------
 	def items(self, prefix=''):
-		with self.read() as batch:
-			yield from batch.items(prefix)
+		batch = self._write
 
-	# Iterate stored keys by prefix
+		if batch is not None and batch.tx is not None:
+			yield from batch.items(prefix)
+		else:
+			with self.read() as batch:
+				yield from batch.items(prefix)
+
+	# Iterate stored keys with read-your-writes consistency.
 	# ----------------------------------------------------------------------
 	def keys(self, prefix=''):
-		with self.read() as batch:
+		batch = self._write
+
+		if batch is not None and batch.tx is not None:
 			yield from batch.keys(prefix)
+		else:
+			with self.read() as batch:
+				yield from batch.keys(prefix)
+

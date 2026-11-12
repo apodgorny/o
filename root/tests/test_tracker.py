@@ -49,89 +49,20 @@ class TestTracker(o.Tester):
 	# Read an uncached field without mistaking its cache fill for a write.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_cache_miss_does_not_count_as_write(cls):
+	def test_cache_miss_observes_read(cls):
 		state = cls._patch_runtime()
 
 		try:
 			Model  = o.T.extend('TrackerCacheMiss', value=int)
 			item   = Model(value=5)
 			reads  = []
-			writes = []
 			del item.__dict__['value']
 
-			with o.services.Tracker.track('rw', reads, writes):
+			with o.services.Tracker.track('r', reads):
 				assert item.value == 5
 				assert item.value == 5
 
 			assert reads == [item.id, item.id]
-			assert writes == []
-		finally:
-			cls._restore_runtime(state)
-
-	# Observe writes without counting the reads performed around them.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_field_writes(cls):
-		state = cls._patch_runtime()
-
-		try:
-			Model  = o.T.extend('TrackerFieldWrites', value=int)
-			item   = Model(value=1)
-			writes = []
-
-			with o.services.Tracker.track('w', writes):
-				assert item.value == 1
-				item.value = 2
-				assert item.value == 2
-				item.value = 3
-
-			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id]
-			assert item.value == 3
-		finally:
-			cls._restore_runtime(state)
-
-	# Capture persisted field deletion with and without a populated cache.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_field_deletion(cls):
-		state = cls._patch_runtime()
-
-		try:
-			Model  = o.T.extend('TrackerFieldDeletion', value=o.F(int, default=0))
-			first  = Model(value=1)
-			other  = Model(value=2)
-			writes = []
-			del other.__dict__['value']
-
-			with o.services.Tracker.track('w', writes):
-				del first.value
-				del other.value
-
-			assert [entity_id for entity_id in writes if entity_id in (first.id, other.id,)] == [first.id, other.id]
-			assert first.value == 0
-			assert other.value == 0
-		finally:
-			cls._restore_runtime(state)
-
-	# Capture each access direction independently within one context.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_read_write_mode(cls):
-		state = cls._patch_runtime()
-
-		try:
-			Model  = o.T.extend('TrackerCombinedMode', value=int)
-			item   = Model(value=1)
-			reads  = []
-			writes = []
-
-			with o.services.Tracker.track('rw', reads, writes):
-				assert item.value == 1
-				item.value = 7
-				assert item.value == 7
-
-			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
-			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id]
 		finally:
 			cls._restore_runtime(state)
 
@@ -199,45 +130,6 @@ class TestTracker(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-	# Capture all list mutations at the existing single save boundary.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_list_writes(cls):
-		state = cls._patch_runtime()
-
-		try:
-			items  = o.List([1, 2])
-			writes = []
-
-			with o.services.Tracker.track('w', writes):
-				items[0] = 3
-				items.append(4)
-				del items[1]
-
-			assert [entity_id for entity_id in writes if entity_id in (items.id,)] == [items.id, items.id, items.id]
-			assert list(items) == [3, 4]
-		finally:
-			cls._restore_runtime(state)
-
-	# Catch list methods implemented through a visible Python copy.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_list_builtin_mutations(cls):
-		state = cls._patch_runtime()
-
-		try:
-			items  = o.List([2, 1])
-			writes = []
-
-			with o.services.Tracker.track('w', writes):
-				items.reverse()
-				items.pop()
-
-			assert [entity_id for entity_id in writes if entity_id in (items.id,)] == [items.id, items.id]
-			assert list(items) == [1]
-		finally:
-			cls._restore_runtime(state)
-
 	# Observe dictionary lookup, membership, length and iteration.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -277,64 +169,6 @@ class TestTracker(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-	# Capture item replacement, insertion, update and removal once each.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_dict_writes(cls):
-		state = cls._patch_runtime()
-
-		try:
-			mapping = o.Dict({'a': 1})
-			writes  = []
-
-			with o.services.Tracker.track('w', writes):
-				mapping['a'] = 2
-				mapping.update({'b': 3})
-				del mapping['b']
-
-			assert [entity_id for entity_id in writes if entity_id in (mapping.id,)] == [mapping.id, mapping.id, mapping.id]
-			assert dict(mapping.items()) == {'a': 2}
-		finally:
-			cls._restore_runtime(state)
-
-	# Catch mutations implemented through dictionary built-in methods.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_dict_builtin_mutations(cls):
-		state = cls._patch_runtime()
-
-		try:
-			mapping = o.Dict({'a': 1, 'b': 2})
-			writes  = []
-
-			with o.services.Tracker.track('w', writes):
-				mapping.pop('a')
-				mapping.clear()
-
-			assert [entity_id for entity_id in writes if entity_id in (mapping.id,)] == [mapping.id, mapping.id]
-			assert dict(mapping.items()) == {}
-		finally:
-			cls._restore_runtime(state)
-
-	# Rebuilding a collection cache is a read, not a persisted mutation.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_collection_reconstruction_is_not_a_write(cls):
-		state = cls._patch_runtime()
-
-		try:
-			items   = o.List([1, 2])
-			mapping = o.Dict({'a': 1})
-			writes  = []
-
-			with o.services.Tracker.track('w', writes):
-				items.__load_items__()
-				mapping.__load_items__()
-
-			assert writes == []
-		finally:
-			cls._restore_runtime(state)
-
 	# Forward nested observations to every matching scope in lexical order.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -347,12 +181,11 @@ class TestTracker(o.Tester):
 			other        = Model(value=2)
 			outer_reads  = []
 			inner_reads  = []
-			inner_writes = []
-
+			
 			with o.services.Tracker.track('r', outer_reads):
 				first.value
 
-				with o.services.Tracker.track('rw', inner_reads, inner_writes):
+				with o.services.Tracker.track('r', inner_reads):
 					other.value
 					other.value = 4
 
@@ -360,7 +193,6 @@ class TestTracker(o.Tester):
 
 			assert [entity_id for entity_id in outer_reads if entity_id in (first.id, other.id)] == [first.id, other.id, first.id]
 			assert [entity_id for entity_id in inner_reads if entity_id == other.id] == [other.id]
-			assert [entity_id for entity_id in inner_writes if entity_id in (other.id,)] == [other.id]
 		finally:
 			cls._restore_runtime(state)
 
@@ -402,18 +234,13 @@ class TestTracker(o.Tester):
 	@classmethod
 	def test_invalid_tracking_arguments(cls):
 		tracker = o.services.Tracker
-		values  = [
-			('unknown', [], []),
-			('r', None, None),
-			('w', None, None),
-			('rw', [], None),
-		]
+		values = [('unknown', []), ('w', []), ('rw', []), ('r', None)]
 
-		for mode, reads, writes in values:
+		for mode, reads in values:
 			failed = False
 
 			try:
-				with tracker.track(mode, reads, writes):
+				with tracker.track(mode, reads):
 					assert False
 			except (TypeError, ValueError):
 				failed = True
@@ -482,35 +309,6 @@ class TestTracker(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-	# Ensure write-only observation leaves the read-side fast path untouched.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_write_only_does_not_patch_reads(cls):
-		state = cls._patch_runtime()
-
-		try:
-			Model            = o.T.extend('TrackerWriteOnly', value=int)
-			item             = Model(value=1)
-			items            = o.List([1])
-			original_assign  = o.T.__dict__['__setattr__']
-			original_publish = o.TMeta.__dict__['__publish_field__']
-			writes           = []
-
-			with o.services.Tracker.track('w', writes):
-				assert 'value' not in Model.__dict__
-				assert '__items__' not in o.List.__dict__
-				assert o.TMeta.__dict__['__publish_field__'] is original_publish
-				assert o.T.__dict__['__setattr__'] is not original_assign
-				assert item.value == 1
-				assert items[0] == 1
-				item.value = 2
-				items.append(3)
-
-			assert [entity_id for entity_id in writes if entity_id in (item.id, items.id,)] == [item.id, items.id]
-			assert o.T.__dict__['__setattr__'] is original_assign
-		finally:
-			cls._restore_runtime(state)
-
 	# Ensure read-only observation leaves write hooks uninstalled.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -541,86 +339,6 @@ class TestTracker(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-	# Install and release each direction independently for nested mixed modes.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_nested_mixed_modes_release_independently(cls):
-		state = cls._patch_runtime()
-
-		try:
-			Model           = o.T.extend('TrackerModeSwitch', value=int)
-			item            = Model(value=1)
-			tracker         = o.services.Tracker
-			original_assign = o.T.__dict__['__setattr__']
-			reads           = []
-			writes          = []
-
-			with tracker.track('w', writes):
-				assert 'value' not in Model.__dict__
-				item.value
-
-				with tracker.track('r', reads):
-					assert isinstance(Model.__dict__['value'], DynamicClassAttribute)
-					assert o.T.__dict__['__setattr__'] is not original_assign
-					assert item.value == 1
-					item.value = 2
-
-				assert 'value' not in Model.__dict__
-				assert o.T.__dict__['__setattr__'] is not original_assign
-				item.value = 3
-
-			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id]
-			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id]
-			assert o.T.__dict__['__setattr__'] is original_assign
-
-			with tracker.track('r', reads):
-				assert isinstance(Model.__dict__['value'], DynamicClassAttribute)
-				with tracker.track('w', writes):
-					item.value = 4
-				assert o.T.__dict__['__setattr__'] is original_assign
-				assert item.value == 4
-
-			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
-			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id, item.id, item.id]
-			assert 'value' not in Model.__dict__
-		finally:
-			cls._restore_runtime(state)
-
-	# Keep different tracking modes isolated when asyncio tasks interleave.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_concurrent_mixed_async_modes(cls):
-		state = cls._patch_runtime()
-
-		try:
-			Model  = o.T.extend('TrackerAsyncMixed', value=int)
-			item   = Model(value=1)
-			reads  = []
-			writes = []
-
-			async def read_task():
-				with o.services.Tracker.track('r', reads):
-					assert item.value == 1
-					await asyncio.sleep(0)
-					await asyncio.sleep(0)
-					assert item.value == 2
-
-			async def write_task():
-				with o.services.Tracker.track('w', writes):
-					await asyncio.sleep(0)
-					item.value = 2
-					await asyncio.sleep(0)
-
-			async def run():
-				await asyncio.gather(read_task(), write_task())
-
-			asyncio.run(run())
-
-			assert [entity_id for entity_id in reads if entity_id == item.id] == [item.id, item.id]
-			assert [entity_id for entity_id in writes if entity_id in (item.id,)] == [item.id]
-		finally:
-			cls._restore_runtime(state)
-
 	# A fork's tracker must observe only its own ontology objects.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -640,29 +358,24 @@ class TestTracker(o.Tester):
 					first  = Alice(value=1)
 					second = Bob(value=2)
 					reads_a  = []
-					writes_a = []
 					reads_b  = []
-					writes_b = []
 
 					assert alice.T is not bob.T
 					assert alice.services.Tracker is not bob.services.Tracker
 
-					with alice.services.Tracker.track('rw', reads_a, writes_a):
+					with alice.services.Tracker.track('r', reads_a):
 						assert second.value == 2
 						second.value = 3
 						assert reads_a == []
-						assert writes_a == []
 
-						with bob.services.Tracker.track('rw', reads_b, writes_b):
+						with bob.services.Tracker.track('r', reads_b):
 							assert first.value == 1
 							assert second.value == 3
 							first.value = 4
 							second.value = 5
 
 						assert [entity_id for entity_id in reads_a if entity_id == first.id] == [first.id]
-						assert [entity_id for entity_id in writes_a if entity_id in (first.id,)] == [first.id]
 						assert [entity_id for entity_id in reads_b if entity_id == second.id] == [second.id]
-						assert [entity_id for entity_id in writes_b if entity_id in (second.id,)] == [second.id]
 				finally:
 					for world in (alice, bob):
 						if 'env' in world.services.Memory.__dict__:

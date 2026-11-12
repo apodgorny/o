@@ -4,11 +4,29 @@
 # Verify dependency completeness at public O object and discovery boundaries.
 # ==============================================================================
 
+from types import SimpleNamespace
+
 import o
 
 
 class TestTrackerPublicApi(o.Tester):
 	RUNTIME_PREFIX = 'o_tracker_public_'
+
+	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
+
+	# Observe identities confirmed after successful commits.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _observe_writes(cls):
+		writes = set()
+		o.services.Memory.ipl = SimpleNamespace(
+			pre_invalidate = lambda owner_id: writes.add(owner_id),
+			invalidate     = lambda: None,
+		)
+
+		return writes
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -26,7 +44,6 @@ class TestTrackerPublicApi(o.Tester):
 			finance  = Finance(salary=200)
 			employee = Employee(finance=finance)
 			reads    = []
-			writes   = []
 
 			with o.services.Tracker.track('r', reads):
 				assert employee.to_data() == {'finance': {'salary': 200}}
@@ -36,12 +53,12 @@ class TestTrackerPublicApi(o.Tester):
 			assert employee.id in reads
 			assert finance.id in reads
 
-			with o.services.Tracker.track('w', writes):
-				finance.salary = 250
-
+			writes = cls._observe_writes()
+			finance.salary = 250
 			assert finance.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Even an empty traversal depends on the object being traversed.
@@ -71,20 +88,19 @@ class TestTrackerPublicApi(o.Tester):
 		try:
 			Model  = o.T.extend('TrackerPublicInstances', value=int)
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert list(Model.__instances__()) == []
 
 			assert Model.id in reads
 
-			with o.services.Tracker.track('w', writes):
-				item = Model(value=1)
-
+			writes = cls._observe_writes()
+			item     = Model(value=1)
 			assert item.id in writes
 			assert Model.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Class membership must invalidate when an instance is dropped.
@@ -97,19 +113,18 @@ class TestTrackerPublicApi(o.Tester):
 			Model  = o.T.extend('TrackerPublicDrop', value=int)
 			item   = Model(value=1)
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert item.id in [value.id for value in Model.__instances__()]
 
-			with o.services.Tracker.track('w', writes):
-				item.drop()
-
+			writes = cls._observe_writes()
+			item.drop()
 			assert Model.id in reads
 			assert Model.id in writes
 			assert item.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Reading an absent entity records the identity that its birth will write.
@@ -122,20 +137,19 @@ class TestTrackerPublicApi(o.Tester):
 			Model  = o.T.extend('TrackerPublicExists', value=int)
 			proto  = f'{Model.__proto__}._{Model.__version__}'
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert not o.services.Entity.exists(proto)
 
 			assert o.services.Id.hash(proto) in reads
 
-			with o.services.Tracker.track('w', writes):
-				item = Model(value=7)
-
+			writes = cls._observe_writes()
+			item     = Model(value=7)
 			assert item.__proto__ == proto
 			assert item.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Subclass membership uses the parent class as a dependency.
@@ -147,19 +161,18 @@ class TestTrackerPublicApi(o.Tester):
 		try:
 			Base   = o.T.extend('TrackerPublicBase')
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert Base.__subclasses__() == []
 
-			with o.services.Tracker.track('w', writes):
-				Child = Base.extend('TrackerPublicChild')
-
+			writes = cls._observe_writes()
+			Child    = Base.extend('TrackerPublicChild')
 			assert Child.__parent__ is Base
 			assert Base.id in reads
 			assert Base.id in writes
 			assert set(reads) & set(writes)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Newly introduced observation paths must restore their original methods.
@@ -176,13 +189,13 @@ class TestTrackerPublicApi(o.Tester):
 		reads             = []
 		writes            = []
 
-		with tracker.track('rw', reads, writes):
+		with tracker.track('r', reads):
 			assert o.T.__dict__['to_data'] is not original_data
 			assert o.Serializer.__dict__['_serialize_instance'] is not original_serialize
 			assert o.Tree.__dict__['_render_node'] is not original_tree
 			assert o.TMeta.__dict__['__instances__'] is not original_instances
-			assert o.TMeta.__dict__['__call__'] is not original_create
-			assert type(o.services.Id).__dict__['unset'] is not original_remove
+			assert o.TMeta.__dict__['__call__'] is original_create
+			assert type(o.services.Id).__dict__['unset'] is original_remove
 
 		assert o.T.__dict__['to_data'] is original_data
 		assert o.Serializer.__dict__['_serialize_instance'] is original_serialize

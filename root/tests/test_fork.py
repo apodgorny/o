@@ -63,8 +63,8 @@ class TestFork(o.Tester):
 					assert bob.TREE_MODE is False
 					assert o.services.Memory.path == default
 
-					alice.services.Memory.set('test/owner', 'alice')
-					bob.services.Memory.set('test/owner', 'bob')
+					alice.services.Memory.set('test/owner', 'alice', 0)
+					bob.services.Memory.set('test/owner', 'bob', 0)
 
 					assert alice.services.Memory.get('test/owner') == 'alice'
 					assert bob.services.Memory.get('test/owner') == 'bob'
@@ -95,7 +95,7 @@ world = o.fork('persisted')
 world.start()
 
 if sys.argv[2] == 'write':
-	world.services.Memory.set('test/value', 123)
+	world.services.Memory.set('test/value', 123, 0)
 else:
 	assert world.services.Memory.get('test/value') == 123
 

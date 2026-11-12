@@ -1,92 +1,44 @@
-# Architecture: Read/Write Tracker
+# Architecture: Read Tracker and storage write invalidation
 
-**Status:** Implemented in `o.services.Tracker`.
-**Source:** `root/services/tracker.py`.
-**Tests:** `root/tests/test_tracker.py`; existing transition regression in `root/tests/test_instance.py`; `root/tests/test_tracker_public_api.py`.
-**Benchmark:** `root/tests/_test_performance_tracker.py`.
+**Status:** Implemented read dependency tracking and local IPL notification hooks; cross-process transport and browser synchronization are separate concerns.
+**Sources:** `root/services/tracker.py`, `root/services/memory.py`, `root/t.py`, `root/t_meta.py`, and the O persistence services.
+**Tests:** `root/tests/test_tracker.py`, `root/tests/test_tracker_public_api.py`, `root/tests/test_tracker_transparency.py`, `root/tests/test_write_tracking.py`.
+**Benchmarks:** `root/tests/_test_performance_tracker.py`, `root/tests/_test_performance_write_tracking.py`.
 **Companion contract:** [Public O API](architecture.public_api.md).
 
 ## Mandatory application API boundary
 
-> **APPLICATIONS MUST USE ONLY THE PUBLIC O API TO QUALIFY FOR TRACKER DEPENDENCY GUARANTEES. Direct access to internal Entity, Id, Cache, Route, Memory, Zone, LMDB, `__zone__`, `__items__`, or raw atomic storage BYPASSES THE GUARANTEE.**
->
-> **The public API alone is not proof of complete reactive coverage:** only operations documented as observed and verified are eligible for automatic dependency-based subscriptions. Unsupported public transformations or reflection paths must be covered by Tracker and tested before use as reactive data sources.
+> **Applications use the documented public O object API for persistent domain state.** Direct access to `Memory`, `Zone`, `Entity`, `Id`, `Cache`, `Route`, LMDB, `__zone__`, `__items__`, or raw atomic storage bypasses the application's automatic dependency/invalidation guarantee.
 
-The authoritative list of application-facing operations, excluded internals, verified observation boundaries, and remaining limitations is in **[architecture.public_api.md](architecture.public_api.md)**. Both documents must be maintained together when Tracker's coverage changes.
+The public API is necessary but does not guarantee complete reactive coverage for every exported method. Only verified operations and matched read/write owner identities qualify for automatic dependency-based subscriptions. See [architecture.public_api.md](architecture.public_api.md).
 
-## Purpose
+`Tracker` is a documented infrastructure interface. `Memory` and `Zone` are internal persistence interfaces for O and trusted infrastructure, **not** application-domain APIs.
 
-`Tracker` observes access to persistent O objects while a caller-owned scope is active. It records **owner entity IDs** in ordinary Python lists, preserving access order and repeated IDs. The tracking mechanism is opt-in and does not require changes in domain classes, controllers, or the implementations of individual collection operations.
+## Two independent responsibilities
 
-Outside tracking scopes, the temporary descriptors and collection wrappers are removed: ordinary cached field reads and collection methods use their original implementations.
+- **Tracker:** observes reads of persistent O objects while a caller-owned scope is active, recording owner entity IDs in caller-supplied lists.
+- **Memory/Zone:** persist O changes and report explicitly identified affected owner IDs to optional IPL callbacks. Write notification no longer depends on Tracker scopes or Python method interception.
 
-## Public API
+The intended coherence relationship is **read dependency ID ↔ committed write owner ID** within the same ontology world. Neither a read trace nor a pre-commit notification is, by itself, a complete subscription system.
+
+## Read Tracker public API
 
 ```python
 import o
 
-tracker = o.services.Tracker
-
-with tracker.track('r', reads):
-	...
-
-with tracker.track('w', writes):
-	...
-
-with tracker.track('rw', reads, writes):
-	...
-```
-
-| Mode | Read list | Write list |
-| --- | --- | --- |
-| `'r'` | Required | Not used |
-| `'w'` | Not used | Required |
-| `'rw'` | Required | Required |
-
-The outputs must be Python `list` objects. They are owned by the caller and are **appended to**, not cleared or deduplicated. For mode `'w'`, the second positional argument is interpreted as the write list; `tracker.track('w', writes=writes)` is also supported. Invalid modes raise `ValueError`; missing/wrong output types raise `TypeError`.
-
-**There is currently no `o.track(...)` shortcut.** Use `o.services.Tracker.track(...)`. The ontology should already have been started normally with `o.start()`.
-
-## Examples
-
-### Track dependencies when rendering a controller
-
-```python
 reads = []
 
 with o.services.Tracker.track('r', reads):
-	result = controller_get()
+	result = o.V.some_field
 
-# In access order, including repetitions.
 print(reads)
 ```
 
-### Track writes in a command
-
-```python
-writes = []
-
-with o.services.Tracker.track('w', writes):
-	controller_set()
-
-for entity_id in dict.fromkeys(writes):
-	print('Written owner:', entity_id)
-```
-
-`dict.fromkeys(writes)` illustrates **optional downstream deduplication**, preserving first-seen order. `Tracker` itself keeps every recorded event.
-
-### Observe both directions
-
-```python
-reads  = []
-writes = []
-
-with o.services.Tracker.track('rw', reads, writes):
-	result = controller()
-
-print('Read owners:', reads)
-print('Written owners:', writes)
-```
+- `'r'` is the **only** supported mode. `'w'` and `'rw'` raise `ValueError`.
+- `reads` must be a Python `list`, otherwise a `TypeError` is raised.
+- IDs are **appended** in access order with duplicates retained. The list is owned by the caller; the tracker neither clears nor deduplicates it.
+- Tracking is opt-in; only accesses inside the scope are recorded. There is no `o.track(...)` shortcut.
+- Normal usage requires an already started ontology (`o.start()`).
 
 ### Fields and collections
 
@@ -96,20 +48,19 @@ person = Person(name='Alex')
 items  = o.List([1, 2])
 prefs  = o.Dict({'theme': 'light'})
 reads  = []
-writes = []
 
-with o.services.Tracker.track('rw', reads, writes):
+with o.services.Tracker.track('r', reads):
 	person.name
-	person.name = 'Alexander'
 	items[0]
-	items.append(3)
+	len(items)
 	prefs['theme']
-	prefs['theme'] = 'dark'
 
-# person.id, items.id, and prefs.id can appear in the traces.
+# The owning person, list and dict IDs can appear in reads.
 ```
 
-Collection events record the **container's ID**, rather than the atomic child ID. A field event records the ID of the object owning that field. Reading a child object's own field separately records that child's ID.
+A field read records the owning instance ID. List/dictionary item-index operations record the collection ID rather than the ID of an atomic child. Reading a nested child's own field also records that child's ID.
+
+Assignments may occur inside a read scope, but **there is no separate write trace**. Reads performed as part of mutation logic may still appear in `reads`.
 
 ### Nested scopes
 
@@ -123,69 +74,78 @@ with o.services.Tracker.track('r', outer):
 	with o.services.Tracker.track('r', inner):
 		person.name
 
-# outer contains both reads; inner contains only its nested read.
+# outer sees both reads; inner sees its nested read.
 ```
 
-All matching active scopes receive an event. They are not exclusive to the innermost scope.
+Each active scope for the current thread or async task receives matching reads. Scopes may overlap, and the last exiting scope restores the original descriptors. An exception does not leave a completed scope's tracking installed.
 
-### Exceptions and cleanup
+## Read interception mechanism
+
+Tracker temporarily installs only the instrumentation needed to observe reads:
+
+- **Fields:** `DynamicClassAttribute` intercepts cached accesses and cache misses while preserving normal set/delete behavior without logging writes.
+- **Collections:** descriptors around `__items__` observe list/dictionary indexing, iteration, membership and length; dictionary membership also uses `Dict.__contains__` interception.
+- **Dynamic fields:** `TMeta.__publish_field__` instruments fields published while tracking is active.
+- **Conversion:** public `to_data()` and `to_data_shallow()` calls record their receivers; nested conversion records the traversed entities. `to_json()` uses the data conversion path.
+- **Serialization and rendering:** `Serializer._serialize_instance()` and `Tree._render_node()` observe participating entities.
+- **Class enumeration:** `Class.__instances__()` and `Class.__subclasses__()` record their owning class, including an empty result.
+- **Existence checks:** `Entity.exists(...)` tracks a requested/prospective identity, or the root identity for route-style queries. This is infrastructure observation, not a general application API.
+
+Original class attributes/descriptors are restored when the last read scope closes. No write interceptors are installed on `T.__setattr__`, `T.__delattr__`, collection saves, constructors, class mutators, or route operations.
+
+Direct atom conversion, some schema reflection, custom rendering callbacks and administrative authorization remain outside fully verified read coverage. Observing a method does not prove that every dependency of an arbitrary computation is recorded.
+
+## Storage write notification contract (internal)
+
+The persistence layer reports changed owners explicitly rather than deriving identity from LMDB key names.
 
 ```python
-reads = []
+# Internal infrastructure only; not the application object API.
+memory.set(key, value, owner_id)
+memory.unset(key, owner_id)
+memory.unset_all(prefix, owner_id)
 
-try:
-	with o.services.Tracker.track('r', reads):
-		person.name
-		raise RuntimeError('Application failure')
-except RuntimeError:
-	pass
-
-# Tracking has ended and temporary class patches are restored,
-# assuming no other tracking scopes remain active.
+zone.set(key, value, owner_id=None)
+zone.unset(key, owner_id=None)
+zone.clear(owner_id=None)
 ```
 
-## Mechanism
+`owner_id` is expected to be an integer or an iterable of affected integer IDs. An ID of `0` denotes **full invalidation** when ownership is unknown. The caller is responsible for providing correct affected IDs; do not rely on exhaustive input-type validation by `Memory`. A `Zone` supplies its own cached owner ID unless an explicit override is supplied.
 
-`Tracker` maintains separate read and write instrumentation groups. A group is installed when the first scope requesting that direction begins and removed when its last such scope ends. Overlapping `r`, `w`, and `rw` scopes therefore install the **union** of required interceptions. Restoring a group leaves the other direction active, and originally absent class attributes are deleted on cleanup.
+When `Memory.ipl` is connected, each successful write that affects data calls `ipl.pre_invalidate(owner_id)` **within the active write transaction**, for every supplied owner ID and without deduplicating repeated IDs. A deletion of a missing key, or deletion of a prefix with no matching keys, emits no notification. The outermost successful transaction emits **one** `ipl.invalidate()` confirmation if there were notifications, after LMDB has committed. Read-only and empty write scopes do not confirm a change.
 
-- **Field reads (`r`/`rw` only):** install `DynamicClassAttribute` data descriptors. `__get__` catches cached reads in `instance.__dict__` and cache misses. Their `__set__` and `__delete__` transparently preserve the usual Python cache behavior, without reporting writes.
-- **Field writes (`w`/`rw` only):** temporarily wrap `o.T.__setattr__`; successful assignments record the owning object's ID after normal persistence. Initial cache hydration uses `object.__setattr__` and is not counted as a write.
-- **Field deletion (`w`/`rw` only):** a temporary wrapper around `o.T.__delattr__` registers a successful deletion, including when the field was not cached.
-- **List/Dict reads (`r`/`rw` only):** temporary descriptors on `__items__` capture list and dictionary item-index reads. Dictionary membership (`key in mapping`) uses a temporary `o.Dict.__contains__` wrapper, avoiding a second index descriptor on ordinary dictionary lookup.
-- **List/Dict writes (`w`/`rw` only):** a temporary wrapper around each class's existing `__save_items__` records structural changes. No patches to `append`, `pop`, `update`, `__setitem__`, or other individual operations are required.
-- **Dynamic class publication (`r`/`rw` only):** a temporary wrapper around `o.TMeta.__publish_field__` instruments fields defined while read tracking is active.
-- **Public data conversion (`r`/`rw` only):** temporary wrappers around `o.T.to_data()` and `to_data_shallow()` record the receiver, including empty objects; recursive conversion observes nested receivers. A wrapper around `Serializer._serialize_instance()` records each serialized O entity; `Tree._render_node()` similarly observes rendered O nodes. Internal `__dependants__()` remains unpatched to avoid imposing read overhead on garbage traversal during writes.
-- **Class enumeration (`r`/`rw` only):** temporary wrappers around `o.TMeta.__instances__` and `__subclasses__` record the class ID even for empty results.
-- **Entity existence (`r`/`rw` only):** a temporary wrapper around `Entity.exists` records the requested/prospective identity (or a coarse root identity for source routes).
-- **Birth/death (`w`/`rw` only):** a wrapper around `o.TMeta.__call__` records successfully constructed non-atomic entity/class identities; an `Id.unset` wrapper records non-atomic removal and class membership changes. Atomic child births and removals are omitted to minimize the overhead of normal field/collection writes. These are candidate write events, not confirmed commits.
-- **Class mutation (`w`/`rw` only):** wrappers around `o.TMeta.extend`, `__setattr__` and `__delattr__` observe public class/field mutation. Route registration changes record a coarse root identity for source-route existence queries.
+### Failure and transaction semantics
 
-Original class attributes and methods are stored separately for read and write interception, then restored when each group's reference count reaches zero. The previously existing `__on_change__` hook is not used.
+- A pre-invalidation announces a **candidate change**, not committed state. On rollback no commit confirmation is issued; the IPL implementation must handle an unconfirmed pre-invalidation without treating it as a committed update.
+- Nested writes share the outer transaction. A failed nested write or nested scope poisons the outer transaction even if the inner exception is caught. The outer write then aborts rather than committing a partially failed operation.
+- A failed transaction rolls back LMDB. Zones registered through write operations in the batch have their caches cleared on rollback; application code must still use the public object API.
+- `Memory` reads within its active write transaction observe pending writes and deletions. This is an internal persistence contract, not a promise of concurrent multi-thread transaction isolation.
+- If `ipl.pre_invalidate(...)` raises, the write transaction aborts. If `ipl.invalidate()` raises **after** LMDB has committed, O raises `RuntimeError('LMDB committed; IPL confirmation failed')` chained to the transport failure. The committed write is preserved.
+- With `Memory.ipl = None`, storage writes proceed without IPL callbacks. This PR defines local callback integration, **not** a tested inter-process notification transport or revision protocol.
 
-## Event semantics and boundaries
+For writes to O fields, collections, class/instance membership and metadata, the owning O implementation and its services supply the affected IDs. The storage layer does not introspect application objects or reverse-engineer owners from arbitrary key strings.
 
-- **Identity:** the lists contain `instance.id`, not a field name, key, index, value, or full change record.
-- **Order and repetitions:** repeated operations remain in the result. No sorting or deduplication occurs.
-- **Reads:** these are instrumented Python accesses to O field/collection indexes, including accesses performed internally by O. For example, an operation that writes a collection may also read its existing index in `'r'` or `'rw'` mode. Therefore read traces describe accesses, not necessarily only explicit application-level reads.
-- **Field writes:** successful assignments are recorded by the temporary `T.__setattr__` wrapper, even if the assigned value equals the previous value. Successful field deletions are also recorded.
-- **Collection writes:** the save wrapper compares before/after container indexes. A no-op save with unchanged indexes does not add a write ID.
-- **Atoms:** O stores atomic children as entities but exposes Python primitive values on normal field/collection access. The observation is associated with the owning field/container. Direct internal access to an atom's `__value__`, or direct calls to `Entity.value(id)`, are not individually tracked.
-- **Transactions:** this is an access trace, **not** a committed-change log. It does not automatically discard write events after a rollback. Consumers that publish changes should coordinate publication with successful transaction completion.
-- **Public API coverage:** direct access to internal storage or entity resolution can bypass observation. Construction, structural traversal and class membership are additionally observed, but class schema reflection, direct atomic conversion, authorization and other specialized public paths still require verification. See [architecture.public_api.md](architecture.public_api.md).
-- **Scope:** only operations executed while the context is active are added. The returned lists remain usable afterward.
+## Event and correctness semantics
+
+Read traces contain integer owner IDs in access order; they are not property names, full values, JSON paths or change records. They do not represent a log of committed changes.
+
+For a previously calculated result with read IDs `R`, and a later **committed** change with affected owner IDs `W`, the necessary coherence condition within one ontology is:
+
+```text
+result_before != result_after  =>  R_before ∩ W_committed != ∅
+```
+
+A consumer that receives a valid intersecting invalidation can re-run its computation under read tracking and replace its dependency set. Subscription management, batching, identity/revision ordering, WebSocket delivery and recovery are **not implemented by Tracker**.
 
 ## Forked ontologies
 
-Each started O fork has its own ontology classes, services, caches, and LMDB. Use the Tracker **from the same fork** as the objects being observed:
+Each fork has distinct ontology classes, services, caches and LMDB. Always use the tracker belonging to the world being read:
 
 ```python
 import o
 
 alice = o.fork('alice')
-bob   = o.fork('bob')
-
 alice.start()
-bob.start()
 
 Person = alice.T.extend('TrackForkPerson', age=int)
 person = Person(age=20)
@@ -197,64 +157,42 @@ with alice.services.Tracker.track('r', reads):
 assert reads == [person.id]
 ```
 
-Scopes from two forks can be active simultaneously; a fork's Tracker instruments its own Python classes and does not observe objects belonging to another fork. Numeric entity IDs are meaningful **within** an ontology; if traces from multiple forks are aggregated, identify the world alongside each ID.
+Numeric IDs must be qualified by ontology identity when aggregating dependencies across forks. A tracker for one world does not observe another world's entities.
 
-## Concurrency
+## Concurrency of read observation
 
-Each direction of instrumentation is installed on shared Python classes under an `RLock`, and stays installed only while at least one scope requests that direction. Individual output lists are selected by **thread-local storage** for ordinary threaded execution, or by the current **`asyncio.Task`** for async execution; the service uses no `ContextVar`.
+The installation/removal of read interceptors is protected by an `RLock`. Active output lists are scoped to a thread or the current `asyncio.Task`; `ContextVar` is not used. Each async task requiring observation opens its own scope. A task without one does not append to another task's trace, although globally installed descriptors can add dispatch overhead while another scope is active.
 
-Each async task that needs its own trace should open its own `track(...)` context. Opening a context in a parent task does not implicitly subscribe child tasks. Because instrumented class attributes are shared, code executing without its own scope may still pay descriptor dispatch overhead while another task/thread is tracking reads, but it will not append to another task's lists. A write-only scope does not install read descriptors.
+This describes **Tracker observation scope isolation**, not thread safety of arbitrary `Memory` transactions.
 
-## Performance benchmark
-
-**Recommended command — no flags necessary:**
+## Benchmarks
 
 ```bash
+# Read tracking overhead: default 5 rounds, 10,000 iterations, graph mode.
 py root/tests/_test_performance_tracker.py
-```
 
-Defaults: **5 rounds**, **10,000 iterations per workload**, the original **`legacy` workload**, **graph mode**, and **all four tracking modes**: `none`, `r`, `w`, `rw`. The benchmark executes each measurement in a separate Python process with an independent LMDB and alternates mode order between rounds. It reports median and min/max microseconds per iteration plus percentage overhead relative to `none`.
-
-**Mode specialization:** `w` now installs **no read descriptors**, so its read-only workloads should approach `none`; `r` installs no write wrappers. These are predictions for the new implementation and require a fresh run to verify.
-
-Optional commands:
-
-```bash
-# Separate attribute read/write and instance-creation workloads.
-py root/tests/_test_performance_tracker.py --workload expanded
-
-# Benchmark the tree-mode ontology instead of graph mode.
-py root/tests/_test_performance_tracker.py --tree-mode tree
-
-# Faster exploratory run.
+# Only the supported modes: none and r.
+py root/tests/_test_performance_tracker.py --mode r --workload expanded
 py root/tests/_test_performance_tracker.py --size 1000 --rounds 2
 
-# One mode and one profiling target.
-py root/tests/_test_performance_tracker.py --mode rw --profile --profile-case dict_setitem
+# Storage writes with no IPL callbacks, then local no-op IPL callbacks.
+py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
+py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --ipl stub
 ```
 
-Tracking wraps the complete benchmark workload, while the original benchmark times operations independently of fixture construction. Results depend on hardware, Python version, and the selected workload; no speedup or slowdown should be assumed before measuring.
+Tracker benchmark modes are `none` and `r` (or `all` to compare both); `w` and `rw` are not accepted. Measurements use fresh storage per run. The IPL stub measures Python callback overhead, **not network IPC latency**. Do not assume a performance result carries across workloads or Python versions.
 
-## Behavior transparency and verification
-
-Tracker's functional contract is **observation without changes to ordinary ontology behavior**: when the same operations run with no tracking and with `r`, `w` or `rw`, they must return the same values, raise equivalent exceptions, mutate the same logical entities and persist the same data.
-
-`root/tests/test_tracker_transparency.py` verifies this contract by executing the same operation scenarios in all four modes and comparing their results. The differential tests cover persistent fields and defaults; cached and uncached reads; list/dictionary built-in methods and mutations; error classes and messages; dynamic schema definition/removal and inheritance; reconstruction; and the resulting persisted values and item-index sizes.
-
-**Introspection caveat:** the implementation deliberately replaces selected attributes of the Python class objects during a scope. Consequently, `Class.__dict__`, `inspect.getattr_static(...)`, method identity and performance are observably different until the scope ends. This is inherent to the temporary class-patching design and is **not** covered by the claim of functional transparency. No finite test suite proves equivalence for every conceivable Python operation or extension.
-
-## Tests
+## Verification and limits
 
 ```bash
 py root/test.py
 ```
 
-`root/tests/test_tracker_public_api.py` covers structural traversal, nested serialization, empty enumeration, entity birth/death, and missing-entity existence.
+- `test_tracker.py`: cached and uncached field/collection reads, nested scopes, field publication, exception cleanup, async/thread observation and fork isolation.
+- `test_tracker_public_api.py`: structural reads, conversion, enumeration, lifecycle dependency intersections and existence checks.
+- `test_tracker_transparency.py`: normal behavior with no tracking versus `'r'`, including failure and schema/mutation cases.
+- `test_write_tracking.py`: explicit owner IDs, local IPL order, one confirmation per outer commit, missing deletes, nested failures, rollback, zone write-cache rollback, and post-commit callback failure.
 
-`root/tests/test_tracker.py` covers cached and uncached reads; field assignments and deletions; mode validation; class defaults/inheritance; dynamic class publication; list and dictionary reads/writes; cache reconstruction; mode-specific interception; mixed nested scopes; exception restoration; thread/async-task separation; and simultaneous tracking in independent ontology forks.
+The functional read-tracking contract is observation without changing the ordinary public object's results, mutations or persistence. Temporary instrumentation does change class introspection (`__dict__`, descriptor identity, `inspect.getattr_static(...)`) while active, so that introspection is outside the transparency claim.
 
-See also: `root/tests/test_instance.py` for the replacement regression test of field transitions via `Tracker`.
-
-## Non-goals
-
-`Tracker` is a low-level, reversible observation service. It does not implement subscriber registration, dependency graph maintenance, Web 4.0 event delivery, transactional publication, or value-level diffs. Those responsibilities belong to consumers that interpret the collected identity traces.
+**Non-goals:** Tracker does not register subscriptions, observe writes, perform value-level diffs, implement network IPC, or coordinate Web 4.0 rendering. The consuming layer must apply the documented dependency condition and handle the lifecycle of subscriptions and updates.

@@ -128,7 +128,7 @@ class TestServices(o.Tester):
 			integer = o.Int(73)
 			id      = integer.id
 
-			o.services.Memory.set(f'{integer.__proto__}.__value__', 91)
+			o.services.Memory.set(f'{integer.__proto__}.__value__', 91, 0)
 			integer.__invalidate__()
 
 			assert integer.id == id
