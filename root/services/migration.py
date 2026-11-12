@@ -231,12 +231,12 @@ class Migration(o.Service):
 
 						if change['new'] is None:
 							parent.__unlink__(o.services.Entity.get(old_id))
-							memory.unset(key)
+							memory.unset(key, parent.id)
 						else:
 							child = o.services.Entity.cast(target, value)
 							parent.__link__(child)
 							parent.__unlink__(o.services.Entity.get(old_id))
-							memory.set(key, child.id)
+							memory.set(key, child.id, parent.id)
 					else:
 						raise RuntimeError(
 							f'Stored value changed after migration approval: `{key}`'
