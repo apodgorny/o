@@ -6,6 +6,8 @@
 
 import os
 
+from types import SimpleNamespace
+
 import o
 
 UNDEFINED = o.Undefined
@@ -488,25 +490,31 @@ class TestInstance(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-	# Persist mutation identities after assigning and deleting a field.
+	# Persist mutations emit a pair of IPL calls per successful commit.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_write_journal_receives_attr_transitions(cls):
+	def test_ipl_receives_attr_transitions(cls):
 		state = cls._patch_runtime()
 
 		try:
 			root_name = os.path.basename(state['root'])
 			Tracked   = o.T.extend(f'Tracked_{root_name}', foo=str)
 			x         = Tracked(foo='a')
-			memory    = o.services.Memory
-			revision  = memory.revision()
+			calls     = []
+
+			memory = o.services.Memory
+			memory.ipl = SimpleNamespace(
+				pre_invalidate = lambda ids: calls.append(('pre', frozenset(ids))),
+				invalidate     = lambda ids: calls.append(('post', frozenset(ids))),
+			)
 
 			x.foo = 'b'
 			del x.foo
 
-			records = list(memory.changes(revision))
-			assert len([ids for _, ids in records if x.id in ids]) == 2
+			assert [name for name, _ in calls] == ['pre', 'post', 'pre', 'post']
+			assert all(x.id in ids for _, ids in calls)
 		finally:
+			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# ----------------------------------------------------------------------
