@@ -139,20 +139,23 @@ class MemoryBatch:
 			else:
 				self.ipl.pre_invalidate(owner_id)
 
-	# Delete a prefix; send each affected ID immediately.
+	# Delete a prefix; notify its owner before scanning any removed keys.
 	# ----------------------------------------------------------------------
 	def unset_all(self, key_prefix, owner_id=None):
 		prefix = self.memory._key(key_prefix)
 		cursor = self.tx.cursor()
 		ok     = cursor.set_range(prefix)
+		ipl    = self.ipl
 
-		if self.ipl is not None:
+		if ipl is not None:
 			name = key_prefix.rstrip('.').rsplit('.', 1)[-1]
 			scan = owner_id is None or not (name.startswith('_') and name[1:].isdigit()) or key_prefix.startswith('o.T.V._')
+
+			if ok and cursor.key().startswith(prefix) and owner_id is not None:
+				self.notified = True
+				ipl.pre_invalidate(owner_id)
 		else:
 			scan = False
-
-		removed = False
 
 		while ok:
 			key = cursor.key()
@@ -161,18 +164,14 @@ class MemoryBatch:
 				break
 
 			cursor.delete()
-			removed = True
 
-			if self.ipl is not None:
+			if ipl is not None:
 				self.notified = True
 
 				if scan:
 					self._record_key(key.decode('utf-8'))
 
 			ok = cursor.set_range(prefix)
-
-		if removed and self.ipl is not None and owner_id is not None:
-			self.ipl.pre_invalidate(owner_id)
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
