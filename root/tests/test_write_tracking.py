@@ -322,6 +322,37 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
+	# Services propagate known IDs without interpreting storage keys.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_service_owner_notifications(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			events = cls._observe()
+			proto  = 'o.T.WriteMapping'
+			id     = o.services.Id.hash(proto)
+
+			o.services.Id.set(proto)
+
+			assert events == [
+				('pre_invalidate', id),
+				('invalidate', None),
+			]
+
+			events.clear()
+			o.services.Route.set('write_mapping_route', {'id': id})
+
+			assert events == [
+				('pre_invalidate', memory.root_id),
+				('pre_invalidate', id),
+				('invalidate', None),
+			]
+		finally:
+			o.services.Memory.ipl = None
+			cls._restore_runtime(state)
+
 	# Clear reports owner once for an instance zone.
 	# ----------------------------------------------------------------------
 	@classmethod
