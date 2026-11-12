@@ -75,6 +75,7 @@ class TestPerformanceSync(o.Tester):
 					sync._wake.wait()
 
 				sync._sleeping = False
+				sync._wake.clear()
 			else:
 				sync._wake.wait(interval)
 
@@ -208,6 +209,7 @@ class TestPerformanceSync(o.Tester):
 					sync._wake.wait()
 
 				sync._sleeping = False
+				sync._wake.clear()
 			else:
 				sync._wake.wait(interval)
 
