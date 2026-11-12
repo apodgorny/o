@@ -33,12 +33,17 @@ class Route(o.Service):
 	# Register route metadata.
 	# ----------------------------------------------------------------------
 	def set(self, route, value):
-		self.zone.set(route, value)
+		owner_id = o.services.Memory.root_id
+
+		if isinstance(value, dict) and type(value.get('id')) is int:
+			owner_id = (owner_id, value['id'])
+
+		self.zone.set(route, value, owner_id)
 
 	# Remove route metadata.
 	# ----------------------------------------------------------------------
 	def unset(self, route):
-		self.zone.unset(route)
+		self.zone.unset(route, o.services.Memory.root_id)
 
 	# Read the source route persisted for a prototype.
 	# ----------------------------------------------------------------------
