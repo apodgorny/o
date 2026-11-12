@@ -34,6 +34,6 @@ jobs:
           python -m pip install -e ./almasi
           python -m pip install -e ./o
 
-      - name: Benchmark 10000 writes: stub vs Sync
+      - name: 'Benchmark 10000 writes: stub vs Sync'
         working-directory: o
         run: python root/tests/_test_performance_sync.py --size 10000 --rounds 5
