@@ -29,7 +29,7 @@ class Id(o.Service):
 	# ----------------------------------------------------------------------
 	def set(self, proto):
 		id = self.hash(proto)
-		self.zone.set(id, proto)
+		self.zone.set(id, proto, id)
 		return id
 
 	# Resolve a previously stored numeric id to its prototype.
@@ -45,4 +45,4 @@ class Id(o.Service):
 	# Remove an id mapping.
 	# ----------------------------------------------------------------------
 	def unset(self, id):
-		self.zone.unset(id)
+		self.zone.unset(id, id)
