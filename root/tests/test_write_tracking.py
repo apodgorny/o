@@ -1,7 +1,7 @@
 # ==============================================================================
 # TEST WRITE INVALIDATION
 # ==============================================================================
-# Observe only the two IPL calls around committed LMDB writes.
+# Send every owner immediately; confirm once after successful LMDB commit.
 # ==============================================================================
 
 from types import SimpleNamespace
@@ -16,14 +16,14 @@ class TestWriteTracking(o.Tester):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Capture immutable ID snapshots from the two in-memory IPL calls.
+	# Capture the exact order of IPL calls.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _observe(cls):
 		events = []
 		o.services.Memory.ipl = SimpleNamespace(
-			pre_invalidate = lambda ids: events.append(('pre_invalidate', frozenset(ids))),
-			invalidate     = lambda ids: events.append(('invalidate', frozenset(ids))),
+			pre_invalidate = lambda owner_id: events.append(('pre_invalidate', owner_id)),
+			invalidate     = lambda: events.append(('invalidate', None)),
 		)
 
 		return events
@@ -32,7 +32,7 @@ class TestWriteTracking(o.Tester):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# The schema and class zones have the same class owner.
+	# Schema, fields and instance zones retain their correct owner IDs.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_zone_owner_id_and_schema(cls):
@@ -55,50 +55,50 @@ class TestWriteTracking(o.Tester):
 			schema.set('field.type', 123)
 
 			assert events == [
-				('pre_invalidate', frozenset({class_id})),
-				('invalidate', frozenset({class_id})),
+				('pre_invalidate', class_id),
+				('invalidate', None),
 			]
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Both calls occur after writes, around the actual commit.
+	# pre_invalidate happens during the transaction; invalidate after commit.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_precedes_commit_and_confirms_afterward(cls):
 		state = cls._patch_runtime()
 
 		try:
-			memory = o.services.Memory
-			key    = 'o.T.WriteBoundary._1.value'
-			events = []
+			memory   = o.services.Memory
+			key      = 'o.T.WriteBoundary._1.value'
+			owner_id = o.services.Id.hash('o.T.WriteBoundary._1')
+			events   = []
 
-			def pre_invalidate(ids):
+			def pre_invalidate(entity_id):
 				with memory.env.begin() as tx:
 					assert tx.get(memory._key(key)) is None
 
-				events.append(('pre_invalidate', frozenset(ids)))
+				events.append(('pre_invalidate', entity_id))
 
-			def invalidate(ids):
+			def invalidate():
 				with memory.env.begin() as tx:
 					assert memory.from_bytes(tx.get(memory._key(key))) == 17
 
-				events.append(('invalidate', frozenset(ids)))
+				events.append(('invalidate', None))
 
 			memory.ipl = SimpleNamespace(pre_invalidate=pre_invalidate, invalidate=invalidate)
-			memory.set(key, 17)
+			memory.set(key, 17, owner_id)
 
-			owner_id = o.services.Id.hash('o.T.WriteBoundary._1')
 			assert events == [
-				('pre_invalidate', frozenset({owner_id})),
-				('invalidate', frozenset({owner_id})),
+				('pre_invalidate', owner_id),
+				('invalidate', None),
 			]
 			assert list(memory.keys('changes/')) == []
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Ordinary field writes and deletion report their containing object.
+	# Each mutation sends one immediate ID and one commit confirmation.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_field_writes_and_deletion(cls):
@@ -112,16 +112,18 @@ class TestWriteTracking(o.Tester):
 			item.value = 2
 			del item.value
 
-			assert [name for name, _ in events] == [
-				'pre_invalidate', 'invalidate', 'pre_invalidate', 'invalidate',
+			assert events == [
+				('pre_invalidate', item.id),
+				('invalidate', None),
+				('pre_invalidate', item.id),
+				('invalidate', None),
 			]
-			assert all(item.id in ids for _, ids in events)
 			assert item.value == 0
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Collection writes report the collection identity.
+	# Collection changes report their collection identity.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_list_and_dict_writes(cls):
@@ -139,7 +141,7 @@ class TestWriteTracking(o.Tester):
 			mapping['b'] = 3
 			del mapping['b']
 
-			written = set().union(*(ids for name, ids in events if name == 'invalidate'))
+			written = {owner for name, owner in events if name == 'pre_invalidate'}
 
 			assert items.id in written
 			assert mapping.id in written
@@ -149,7 +151,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Creating and dropping instances invalidates the parent class.
+	# Instance creation and deletion also report parent-class membership.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_instance_birth_and_death(cls):
@@ -159,20 +161,20 @@ class TestWriteTracking(o.Tester):
 			Model  = o.T.extend('WriteLifecycle', value=int)
 			events = cls._observe()
 			item   = Model(value=5)
-			born   = set().union(*(ids for name, ids in events if name == 'invalidate'))
+			born   = {owner for name, owner in events if name == 'pre_invalidate'}
 
 			assert {item.id, Model.id} <= born
 
 			events.clear()
 			item.drop()
-			dropped = set().union(*(ids for name, ids in events if name == 'invalidate'))
+			dropped = {owner for name, owner in events if name == 'pre_invalidate'}
 
 			assert {item.id, Model.id} <= dropped
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Creating and dropping subclasses invalidates the parent class.
+	# Class creation and deletion also report the parent-class ID.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_class_birth_and_death(cls):
@@ -182,23 +184,23 @@ class TestWriteTracking(o.Tester):
 			Base   = o.T.extend('WriteClassBase')
 			events = cls._observe()
 			Child  = Base.extend('WriteClassChild')
-			born   = set().union(*(ids for name, ids in events if name == 'invalidate'))
+			born   = {owner for name, owner in events if name == 'pre_invalidate'}
 
 			assert {Child.id, Base.id} <= born
 
 			events.clear()
 			Child.drop()
-			dropped = set().union(*(ids for name, ids in events if name == 'invalidate'))
+			dropped = {owner for name, owner in events if name == 'pre_invalidate'}
 
 			assert {Child.id, Base.id} <= dropped
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Nested mutations emit exactly one pair of deduplicated notifications.
+	# Nested writes send immediately, including duplicates, but commit once.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_nested_commit_and_deduplication(cls):
+	def test_nested_commit_and_no_deduplication(cls):
 		state = cls._patch_runtime()
 
 		try:
@@ -209,16 +211,20 @@ class TestWriteTracking(o.Tester):
 			with memory.write() as outer:
 				zone.set('left', 1)
 
+				assert events == [('pre_invalidate', zone.owner_id)]
+
 				with memory.write() as inner:
 					assert inner is outer
 					zone.set('right', 2)
 					zone.set('left', 3)
 
-				assert events == []
+				assert events == [('pre_invalidate', zone.owner_id)] * 3
 
 			assert events == [
-				('pre_invalidate', frozenset({zone.owner_id})),
-				('invalidate', frozenset({zone.owner_id})),
+				('pre_invalidate', zone.owner_id),
+				('pre_invalidate', zone.owner_id),
+				('pre_invalidate', zone.owner_id),
+				('invalidate', None),
 			]
 			assert memory.get('o.T.WriteNested._1.left') == 3
 			assert memory.get('o.T.WriteNested._1.right') == 2
@@ -226,10 +232,10 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Rollback emits neither message, and a subsequent commit still works.
+	# Rollback leaves pre-invalidation for IPL timeout but no confirmation.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_rollback_does_not_notify(cls):
+	def test_rollback_does_not_confirm(cls):
 		state = cls._patch_runtime()
 
 		try:
@@ -245,17 +251,19 @@ class TestWriteTracking(o.Tester):
 				failed = True
 
 			assert failed
-			assert events == []
+			assert events == [('pre_invalidate', o.services.Id.hash('o.T.WriteRollback._1'))]
 			assert memory.get('o.T.WriteRollback._1.value') is o.Undefined
 
 			memory.set('o.T.WriteRollback._2.value', 8)
-			assert len(events) == 2
-			assert o.services.Id.hash('o.T.WriteRollback._2') in events[-1][1]
+			assert events[-2:] == [
+				('pre_invalidate', o.services.Id.hash('o.T.WriteRollback._2')),
+				('invalidate', None),
+			]
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Failure to send the warning prevents a commit; no confirmation follows.
+	# An IPL pre-invalidation error rolls back the uncommitted data.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_failed_pre_invalidate_prevents_commit(cls):
@@ -265,13 +273,13 @@ class TestWriteTracking(o.Tester):
 			memory = o.services.Memory
 			calls  = []
 
-			def fail(ids):
+			def fail(owner_id):
 				calls.append('pre_invalidate')
 				raise RuntimeError('IPL disconnected')
 
 			memory.ipl = SimpleNamespace(
 				pre_invalidate = fail,
-				invalidate     = lambda ids: calls.append('invalidate'),
+				invalidate     = lambda: calls.append('invalidate'),
 			)
 
 			failed = False
@@ -288,7 +296,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Unknown keys conservatively request a full invalidation via ID zero.
+	# Unknown and administrative keys preserve their earlier ID mapping.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_unknown_and_administrative_keys(cls):
@@ -299,7 +307,7 @@ class TestWriteTracking(o.Tester):
 			events = cls._observe()
 			memory.set('custom/unknown', 1)
 
-			assert events[-1] == ('invalidate', frozenset({0}))
+			assert events == [('pre_invalidate', 0), ('invalidate', None)]
 
 			events.clear()
 			memory.set('ids/12345', 'o.T.Unknown')
@@ -307,13 +315,13 @@ class TestWriteTracking(o.Tester):
 			memory.set('routes/example', {'id': 34567})
 			memory.set('tree/parents/45678', 56789)
 
-			written = set().union(*(ids for name, ids in events if name == 'invalidate'))
+			written = {owner for name, owner in events if name == 'pre_invalidate'}
 			assert {12345, 23456, 34567, 45678, 56789, memory.root_id} <= written
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Clearing an instance zone reports only its known owner.
+	# Clear reports owner once for an instance zone.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_instance_zone_clear(cls):
@@ -329,15 +337,15 @@ class TestWriteTracking(o.Tester):
 			zone.clear()
 
 			assert events == [
-				('pre_invalidate', frozenset({zone.owner_id})),
-				('invalidate', frozenset({zone.owner_id})),
+				('pre_invalidate', zone.owner_id),
+				('invalidate', None),
 			]
 			assert memory.get('o.T.WriteClear._1.a') is o.Undefined
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# A mixed-owner prefix includes every deleted object's identity.
+	# Mixed-owner prefix removal emits a pre-invalidation for each owner.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_mixed_owner_prefix_deletion(cls):
@@ -351,13 +359,15 @@ class TestWriteTracking(o.Tester):
 
 			memory.unset_all('o.T.WriteMixed.')
 
-			assert o.services.Id.hash('o.T.WriteMixed._1') in events[-1][1]
-			assert o.services.Id.hash('o.T.WriteMixed._2') in events[-1][1]
+			written = {owner for name, owner in events if name == 'pre_invalidate'}
+			assert o.services.Id.hash('o.T.WriteMixed._1') in written
+			assert o.services.Id.hash('o.T.WriteMixed._2') in written
+			assert events[-1] == ('invalidate', None)
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Root-authorization changes include the referenced entity identity.
+	# Root auth keys reference other objects, which must be notified too.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_root_zone_auth_target_deletion(cls):
@@ -371,13 +381,14 @@ class TestWriteTracking(o.Tester):
 
 			zone.clear()
 
-			assert zone.owner_id in events[-1][1]
-			assert 12345 in events[-1][1]
+			written = {owner for name, owner in events if name == 'pre_invalidate'}
+			assert zone.owner_id in written
+			assert 12345 in written
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Explicit IDs bypass key hashing for direct Memory operations.
+	# Provided owner IDs are sent directly, without hashing or parsing.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_explicit_owner_for_direct_memory_writes(cls):
@@ -390,14 +401,14 @@ class TestWriteTracking(o.Tester):
 			memory.set('custom/opaque', 'updated', owner_id=13579)
 
 			assert events == [
-				('pre_invalidate', frozenset({13579})),
-				('invalidate', frozenset({13579})),
+				('pre_invalidate', 13579),
+				('invalidate', None),
 			]
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Missing deletes and empty write batches do not notify IPL.
+	# Neither missing deletes nor empty write batches emit notifications.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_reads_and_missing_deletions(cls):
@@ -418,7 +429,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
-	# Write tracking is optional until IPL is connected.
+	# When IPL is disconnected, writes work without any ownership parsing.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_writes_without_ipl(cls):
