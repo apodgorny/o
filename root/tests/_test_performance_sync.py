@@ -57,9 +57,26 @@ class TestPerformanceSync(o.Tester):
 	# for faster delivery under sparse traffic.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def _queue_run(cls, sync, interval, event_mode):
+	def _queue_run(cls, sync, interval, event_mode, hybrid):
+		last_active = time.monotonic()
+
 		while not sync._stop.is_set():
-			sync._wake.wait(interval)
+			# Sleep until a producer signals when no transaction is pending.
+			# Recheck after declaring the worker asleep to avoid lost wakeups.
+			# --------------------------------------------------------------
+			if (
+				hybrid and time.monotonic() - last_active >= 0.02
+				and sync._completed.empty() and not sync._pending
+			):
+				sync._wake.clear()
+				sync._sleeping = True
+
+				if sync._completed.empty() and not sync._pending:
+					sync._wake.wait()
+
+				sync._sleeping = False
+			else:
+				sync._wake.wait(interval)
 
 			if event_mode and sync._wake.is_set():
 				sync._wake.clear()
@@ -84,6 +101,7 @@ class TestPerformanceSync(o.Tester):
 					state[0] = now + 1.0
 
 			if batches:
+				last_active = time.monotonic()
 				ids = set()
 
 				for batch in batches:
@@ -114,12 +132,13 @@ class TestPerformanceSync(o.Tester):
 	# Thread-safety beyond CPython's GIL needs a separate correctness review.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def _queue_mode(cls, sync, interval, event_mode):
+	def _queue_mode(cls, sync, interval, event_mode, hybrid=False):
 		sync._pending   = {}
 		sync._completed = SimpleQueue()
 		sync._stop      = threading.Event()
 		sync._wake      = threading.Event()
 		sync._closed    = False
+		sync._sleeping  = False
 
 		def on_change(txn, id):
 			state = sync._pending.get(txn)
@@ -130,13 +149,16 @@ class TestPerformanceSync(o.Tester):
 
 			state[1].append(id)
 
+			if hybrid and sync._sleeping:
+				sync._wake.set()
+
 		def on_changed(txn):
 			state = sync._pending.pop(txn, None)
 
 			if state is not None:
 				sync._completed.put(state[1])
 
-				if event_mode:
+				if event_mode or (hybrid and sync._sleeping):
 					sync._wake.set()
 
 		def on_aborted(txn):
@@ -156,7 +178,7 @@ class TestPerformanceSync(o.Tester):
 
 		sync._queue_worker = threading.Thread(
 			target = cls._queue_run,
-			args   = (sync, interval, event_mode),
+			args   = (sync, interval, event_mode, hybrid),
 			name   = 'o-sync-benchmark',
 			daemon = True,
 		)
@@ -188,6 +210,8 @@ class TestPerformanceSync(o.Tester):
 				cls._queue_mode(sync, 0.005, False)
 			elif mode == 'event1':
 				cls._queue_mode(sync, 0.001, True)
+			elif mode == 'hybrid':
+				cls._queue_mode(sync, 0.001, False, True)
 
 	# Measure microseconds per write, sparse delivery latency distribution,
 	# or worker CPU spent during a one-second idle interval.
@@ -280,10 +304,10 @@ if __name__ == '__main__':
 	parser.add_argument('--rounds', type=int, default=5)
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	parser.add_argument('--scenario', choices=('single', 'batch', 'latency', 'idle'))
-	parser.add_argument('--mode', choices=('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1'))
+	parser.add_argument('--mode', choices=('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid'))
 	args = parser.parse_args()
 
-	modes = ('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1')
+	modes = ('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid')
 
 	if args._json:
 		result = TestPerformanceSync.measure(args.scenario, args.mode, args.size)
