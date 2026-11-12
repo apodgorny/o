@@ -366,11 +366,11 @@ class TestGarbage(o.Tester):
 			other_proto = 'o.T.Node._20'
 			id = 26
 
-			memory.set(proto, True)
-			memory.set(f'{proto}.name', 7)
-			memory.set(other_proto, True)
-			memory.set(f'{other_proto}.name', 20)
-			memory.set('o.T.Other._0', True)
+			memory.set(proto, True, 0)
+			memory.set(f'{proto}.name', 7, 0)
+			memory.set(other_proto, True, 0)
+			memory.set(f'{other_proto}.name', 20, 0)
+			memory.set('o.T.Other._0', True, 0)
 			garbage.garbage.set(id, proto)
 
 			garbage.collect()
@@ -395,8 +395,8 @@ class TestGarbage(o.Tester):
 			proto = 'o.T.Node._3'
 			id = 27
 
-			memory.set(proto, True)
-			memory.set(f'{proto}.name', 7)
+			memory.set(proto, True, 0)
+			memory.set(f'{proto}.name', 7, 0)
 			garbage.garbage.set(id, proto)
 
 			garbage.collect()
