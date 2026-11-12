@@ -44,7 +44,6 @@ class TestTrackerPublicApi(o.Tester):
 			finance  = Finance(salary=200)
 			employee = Employee(finance=finance)
 			reads    = []
-			writes   = []
 
 			with o.services.Tracker.track('r', reads):
 				assert employee.to_data() == {'finance': {'salary': 200}}
@@ -54,9 +53,8 @@ class TestTrackerPublicApi(o.Tester):
 			assert employee.id in reads
 			assert finance.id in reads
 
-			writes   = cls._observe_writes()
+			writes = cls._observe_writes()
 			finance.salary = 250
-			
 			assert finance.id in writes
 			assert set(reads) & set(writes)
 		finally:
@@ -90,16 +88,14 @@ class TestTrackerPublicApi(o.Tester):
 		try:
 			Model  = o.T.extend('TrackerPublicInstances', value=int)
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert list(Model.__instances__()) == []
 
 			assert Model.id in reads
 
-			writes   = cls._observe_writes()
+			writes = cls._observe_writes()
 			item     = Model(value=1)
-			
 			assert item.id in writes
 			assert Model.id in writes
 			assert set(reads) & set(writes)
@@ -117,14 +113,12 @@ class TestTrackerPublicApi(o.Tester):
 			Model  = o.T.extend('TrackerPublicDrop', value=int)
 			item   = Model(value=1)
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert item.id in [value.id for value in Model.__instances__()]
 
-			writes   = cls._observe_writes()
+			writes = cls._observe_writes()
 			item.drop()
-			
 			assert Model.id in reads
 			assert Model.id in writes
 			assert item.id in writes
@@ -143,16 +137,14 @@ class TestTrackerPublicApi(o.Tester):
 			Model  = o.T.extend('TrackerPublicExists', value=int)
 			proto  = f'{Model.__proto__}._{Model.__version__}'
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert not o.services.Entity.exists(proto)
 
 			assert o.services.Id.hash(proto) in reads
 
-			writes   = cls._observe_writes()
+			writes = cls._observe_writes()
 			item     = Model(value=7)
-			
 			assert item.__proto__ == proto
 			assert item.id in writes
 			assert set(reads) & set(writes)
@@ -169,14 +161,12 @@ class TestTrackerPublicApi(o.Tester):
 		try:
 			Base   = o.T.extend('TrackerPublicBase')
 			reads  = []
-			writes = []
 
 			with o.services.Tracker.track('r', reads):
 				assert Base.__subclasses__() == []
 
-			writes   = cls._observe_writes()
+			writes = cls._observe_writes()
 			Child    = Base.extend('TrackerPublicChild')
-			
 			assert Child.__parent__ is Base
 			assert Base.id in reads
 			assert Base.id in writes
