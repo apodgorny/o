@@ -1,7 +1,7 @@
 # ==============================================================================
 # TRANSACTIONAL WRITE TRACKING PERFORMANCE
 # ==============================================================================
-# Compare identical persistent writes on master and transactional journal code.
+# Compare identical persistent writes on master and two-call IPL code.
 # Each timing run starts with fresh storage; use median microseconds per operation.
 # ==============================================================================
 
@@ -33,7 +33,7 @@ class TestPerformanceWriteTracking(o.Tester):
 		zone   = memory.zone('o.T.WriteBench._1.')
 		result = {}
 
-		# One new commit per write; the journal has its highest relative cost.
+		# One new commit per write; captures the per-commit notification cost.
 		# ----------------------------------------------------------------------
 		started = time.perf_counter_ns()
 
@@ -42,7 +42,7 @@ class TestPerformanceWriteTracking(o.Tester):
 
 		result['zone_set_single'] = (time.perf_counter_ns() - started) / (1000 * size)
 
-		# Many updates to one owner share a single committed journal entry.
+		# Many updates to one owner share a single notification pair.
 		# ----------------------------------------------------------------------
 		started = time.perf_counter_ns()
 
@@ -61,7 +61,7 @@ class TestPerformanceWriteTracking(o.Tester):
 
 		result['memory_set_single'] = (time.perf_counter_ns() - started) / (1000 * size)
 
-		# A normal cached zone read must not pay the journal's write cost.
+		# A cached zone read must not pay any IPL notification cost.
 		# ----------------------------------------------------------------------
 		started = time.perf_counter_ns()
 
@@ -89,6 +89,7 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--size', type=int, default=2000)
 	parser.add_argument('--rounds', type=int, default=5)
+	parser.add_argument('--ipl', choices=['none', 'stub'], default='none')
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	args = parser.parse_args()
 
@@ -100,6 +101,12 @@ if __name__ == '__main__':
 			type(o).__app__ = SimpleNamespace(__lib_path__=directory)
 			o.start()
 
+			if args.ipl == 'stub':
+				o.services.Memory.ipl = SimpleNamespace(
+					pre_invalidate = lambda ids: None,
+					invalidate     = lambda ids: None,
+				)
+
 			try:
 				results = TestPerformanceWriteTracking.measure(args.size)
 				print(json.dumps(results))
@@ -109,11 +116,11 @@ if __name__ == '__main__':
 		measurements = {}
 		runner       = os.path.abspath(__file__)
 
-		print(f'{args.rounds} rounds × {args.size} operations; independent LMDB each round.', flush=True)
+		print(f'{args.rounds} rounds × {args.size} operations; IPL: {args.ipl}.', flush=True)
 
 		for index in range(args.rounds):
 			completed = subprocess.run(
-				[sys.executable, runner, '--size', str(args.size), '--_json'],
+				[sys.executable, runner, '--size', str(args.size), '--ipl', args.ipl, '--_json'],
 				capture_output = True,
 				text           = True,
 			)
