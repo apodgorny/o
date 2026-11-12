@@ -353,6 +353,29 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
+	# Auth writes notify the root instance and their target node.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_auth_owner_notifications(cls):
+		state    = cls._patch_runtime()
+		old_mode = o.TREE_MODE
+		o.TREE_MODE = True
+
+		try:
+			node   = o.T()
+			events = cls._observe()
+			o.services.Auth.set(node, 7, 'rw')
+
+			assert events == [
+				('pre_invalidate', o.V.id),
+				('pre_invalidate', node.id),
+				('invalidate', None),
+			]
+		finally:
+			o.TREE_MODE = old_mode
+			o.services.Memory.ipl = None
+			cls._restore_runtime(state)
+
 	# Clear reports owner once for an instance zone.
 	# ----------------------------------------------------------------------
 	@classmethod
