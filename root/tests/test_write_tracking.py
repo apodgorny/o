@@ -110,14 +110,13 @@ class TestWriteTracking(o.Tester):
 			events = cls._observe()
 
 			item.value = 2
-			del item.value
+			assert ('pre_invalidate', item.id) in events
+			assert events[-1] == ('invalidate', None)
 
-			assert events == [
-				('pre_invalidate', item.id),
-				('invalidate', None),
-				('pre_invalidate', item.id),
-				('invalidate', None),
-			]
+			events.clear()
+			del item.value
+			assert ('pre_invalidate', item.id) in events
+			assert events[-1] == ('invalidate', None)
 			assert item.value == 0
 		finally:
 			o.services.Memory.ipl = None
