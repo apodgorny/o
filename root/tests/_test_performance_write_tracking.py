@@ -1,7 +1,7 @@
 # ==============================================================================
 # TRANSACTIONAL WRITE TRACKING PERFORMANCE
 # ==============================================================================
-# Compare identical persistent writes on master and two-call IPL code.
+# Compare master writes against explicit-owner writes and IPL notifications.
 # Each timing run starts with fresh storage; use median microseconds per operation.
 # ==============================================================================
 
@@ -52,25 +52,19 @@ class TestPerformanceWriteTracking(o.Tester):
 
 		result['zone_set_batch'] = (time.perf_counter_ns() - started) / (1000 * size)
 
-		# Low-level writes must derive identity from storage keys.
+		# Measure direct writes with the explicit owner on PR and master API.
 		# ----------------------------------------------------------------------
-		started = time.perf_counter_ns()
+		started  = time.perf_counter_ns()
+		owner_id = o.services.Id.hash('o.T.WriteBench._2')
 
-		for index in range(size):
-			memory.set('o.T.WriteBench._2.value', index)
+		if hasattr(memory, 'ipl'):
+			for index in range(size):
+				memory.set('o.T.WriteBench._2.value', index, owner_id)
+		else:
+			for index in range(size):
+				memory.set('o.T.WriteBench._2.value', index)
 
 		result['memory_set_single'] = (time.perf_counter_ns() - started) / (1000 * size)
-
-		# The same direct write with owner_id skips key parsing entirely.
-		# ----------------------------------------------------------------------
-		if hasattr(memory, 'ipl'):
-			owner_id = o.services.Id.hash('o.T.WriteBench._3')
-			started = time.perf_counter_ns()
-
-			for index in range(size):
-				memory.set('o.T.WriteBench._3.value', index, owner_id)
-
-			result['memory_set_owned'] = (time.perf_counter_ns() - started) / (1000 * size)
 
 		# A cached zone read must not pay any IPL notification cost.
 		# ----------------------------------------------------------------------
