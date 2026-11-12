@@ -1,8 +1,8 @@
 # ==============================================================================
 # TEST PERFORMANCE SYNC
 # ==============================================================================
-# Isolate per-ID bookkeeping, transaction confirmation, and worker wakeups.
-# Compare production Sync, a worker-disabled diagnostic, and a no-op stub.
+# Compare production Sync against test-only polling and event-driven delivery.
+# Measure storage throughput, notification latency, and idle CPU utilization.
 # ==============================================================================
 
 import argparse
@@ -12,9 +12,12 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
-from types import SimpleNamespace
+from collections import defaultdict
+from queue       import Empty, Queue, SimpleQueue
+from types       import SimpleNamespace
 
 import o
 
@@ -22,122 +25,231 @@ import o
 class TestPerformanceSync(o.Tester):
 
 	# ======================================================================
-	# PUBLIC METHODS
+	# PRIVATE METHODS
 	# ======================================================================
 
-	# Measure one scenario in a fresh ontology, excluding service startup,
-	# shutdown, and subscriber registration from the timed interval.
+	# Keep the original Sync locking but poll instead of waking its worker
+	# at each commit; production Sync remains unchanged.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def measure(cls, scenario, mode, size):
+	def _poll_mode(cls, sync, interval):
+		condition       = sync._condition
+		original_notify = condition.notify
+		original_wait   = condition.wait
+		original_close  = sync.close
+
+		condition.notify = lambda n=1: None
+		condition.wait   = lambda timeout=None: original_wait(
+			min(timeout, interval) if timeout is not None else interval
+		)
+
+		# Restore wake-up semantics before closing the original worker.
+		# ------------------------------------------------------------------
+		def close():
+			condition.notify = original_notify
+			original_close()
+			condition.wait = original_wait
+
+		sync.close = close
+
+	# Run a test-only queue consumer that never locks the writing thread.
+	# Polling preserves cheap storage; event mode trades write-side signalling
+	# for faster delivery under sparse traffic.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _queue_run(cls, sync, interval, event_mode):
+		while not sync._stop.is_set():
+			sync._wake.wait(interval)
+
+			if event_mode and sync._wake.is_set():
+				sync._wake.clear()
+				time.sleep(0.001)
+
+			batches = []
+
+			for index in range(sync._completed.qsize()):
+				try:
+					batches.append(sync._completed.get_nowait())
+				except Empty:
+					break
+
+			# Unconfirmed transactions retain a 1-second fallback. A
+			# generation check rejects stale snapshots after ID reuse.
+			# ----------------------------------------------------------
+			now = time.monotonic()
+
+			for txn, state in tuple(sync._pending.items()):
+				if now >= state[0] and sync._pending.get(txn) is state:
+					batches.append(tuple(state[1]))
+					state[0] = now + 1.0
+
+			if batches:
+				ids = set()
+
+				for batch in batches:
+					ids.update(batch)
+
+				sync._update(frozenset({0}) if 0 in ids else frozenset(ids))
+
+		# Drain confirmed commits before shutdown.
+		# ------------------------------------------------------------------
+		batches = []
+
+		for index in range(sync._completed.qsize()):
+			try:
+				batches.append(sync._completed.get_nowait())
+			except Empty:
+				break
+
+		if batches:
+			ids = set()
+
+			for batch in batches:
+				ids.update(batch)
+
+			sync._update(frozenset({0}) if 0 in ids else frozenset(ids))
+
+	# Prototype: producer-owned pending IDs, lock-free SimpleQueue handoff,
+	# and periodic draining or a coalesced Event wake-up.
+	# Thread-safety beyond CPython's GIL needs a separate correctness review.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _queue_mode(cls, sync, interval, event_mode):
+		sync._pending   = {}
+		sync._completed = SimpleQueue()
+		sync._stop      = threading.Event()
+		sync._wake      = threading.Event()
+		sync._closed    = False
+
+		def on_change(txn, id):
+			state = sync._pending.get(txn)
+
+			if state is None:
+				state = [time.monotonic() + 1.0, []]
+				sync._pending[txn] = state
+
+			state[1].append(id)
+
+		def on_changed(txn):
+			state = sync._pending.pop(txn, None)
+
+			if state is not None:
+				sync._completed.put(state[1])
+
+				if event_mode:
+					sync._wake.set()
+
+		def on_aborted(txn):
+			sync._pending.pop(txn, None)
+
+		def close():
+			sync._stop.set()
+			sync._wake.set()
+			sync._queue_worker.join()
+			sync._subscribers.clear()
+			sync._closed = True
+
+		sync.on_change  = on_change
+		sync.on_changed = on_changed
+		sync.on_aborted = on_aborted
+		sync.close      = close
+
+		sync._queue_worker = threading.Thread(
+			target = cls._queue_run,
+			args   = (sync, interval, event_mode),
+			name   = 'o-sync-benchmark',
+			daemon = True,
+		)
+		sync._queue_worker.start()
+
+	# Establish a fresh model for each mode after O startup has completed.
+	# A no-op stub measures original storage without delivery bookkeeping.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _select_mode(cls, memory, sync, mode):
+		sync.close()
+
+		if mode == 'stub':
+			memory.sync = SimpleNamespace(
+				on_change  = lambda txn, id: None,
+				on_changed = lambda txn: None,
+				on_aborted = lambda txn: None,
+			)
+		else:
+			type(sync).initialize(sync, fallback_delay=1.0)
+
+			if mode == 'poll1':
+				cls._poll_mode(sync, 0.001)
+			elif mode == 'poll5':
+				cls._poll_mode(sync, 0.005)
+			elif mode == 'queue1':
+				cls._queue_mode(sync, 0.001, False)
+			elif mode == 'queue5':
+				cls._queue_mode(sync, 0.005, False)
+			elif mode == 'event1':
+				cls._queue_mode(sync, 0.001, True)
+
+	# Measure microseconds per write, sparse delivery latency distribution,
+	# or worker CPU spent during a one-second idle interval.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _measure(cls, scenario, mode, size):
 		with tempfile.TemporaryDirectory(prefix='o_perf_sync_') as directory:
 			type(o).__app__ = SimpleNamespace(__lib_path__=directory)
 			o.start()
 
-			memory   = o.services.Memory
-			sync     = o.services.Sync
-			owner_id = 12345
-			elapsed  = None
-			first_txn = -1000000
-
-			# Startup writes may already have launched the worker. Reset Sync
-			# before each diagnostic to isolate its actual delivery policy.
-			# --------------------------------------------------------------
-			sync.close()
-
-			if mode == 'stub':
-				memory.sync = SimpleNamespace(
-					on_change  = lambda txn, id: None,
-					on_changed = lambda txn: None,
-					on_aborted = lambda txn: None,
-				)
-			else:
-				type(sync).initialize(sync, fallback_delay=5.0)
-
-				if mode == 'no_worker':
-					# Diagnostic only: accumulate notifications without starting
-					# their consumer. This is NOT a valid production configuration.
-					# ----------------------------------------------------------
-					sync._start_worker = lambda: None
-				elif mode == 'listening':
-					sync.subscribe(lambda ids: None)
+			memory = o.services.Memory
+			sync   = o.services.Sync
+			cls._select_mode(memory, sync, mode)
 
 			try:
-				if scenario == 'notify':
-					# Repeated changes to one open transaction: steady-state
-					# hot-path bookkeeping without scheduling new deadlines.
-					# ------------------------------------------------------
+				if scenario == 'single':
 					started = time.perf_counter_ns()
 
 					for index in range(size):
-						memory.sync.on_change(first_txn, owner_id)
+						memory.set('sync/perf/single', index, 12345)
 
-					elapsed = time.perf_counter_ns() - started
-					memory.sync.on_changed(first_txn)
-
-				elif scenario == 'first':
-					# First changed ID in each distinct transaction: deadline,
-					# bookkeeping, and initial worker notification.
-					# ------------------------------------------------------
-					started = time.perf_counter_ns()
-
-					for index in range(size):
-						memory.sync.on_change(first_txn - index, owner_id)
-
-					elapsed = time.perf_counter_ns() - started
-
-					for index in range(size):
-						memory.sync.on_aborted(first_txn - index)
-
-				elif scenario == 'confirm':
-					# Prepare candidate IDs before timing confirmation. This
-					# isolates on_changed, queue insertion, and worker wakeups.
-					# ------------------------------------------------------
-					if mode != 'stub':
-						for index in range(size):
-							txn = first_txn - index
-							sync.changes[txn]    = [owner_id]
-							sync._scheduled[txn] = index
-
-					started = time.perf_counter_ns()
-
-					for index in range(size):
-						memory.sync.on_changed(first_txn - index)
-
-					elapsed = time.perf_counter_ns() - started
-
-				elif scenario == 'pair':
-					# Entire per-transaction Sync notification without LMDB.
-					# ------------------------------------------------------
-					started = time.perf_counter_ns()
-
-					for index in range(size):
-						txn = first_txn - index
-						memory.sync.on_change(txn, owner_id)
-						memory.sync.on_changed(txn)
-
-					elapsed = time.perf_counter_ns() - started
+					result = (time.perf_counter_ns() - started) / (size * 1000)
 
 				elif scenario == 'batch':
-					# Change one key repeatedly within a single LMDB commit.
-					# ------------------------------------------------------
 					started = time.perf_counter_ns()
 
 					with memory.write():
 						for index in range(size):
-							memory.set('sync/perf/batch', index, owner_id)
+							memory.set('sync/perf/batch', index, 12345)
 
-					elapsed = time.perf_counter_ns() - started
+					result = (time.perf_counter_ns() - started) / (size * 1000)
 
-				elif scenario == 'single':
-					# Each mutation opens and commits a separate transaction.
-					# ------------------------------------------------------
-					started = time.perf_counter_ns()
+				elif scenario == 'latency':
+					observed = Queue()
+
+					if mode != 'stub':
+						sync.subscribe(lambda ids: observed.put(time.perf_counter_ns()))
+
+					samples = []
 
 					for index in range(size):
-						memory.set('sync/perf/single', index, owner_id)
+						txn = -(index + 1)
+						memory.sync.on_change(txn, index + 1)
+						started = time.perf_counter_ns()
+						memory.sync.on_changed(txn)
 
-					elapsed = time.perf_counter_ns() - started
+						if mode != 'stub':
+							finished = observed.get(timeout=3)
+							samples.append(max(0, finished - started) / 1000)
+
+					result = samples
+
+				elif scenario == 'idle':
+					if mode != 'stub':
+						# Prime the worker, then allow the initial event to drain.
+						memory.sync.on_change(-1, 1)
+						memory.sync.on_changed(-1)
+						time.sleep(0.05)
+
+					started = time.process_time_ns()
+					time.sleep(1.0)
+					result = (time.process_time_ns() - started) / 1000000
 
 			finally:
 				if mode != 'stub':
@@ -145,48 +257,53 @@ class TestPerformanceSync(o.Tester):
 
 				memory.env.close()
 
-		result = elapsed / (size * 1000)
 		return result
 
 
-# Run paired modes in independent processes and alternate their order.
-# Microbenchmarks isolate overhead; no_worker intentionally bypasses delivery.
+	# ======================================================================
+	# PUBLIC METHODS
+	# ======================================================================
+
+	# Provide isolated results to the parent process for each strategy.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def measure(cls, scenario, mode, size):
+		result = cls._measure(scenario, mode, size)
+		return result
+
+
+# Keep each sample in a separate process to isolate LMDB and service state.
 # ------------------------------------------------------------------------------
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--size', type=int, default=10000)
 	parser.add_argument('--rounds', type=int, default=5)
-	parser.add_argument('--scenario', choices=('notify', 'first', 'confirm', 'pair', 'batch', 'single'))
-	parser.add_argument('--mode', choices=('stub', 'no_worker', 'sync', 'listening'))
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
+	parser.add_argument('--scenario', choices=('single', 'batch', 'latency', 'idle'))
+	parser.add_argument('--mode', choices=('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1'))
 	args = parser.parse_args()
 
-	if args.size <= 0 or args.rounds <= 0:
-		parser.error('--size and --rounds must be positive')
+	modes = ('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1')
 
 	if args._json:
 		result = TestPerformanceSync.measure(args.scenario, args.mode, args.size)
 		print(json.dumps(result))
 	else:
 		runner = os.path.abspath(__file__)
-		modes  = ('stub', 'no_worker', 'sync', 'listening')
-		print(f'{args.rounds} rounds x {args.size} operations, isolated LMDB for each sample.', flush=True)
-		print('Microseconds per operation: median [min..max]; lower is faster.', flush=True)
-		print('no_worker disables delivery ONLY to isolate worker cost.', flush=True)
-		print(f'{"Scenario":12} ' + ' '.join(f'{mode:>25}' for mode in modes), flush=True)
-		print('-' * 116, flush=True)
 
-		for scenario in ('notify', 'first', 'confirm', 'pair', 'batch', 'single'):
-			samples = {mode: [] for mode in modes}
+		for scenario in ('single', 'batch', 'latency', 'idle'):
+			count   = args.size if scenario in ('single', 'batch') else (80 if scenario == 'latency' else 1)
+			rounds = args.rounds if scenario in ('single', 'batch') else (2 if scenario == 'latency' else 1)
+			print(f'{scenario}: {rounds} rounds x {count} iterations', flush=True)
 
-			for round_id in range(args.rounds):
-				order = modes if round_id % 2 == 0 else tuple(reversed(modes))
+			for mode in modes:
+				results = []
 
-				for mode in order:
+				for round_id in range(rounds):
 					completed = subprocess.run(
 						[
 							sys.executable, runner,
-							'--size', str(args.size),
+							'--size', str(count),
 							'--scenario', scenario,
 							'--mode', mode,
 							'--_json',
@@ -200,15 +317,16 @@ if __name__ == '__main__':
 							f'{scenario}/{mode}: ' + completed.stdout + completed.stderr
 						)
 
-					samples[mode].append(json.loads(completed.stdout.strip().splitlines()[-1]))
+					results.append(json.loads(completed.stdout.strip().splitlines()[-1]))
 
-			values = []
-
-			for mode in modes:
-				data = samples[mode]
-				values.append(
-					f'{statistics.median(data):8.3f} '
-					f'[{min(data):7.3f}..{max(data):7.3f}]'
-				)
-
-			print(f'{scenario:12} ' + ' '.join(values), flush=True)
+				if scenario == 'latency':
+					latencies = sorted(value for sample in results for value in sample)
+					if latencies:
+						p50 = latencies[int(0.50 * (len(latencies) - 1))]
+						p95 = latencies[int(0.95 * (len(latencies) - 1))]
+						p99 = latencies[int(0.99 * (len(latencies) - 1))]
+						print(f'{mode:9} latency p50={p50:8.1f} p95={p95:8.1f} p99={p99:8.1f} us', flush=True)
+				else:
+					print(f'{mode:9} latency n/a', flush=True)
+			else:
+				print(f'{mode:9} {statistics.median(results):8.3f} [{min(results):8.3f}..{max(results):8.3f}] {"ms CPU" if scenario == "idle" else "us/change"}', flush=True)
