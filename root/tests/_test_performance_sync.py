@@ -326,8 +326,8 @@ if __name__ == '__main__':
 						p95 = latencies[int(0.95 * (len(latencies) - 1))]
 						p99 = latencies[int(0.99 * (len(latencies) - 1))]
 						print(f'{mode:9} latency p50={p50:8.1f} p95={p95:8.1f} p99={p99:8.1f} us', flush=True)
+					else:
+						print(f'{mode:9} latency n/a', flush=True)
 				else:
-					print(f'{mode:9} latency n/a', flush=True)
-			else:
-				unit = 'ms CPU' if scenario == 'idle' else 'us/change'
-				print(f'{mode:9} {statistics.median(results):8.3f} [{min(results):8.3f}..{max(results):8.3f}] {unit}', flush=True)
+					unit = 'ms CPU' if scenario == 'idle' else 'us/change'
+					print(f'{mode:9} {statistics.median(results):8.3f} [{min(results):8.3f}..{max(results):8.3f}] {unit}', flush=True)
