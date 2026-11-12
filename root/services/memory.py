@@ -15,52 +15,79 @@ UNDEFINED = o.Undefined
 
 class MemoryBatch:
 
-	# Create batch
+
+	# Create batch with explicit rollback and zone-cache ownership.
 	# ----------------------------------------------------------------------
 	def __init__(self, memory, write=True):
-		self.memory      = memory
-		self.write       = write
-		self.ctx         = None
-		self.tx          = None
-		self.depth       = 0
-		self.ipl         = None
-		self.notified    = False
+		self.memory   = memory
+		self.write    = write
+		self.ctx      = None
+		self.tx       = None
+		self.depth    = 0
+		self.ipl      = None
+		self.notified = False
+		self.failed   = False
+		self.zones    = set()
 
-	# If we are already in a transaction, just return ourselves
+	# Join an existing transaction or open a new outer transaction.
 	# ----------------------------------------------------------------------
 	def __enter__(self):
 		if self.tx is None:
-			self.ctx         = self.memory.env.begin(write=self.write)
-			self.tx          = self.ctx.__enter__()
-			self.ipl         = self.memory.ipl if self.write else None
-			self.notified    = False
+			self.ctx      = self.memory.env.begin(write=self.write)
+			self.tx       = self.ctx.__enter__()
+			self.ipl      = self.memory.ipl if self.write else None
+			self.notified = False
+			self.failed   = False
+			self.zones.clear()
 
 		self.depth += 1
 		return self
 
-	# Confirm the transaction after its successful commit.
+	# Commit once, or roll back every change after any nested failure.
+	# Clear cached zone values whenever LMDB does not commit.
 	# ----------------------------------------------------------------------
 	def __exit__(self, exc_type, exc, tb):
 		self.depth -= 1
 
+		if exc_type is not None:
+			self.failed = True
+
 		if self.ctx is not None and self.depth == 0:
-			ipl = self.ipl if exc_type is None and self.notified else None
+			aborted   = self.failed
+			committed = False
+			ipl       = self.ipl if self.notified else None
 
 			try:
-				self.ctx.__exit__(exc_type, exc, tb)
+				if aborted:
+					self.ctx.__exit__(RuntimeError, RuntimeError('Transaction aborted'), None)
+				else:
+					self.ctx.__exit__(exc_type, exc, tb)
+					committed = exc_type is None
 			finally:
+				if not committed:
+					for zone in self.zones:
+						zone.cache.clear()
+
 				if self.write:
 					self.memory._write = None
 				else:
 					self.memory._read = None
 
-				self.ipl = None
+				self.ipl      = None
 				self.notified = False
+				self.failed   = False
+				self.zones.clear()
 				self.tx  = None
 				self.ctx = None
 
-			if ipl is not None:
-				ipl.invalidate()
+			if committed and ipl is not None:
+				try:
+					ipl.invalidate()
+				except Exception as error:
+					raise RuntimeError('LMDB committed; IPL confirmation failed') from error
+
+			if aborted and exc_type is None:
+				raise RuntimeError('Transaction aborted after an earlier failure')
 
 		return False
 
@@ -69,60 +96,70 @@ class MemoryBatch:
 	def __getattr__(self, name):
 		return getattr(self.memory, name)
 
-	# Store value and notify IPL after LMDB accepts the write.
-	# owner_id is one integer ID or an iterable for multi-owner changes.
+
+	# Send every affected ID; each write operation owns its notification.
+	# ----------------------------------------------------------------------
+	def _notify(self, owner_id):
+		self.notified = True
+
+		if type(owner_id) is int:
+			self.ipl.pre_invalidate(owner_id)
+		else:
+			sent = False
+
+			for id in owner_id:
+				self.ipl.pre_invalidate(id)
+				sent = True
+
+			if not sent:
+				raise ValueError('owner_id iterable must contain at least one ID')
+
+	# Store a value, aborting the transaction when a write or notification fails.
 	# ----------------------------------------------------------------------
 	def set(self, key, value, owner_id):
-		self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
+		try:
+			self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
-		if self.ipl is not None:
-			self.notified = True
+			if self.ipl is not None:
+				self._notify(owner_id)
+		except Exception:
+			self.failed = True
+			raise
 
-			if type(owner_id) is int:
-				self.ipl.pre_invalidate(owner_id)
-			else:
-				for id in owner_id:
-					self.ipl.pre_invalidate(id)
-
-	# Notify IPL only when a key was actually removed.
+	# Remove an existing key and notify IPL about its changed owner.
 	# ----------------------------------------------------------------------
 	def unset(self, key, owner_id):
-		deleted = self.tx.delete(self.memory._key(key))
+		try:
+			deleted = self.tx.delete(self.memory._key(key))
 
-		if deleted and self.ipl is not None:
-			self.notified = True
+			if deleted and self.ipl is not None:
+				self._notify(owner_id)
+		except Exception:
+			self.failed = True
+			raise
 
-			if type(owner_id) is int:
-				self.ipl.pre_invalidate(owner_id)
-			else:
-				for id in owner_id:
-					self.ipl.pre_invalidate(id)
-
-	# Delete a prefix and notify its known owners once before removal.
+	# Notify all known owners before deleting their stored prefix.
 	# ----------------------------------------------------------------------
 	def unset_all(self, key_prefix, owner_id):
-		prefix = self.memory._key(key_prefix)
-		cursor = self.tx.cursor()
-		ok     = cursor.set_range(prefix)
-		ipl    = self.ipl
+		try:
+			prefix = self.memory._key(key_prefix)
+			cursor = self.tx.cursor()
+			ok     = cursor.set_range(prefix)
 
-		if ok and cursor.key().startswith(prefix) and ipl is not None:
-			self.notified = True
+			if ok and cursor.key().startswith(prefix) and self.ipl is not None:
+				self._notify(owner_id)
 
-			if type(owner_id) is int:
-				ipl.pre_invalidate(owner_id)
-			else:
-				for id in owner_id:
-					ipl.pre_invalidate(id)
+			while ok:
+				key = cursor.key()
 
-		while ok:
-			key = cursor.key()
+				if not key.startswith(prefix):
+					break
 
-			if not key.startswith(prefix):
-				break
-
-			cursor.delete()
-			ok = cursor.set_range(prefix)
+				cursor.delete()
+				ok = cursor.set_range(prefix)
+		except Exception:
+			self.failed = True
+			raise
 
 	# Resolve stored value
 	# ----------------------------------------------------------------------
@@ -219,23 +256,30 @@ class Zone:
 
 		return self.cache[key] is not UNDEFINED
 
-	# Store a zone key; an explicit owner overrides the cached zone owner.
+
+	# Store a zone key and reconcile its cache with transaction outcome.
 	# ----------------------------------------------------------------------
 	def set(self, key, value=None, owner_id=None):
-		self.cache[key] = value
-		self.memory.set(self._key(key), value, self.owner_id if owner_id is None else owner_id)
+		with self.memory.write() as batch:
+			batch.zones.add(self)
+			batch.set(self._key(key), value, self.owner_id if owner_id is None else owner_id)
+			self.cache[key] = value
 
-	# Remove a zone key; an explicit owner overrides the cached zone owner.
+	# Remove a zone key; rollback discards its speculative cache.
 	# ----------------------------------------------------------------------
 	def unset(self, key, owner_id=None):
-		self.cache[key] = UNDEFINED
-		self.memory.unset(self._key(key), self.owner_id if owner_id is None else owner_id)
+		with self.memory.write() as batch:
+			batch.zones.add(self)
+			batch.unset(self._key(key), self.owner_id if owner_id is None else owner_id)
+			self.cache[key] = UNDEFINED
 
-	# Delete zone keys; supply all affected IDs for mixed-owner prefixes.
+	# Clear a zone and reconcile its cache when the outer transaction finishes.
 	# ----------------------------------------------------------------------
 	def clear(self, owner_id=None):
-		self.cache.clear()
-		self.memory.unset_all(self.prefix, self.owner_id if owner_id is None else owner_id)
+		with self.memory.write() as batch:
+			batch.zones.add(self)
+			batch.unset_all(self.prefix, self.owner_id if owner_id is None else owner_id)
+			self.cache.clear()
 
 	# Iterate zone items
 	# ----------------------------------------------------------------------

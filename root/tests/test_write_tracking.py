@@ -526,5 +526,155 @@ class TestWriteTracking(o.Tester):
 			cls._restore_runtime(state)
 
 
+
+	# A failed nested notification poisons the outer transaction even if caught.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_failed_nested_notification_aborts_outer_batch(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			zone   = memory.zone('o.T.WriteNestedFailure._1.')
+			events = []
+
+			def pre_invalidate(owner_id):
+				events.append(('pre_invalidate', owner_id))
+				if len(events) == 2:
+					raise ValueError('IPL refused change')
+
+			memory.ipl = SimpleNamespace(
+				pre_invalidate = pre_invalidate,
+				invalidate     = lambda: events.append(('invalidate', None)),
+			)
+			aborted = False
+
+			try:
+				with memory.write():
+					zone.set('first', 1)
+
+					try:
+						with memory.write():
+							zone.set('second', 2)
+					except ValueError:
+						assert zone.get('first') == 1
+
+					assert zone.get('second') is o.Undefined
+			except RuntimeError as error:
+				aborted = str(error) == 'Transaction aborted after an earlier failure'
+
+			assert aborted
+			assert events == [
+				('pre_invalidate', zone.owner_id),
+				('pre_invalidate', zone.owner_id),
+			]
+			assert zone.get('first') is o.Undefined
+			assert zone.get('second') is o.Undefined
+			assert memory.get('o.T.WriteNestedFailure._1.first') is o.Undefined
+		finally:
+			o.services.Memory.ipl = None
+			cls._restore_runtime(state)
+
+	# The zone cache reflects committed LMDB after rollback of mixed operations.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_rolled_back_zone_set_unset_clear_reloads_cache(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			zone   = memory.zone('o.T.WriteZoneRollback._1.')
+			zone.set('first', 1)
+			zone.set('second', 2)
+			rolled_back = False
+
+			try:
+				with memory.write():
+					zone.set('first', 3)
+					zone.unset('second')
+					zone.set('temporary', 9)
+					zone.clear()
+					assert zone.get('first') is o.Undefined
+					raise ValueError('cancel outer batch')
+			except ValueError:
+				rolled_back = True
+
+			assert rolled_back
+			assert zone.get('first') == 1
+			assert zone.get('second') == 2
+			assert zone.get('temporary') is o.Undefined
+			assert memory.get('o.T.WriteZoneRollback._1.first') == 1
+		finally:
+			cls._restore_runtime(state)
+
+	# An IPL error after commit reports committed data without a write rollback.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_failed_commit_confirmation_reports_committed_write(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory   = o.services.Memory
+			key      = 'o.T.WriteCommitError._1.value'
+			owner_id = o.services.Id.hash('o.T.WriteCommitError._1')
+			events   = []
+
+			def fail():
+				events.append('invalidate')
+				raise ValueError('transport failed after commit')
+
+			memory.ipl = SimpleNamespace(
+				pre_invalidate = lambda id: events.append(('pre_invalidate', id)),
+				invalidate     = fail,
+			)
+			committed = False
+
+			try:
+				memory.set(key, 7, owner_id)
+			except RuntimeError as error:
+				committed = (
+					str(error) == 'LMDB committed; IPL confirmation failed'
+					and isinstance(error.__cause__, ValueError)
+				)
+
+			assert committed
+			assert events == [('pre_invalidate', owner_id), 'invalidate']
+			assert memory._write is None
+			assert memory.get(key) == 7
+		finally:
+			o.services.Memory.ipl = None
+			cls._restore_runtime(state)
+
+	# A caught nested body failure still forces the outer batch to roll back.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_caught_nested_body_failure_aborts_outer_batch(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory  = o.services.Memory
+			zone    = memory.zone('o.T.WriteNestedBody._1.')
+			aborted = False
+
+			try:
+				with memory.write():
+					zone.set('first', 1)
+
+					try:
+						with memory.write():
+							zone.set('second', 2)
+							raise ValueError('caught by caller')
+					except ValueError:
+						assert zone.get('second') == 2
+			except RuntimeError as error:
+				aborted = str(error) == 'Transaction aborted after an earlier failure'
+
+			assert aborted
+			assert zone.get('first') is o.Undefined
+			assert zone.get('second') is o.Undefined
+		finally:
+			cls._restore_runtime(state)
+
+
 if __name__ == '__main__':
 	TestWriteTracking.run()
