@@ -184,6 +184,150 @@ class TestPerformanceSync(o.Tester):
 		)
 		sync._queue_worker.start()
 
+	# Keep each pending transaction owned by the worker. Producers publish
+	# the transaction record once and later hand off committed ID lists.
+	# The writer and worker do not concurrently access the transaction map.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _handoff_run(cls, sync, interval):
+		pending     = []
+		last_active = time.monotonic()
+
+		while not sync._stop.is_set():
+			# A dormant worker wakes only when a new transaction arrives.
+			# ----------------------------------------------------------
+			if (
+				time.monotonic() - last_active >= 0.02
+				and not pending and sync._registered.empty()
+				and sync._completed.empty()
+			):
+				sync._wake.clear()
+				sync._sleeping = True
+
+				if not pending and sync._registered.empty() and sync._completed.empty():
+					sync._wake.wait()
+
+				sync._sleeping = False
+			else:
+				sync._wake.wait(interval)
+
+			for index in range(sync._registered.qsize()):
+				try:
+					state = sync._registered.get_nowait()
+
+					if state[2]:
+						pending.append(state)
+				except Empty:
+					break
+
+			batches = []
+
+			for index in range(sync._completed.qsize()):
+				try:
+					batches.append(sync._completed.get_nowait())
+				except Empty:
+					break
+
+			now    = time.monotonic()
+			active = []
+
+			for state in pending:
+				if state[2]:
+					if now >= state[0]:
+						batches.append(tuple(state[1]))
+						state[0] = now + 1.0
+
+					active.append(state)
+
+			pending = active
+
+			if batches:
+				last_active = now
+				ids = set()
+
+				for batch in batches:
+					ids.update(batch)
+
+				sync._update(frozenset({0}) if 0 in ids else frozenset(ids))
+
+		batches = []
+
+		for index in range(sync._completed.qsize()):
+			try:
+				batches.append(sync._completed.get_nowait())
+			except Empty:
+				break
+
+		if batches:
+			ids = set()
+
+			for batch in batches:
+				ids.update(batch)
+
+			sync._update(frozenset({0}) if 0 in ids else frozenset(ids))
+
+	# Publish an open transaction once, then hand its list to the worker
+	# on commit; all transaction-map mutations stay on the producer side.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _handoff_mode(cls, sync, interval):
+		sync._pending    = {}
+		sync._registered = SimpleQueue()
+		sync._completed  = SimpleQueue()
+		sync._stop       = threading.Event()
+		sync._wake       = threading.Event()
+		sync._sleeping   = False
+		sync._closed     = False
+
+		def on_change(txn, id):
+			state = sync._pending.get(txn)
+
+			if state is None:
+				state = [time.monotonic() + 1.0, [], True]
+				sync._pending[txn] = state
+				sync._registered.put(state)
+
+			state[1].append(id)
+
+			if sync._sleeping:
+				sync._wake.set()
+
+		def on_changed(txn):
+			state = sync._pending.pop(txn, None)
+
+			if state is not None:
+				state[2] = False
+				sync._completed.put(state[1])
+
+				if sync._sleeping:
+					sync._wake.set()
+
+		def on_aborted(txn):
+			state = sync._pending.pop(txn, None)
+
+			if state is not None:
+				state[2] = False
+
+		def close():
+			sync._stop.set()
+			sync._wake.set()
+			sync._queue_worker.join()
+			sync._subscribers.clear()
+			sync._closed = True
+
+		sync.on_change  = on_change
+		sync.on_changed = on_changed
+		sync.on_aborted = on_aborted
+		sync.close      = close
+
+		sync._queue_worker = threading.Thread(
+			target = cls._handoff_run,
+			args   = (sync, interval),
+			name   = 'o-sync-handoff-benchmark',
+			daemon = True,
+		)
+		sync._queue_worker.start()
+
 	# Establish a fresh model for each mode after O startup has completed.
 	# A no-op stub measures original storage without delivery bookkeeping.
 	# ----------------------------------------------------------------------
@@ -212,6 +356,8 @@ class TestPerformanceSync(o.Tester):
 				cls._queue_mode(sync, 0.001, True)
 			elif mode == 'hybrid':
 				cls._queue_mode(sync, 0.001, False, True)
+			elif mode == 'handoff':
+				cls._handoff_mode(sync, 0.001)
 
 	# Measure microseconds per write, sparse delivery latency distribution,
 	# or worker CPU spent during a one-second idle interval.
@@ -304,10 +450,10 @@ if __name__ == '__main__':
 	parser.add_argument('--rounds', type=int, default=5)
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	parser.add_argument('--scenario', choices=('single', 'batch', 'latency', 'idle'))
-	parser.add_argument('--mode', choices=('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid'))
+	parser.add_argument('--mode', choices=('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid', 'handoff'))
 	args = parser.parse_args()
 
-	modes = ('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid')
+	modes = ('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid', 'handoff')
 
 	if args._json:
 		result = TestPerformanceSync.measure(args.scenario, args.mode, args.size)
