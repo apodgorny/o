@@ -329,4 +329,5 @@ if __name__ == '__main__':
 				else:
 					print(f'{mode:9} latency n/a', flush=True)
 			else:
-				print(f'{mode:9} {statistics.median(results):8.3f} [{min(results):8.3f}..{max(results):8.3f}] {"ms CPU" if scenario == "idle" else "us/change"}', flush=True)
+				unit = 'ms CPU' if scenario == 'idle' else 'us/change'
+				print(f'{mode:9} {statistics.median(results):8.3f} [{min(results):8.3f}..{max(results):8.3f}] {unit}', flush=True)
