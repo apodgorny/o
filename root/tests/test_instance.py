@@ -511,11 +511,13 @@ class TestInstance(o.Tester):
 			x.foo = 'b'
 			assert ('pre', x.id) in calls
 			assert calls[-1] == ('post', None)
+			assert calls.count(('post', None)) == 1
 
 			calls.clear()
 			del x.foo
 			assert ('pre', x.id) in calls
 			assert calls[-1] == ('post', None)
+			assert calls.count(('post', None)) == 1
 		finally:
 			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
