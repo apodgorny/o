@@ -399,31 +399,52 @@ class Memory(o.Service):
 		with self.write() as batch:
 			batch.unset_all(key_prefix, owner_id)
 
-	# Resolve stored value
+
+	# Resolve the current transaction's value, including pending writes.
 	# ----------------------------------------------------------------------
 	def get(self, key, default=UNDEFINED):
-		with self.read() as batch:
+		batch = self._write
+
+		if batch is not None and batch.tx is not None:
 			value = batch.get(key, default)
-		
+		else:
+			with self.read() as batch:
+				value = batch.get(key, default)
+
 		return value
 
-	# Check whether key exists
+	# Check existence against pending writes before committed storage.
 	# ----------------------------------------------------------------------
 	def has(self, key):
-		with self.read() as batch:
+		batch = self._write
+
+		if batch is not None and batch.tx is not None:
 			result = batch.has(key)
+		else:
+			with self.read() as batch:
+				result = batch.has(key)
 
 		return result
 
-	# Iterate stored items by prefix
+	# Iterate stored items with read-your-writes consistency.
 	# ----------------------------------------------------------------------
 	def items(self, prefix=''):
-		with self.read() as batch:
-			yield from batch.items(prefix)
+		batch = self._write
 
-	# Iterate stored keys by prefix
+		if batch is not None and batch.tx is not None:
+			yield from batch.items(prefix)
+		else:
+			with self.read() as batch:
+				yield from batch.items(prefix)
+
+	# Iterate stored keys with read-your-writes consistency.
 	# ----------------------------------------------------------------------
 	def keys(self, prefix=''):
-		with self.read() as batch:
+		batch = self._write
+
+		if batch is not None and batch.tx is not None:
 			yield from batch.keys(prefix)
+		else:
+			with self.read() as batch:
+				yield from batch.keys(prefix)
 

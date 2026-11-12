@@ -676,5 +676,30 @@ class TestWriteTracking(o.Tester):
 			cls._restore_runtime(state)
 
 
+
+	# Reads inside an outer write batch must observe the staged LMDB state.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_pending_write_is_visible_to_memory_reads(cls):
+		state = cls._patch_runtime()
+
+		try:
+			memory = o.services.Memory
+			key    = 'o.T.WriteReadYourWrites._1.value'
+
+			with memory.write():
+				memory.set(key, 11, 0)
+				assert memory.get(key) == 11
+				assert memory.has(key)
+				assert list(memory.items(key)) == [(key, 11)]
+				assert list(memory.keys(key)) == [key]
+
+				memory.unset(key, 0)
+				assert memory.get(key) is o.Undefined
+				assert not memory.has(key)
+				assert list(memory.items(key)) == []
+		finally:
+			cls._restore_runtime(state)
+
 if __name__ == '__main__':
 	TestWriteTracking.run()
