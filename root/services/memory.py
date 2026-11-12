@@ -44,11 +44,10 @@ class MemoryBatch:
 		self.depth -= 1
 
 		if self.ctx is not None and self.depth == 0:
+			ipl = self.ipl if exc_type is None and self.notified else None
+
 			try:
 				self.ctx.__exit__(exc_type, exc, tb)
-
-				if exc_type is None and self.notified:
-					self.ipl.invalidate()
 			finally:
 				if self.write:
 					self.memory._write = None
@@ -59,6 +58,9 @@ class MemoryBatch:
 				self.notified = False
 				self.tx  = None
 				self.ctx = None
+
+			if ipl is not None:
+				ipl.invalidate()
 
 		return False
 
