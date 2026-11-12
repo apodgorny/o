@@ -191,7 +191,7 @@ class T(o.Module, metaclass=o.TMeta):
 						pending.add(child.id)
 
 					if not check_only:
-						memory.set(key, self.id)
+						memory.set(key, self.id, (child.id, self.id))
 				else:
 					raise ValueError('Child already has a parent')
 
@@ -208,7 +208,7 @@ class T(o.Module, metaclass=o.TMeta):
 				key = f'tree/parents/{child.id}'
 
 				if memory.get(key, None) == self.id:
-					memory.unset(key)
+					memory.unset(key, (child.id, self.id))
 				else:
 					raise ValueError('Parent mismatch')
 
@@ -246,7 +246,7 @@ class T(o.Module, metaclass=o.TMeta):
 			proto   = f'{cls.__proto__}._{version}'
 			id      = o.services.Id.set(proto)
 
-			memory.set(proto, True)
+			memory.set(proto, True, cls.id)
 
 		with o.services.Memory.read():
 			for name, field in cls._.items():
@@ -334,7 +334,9 @@ class T(o.Module, metaclass=o.TMeta):
 					entity.__unlink__(child)
 
 			entity.__zone__.clear()
-			memory.unset(entity.__proto__)
+			parent   = entity.__parent__ if self is None else entity.__class__
+			owner_id = parent.id if parent is not None else entity.id
+			memory.unset(entity.__proto__, owner_id)
 			o.services.Id.unset(entity.id)
 			if route is not UNDEFINED:
 				o.services.Route.unset(route)
