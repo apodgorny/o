@@ -1,0 +1,39 @@
+name: O Sync performance
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'root/tests/_test_performance_sync.py'
+      - '.github/workflows/sync-performance.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout O
+        uses: actions/checkout@v4
+        with:
+          path: o
+
+      - name: Checkout Almasi
+        uses: actions/checkout@v4
+        with:
+          repository: apodgorny/almasi
+          path: almasi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install -e ./almasi
+          python -m pip install -e ./o
+
+      - name: Benchmark 10000 writes: stub vs Sync
+        working-directory: o
+        run: python root/tests/_test_performance_sync.py --size 10000 --rounds 5
