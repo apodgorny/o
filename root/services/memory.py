@@ -70,7 +70,7 @@ class MemoryBatch:
 		return getattr(self.memory, name)
 
 	# Store value and notify IPL after LMDB accepts the write.
-	# owner_id is one ID or a tuple of IDs for multi-owner changes.
+	# owner_id is one integer ID or an iterable for multi-owner changes.
 	# ----------------------------------------------------------------------
 	def set(self, key, value, owner_id):
 		self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
@@ -219,19 +219,19 @@ class Zone:
 
 		return self.cache[key] is not UNDEFINED
 
-	# Set value
+	# Store a zone key; an explicit owner overrides the cached zone owner.
 	# ----------------------------------------------------------------------
 	def set(self, key, value=None, owner_id=None):
 		self.cache[key] = value
 		self.memory.set(self._key(key), value, self.owner_id if owner_id is None else owner_id)
 
-	# Remove value
+	# Remove a zone key; an explicit owner overrides the cached zone owner.
 	# ----------------------------------------------------------------------
 	def unset(self, key, owner_id=None):
 		self.cache[key] = UNDEFINED
 		self.memory.unset(self._key(key), self.owner_id if owner_id is None else owner_id)
 
-	# Clear zone
+	# Delete zone keys; supply all affected IDs for mixed-owner prefixes.
 	# ----------------------------------------------------------------------
 	def clear(self, owner_id=None):
 		self.cache.clear()
@@ -336,19 +336,20 @@ class Memory(o.Service):
 	def zone(self, prefix):
 		return Zone(prefix)
 
-	# Store value
+	# Store a value with its affected ID or iterable of IDs.
+	# ID zero requests full IPL invalidation for unknown owners.
 	# ----------------------------------------------------------------------
 	def set(self, key, value, owner_id):
 		with self.write() as batch:
 			batch.set(key, value, owner_id)
 
-	# Remove key
+	# Remove a key and notify its affected owners when present.
 	# ----------------------------------------------------------------------
 	def unset(self, key, owner_id):
 		with self.write() as batch:
 			batch.unset(key, owner_id)
 
-	# Unset all keys by prefix
+	# Delete a prefix; report every affected owner or ID zero.
 	# ----------------------------------------------------------------------
 	def unset_all(self, key_prefix, owner_id):
 		with self.write() as batch:
