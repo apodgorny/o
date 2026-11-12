@@ -84,7 +84,7 @@ class TestMemory(o.Tester):
 		try:
 			memory = state['memory']
 
-			memory.set('o.T.User', 'Ada')
+			memory.set('o.T.User', 'Ada', 0)
 
 			assert memory.has('o.T.User') == True
 			assert memory.get('o.T.User') == 'Ada'
@@ -112,8 +112,8 @@ class TestMemory(o.Tester):
 		try:
 			memory = state['memory']
 
-			memory.set('o.T.User', 7)
-			memory.unset('o.T.User')
+			memory.set('o.T.User', 7, 0)
+			memory.unset('o.T.User', 0)
 
 			assert memory.has('o.T.User') == False
 			assert memory.get('o.T.User') is UNDEFINED
@@ -128,9 +128,9 @@ class TestMemory(o.Tester):
 		try:
 			memory = state['memory']
 
-			memory.set('o.T.User._.age.type', 7)
-			memory.set('o.T.User._.name.default', 'Ada')
-			memory.set('o.T.Other._.age.type', 9)
+			memory.set('o.T.User._.age.type', 7, 0)
+			memory.set('o.T.User._.name.default', 'Ada', 0)
+			memory.set('o.T.Other._.age.type', 9, 0)
 
 			items = list(memory.items('o.T.User._'))
 
@@ -149,9 +149,9 @@ class TestMemory(o.Tester):
 		try:
 			memory = state['memory']
 
-			memory.set('o.T.User._.age.type', 7)
-			memory.set('o.T.User._.name.default', 'Ada')
-			memory.set('o.T.Other._.age.type', 9)
+			memory.set('o.T.User._.age.type', 7, 0)
+			memory.set('o.T.User._.name.default', 'Ada', 0)
+			memory.set('o.T.Other._.age.type', 9, 0)
 
 			keys = list(memory.keys('o.T.User._'))
 
@@ -170,11 +170,11 @@ class TestMemory(o.Tester):
 		try:
 			memory = state['memory']
 
-			memory.set('o.T.User._.age.type', 7)
-			memory.set('o.T.User._.name.default', 'Ada')
-			memory.set('o.T.Other._.age.type', 9)
+			memory.set('o.T.User._.age.type', 7, 0)
+			memory.set('o.T.User._.name.default', 'Ada', 0)
+			memory.set('o.T.Other._.age.type', 9, 0)
 
-			memory.unset_all('o.T.User._')
+			memory.unset_all('o.T.User._', 0)
 
 			assert memory.has('o.T.User._.age.type') == False
 			assert memory.has('o.T.User._.name.default') == False
@@ -191,8 +191,8 @@ class TestMemory(o.Tester):
 			memory = state['memory']
 
 			with memory.write() as batch:
-				batch.set('o.T.User.name', 'Ada')
-				batch.set('o.T.User.age', 37)
+				batch.set('o.T.User.name', 'Ada', 0)
+				batch.set('o.T.User.age', 37, 0)
 
 			assert memory.get('o.T.User.name') == 'Ada'
 			assert memory.get('o.T.User.age') == 37
@@ -210,7 +210,7 @@ class TestMemory(o.Tester):
 			with memory.write() as outer:
 				with memory.write() as inner:
 					assert outer is inner
-					inner.set('o.T.User.name', 'Ada')
+					inner.set('o.T.User.name', 'Ada', 0)
 
 			assert memory.get('o.T.User.name') == 'Ada'
 		finally:
@@ -261,9 +261,9 @@ class TestMemory(o.Tester):
 			memory = state['memory']
 			zone   = memory.zone('o.T.User._.')
 
-			memory.set('o.T.User._.age.type', 7)
-			memory.set('o.T.User._.name.default', 'Ada')
-			memory.set('o.T.Other._.age.type', 9)
+			memory.set('o.T.User._.age.type', 7, 0)
+			memory.set('o.T.User._.name.default', 'Ada', 0)
+			memory.set('o.T.Other._.age.type', 9, 0)
 
 			items = list(zone.items())
 			keys  = list(zone.keys())
@@ -290,7 +290,7 @@ class TestMemory(o.Tester):
 
 			zone.set('age.type', 7)
 			zone.set('name.default', 'Ada')
-			memory.set('o.T.Other._.age.type', 9)
+			memory.set('o.T.Other._.age.type', 9, 0)
 
 			zone.clear()
 
