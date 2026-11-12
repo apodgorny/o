@@ -46,12 +46,10 @@ jobs:
         working-directory: o
         run: |
           git fetch origin master
-          git show origin/master:root/services/memory.py > root/services/memory.py
-          git show origin/master:root/services/tracker.py > root/services/tracker.py
+          git restore --source=origin/master --worktree root/services root/t.py root/t_meta.py
           python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
           python root/tests/_test_performance_tracker.py --size 1000 --rounds 3
-          git show HEAD:root/services/memory.py > root/services/memory.py
-          git show HEAD:root/services/tracker.py > root/services/tracker.py
+          git restore --source=HEAD --worktree root/services root/t.py root/t_meta.py
 
       - name: Benchmark Memory without IPL and read-only Tracker (PR)
         working-directory: o
