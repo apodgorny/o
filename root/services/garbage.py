@@ -25,8 +25,8 @@ class Garbage(o.Service):
 		old_count = self.refcounts.get(instance.id, 0)
 		count     = old_count + 1
 
-		self.refcounts.set(instance.id, count)
-		self.garbage.unset(instance.id)
+		self.refcounts.set(instance.id, count, instance.id)
+		self.garbage.unset(instance.id, instance.id)
 
 		if old_count == 0:
 			for key, n_proto, child in instance.__dependants__():
@@ -45,14 +45,14 @@ class Garbage(o.Service):
 		count     = max(old_count - 1, 0)
 
 		if count == 0:
-			self.refcounts.unset(instance.id)
-			self.garbage.set(instance.id, instance.__proto__)
+			self.refcounts.unset(instance.id, instance.id)
+			self.garbage.set(instance.id, instance.__proto__, instance.id)
 
 			if old_count == 1:
 				for key, n_proto, child in instance.__dependants__():
 					self._on_instance_unlink(child)
 		else:
-			self.refcounts.set(instance.id, count)
+			self.refcounts.set(instance.id, count, instance.id)
 
 	# Collect garbage storage
 	# ----------------------------------------------------------------------
@@ -60,9 +60,10 @@ class Garbage(o.Service):
 		with o.services.Memory.write():
 			for id, proto in self.garbage.items():
 				if o.TREE_MODE:
-					o.services.Memory.unset(f'tree/parents/{id}')
+					o.services.Memory.unset(f'tree/parents/{id}', int(id))
 
-				o.services.Memory.unset(proto)
+				owner_id = (int(id), o.services.Id.hash(proto.rsplit('.', 1)[0]))
+				o.services.Memory.unset(proto, owner_id)
 				o.services.Memory.zone(f'{proto}.').clear()
 
 			self.clear()
@@ -70,4 +71,6 @@ class Garbage(o.Service):
 	# Clear garbage storage
 	# ----------------------------------------------------------------------
 	def clear(self):
-		self.garbage.clear()
+		with o.services.Memory.write():
+			for id in self.garbage.keys():
+				self.garbage.unset(id, int(id))
