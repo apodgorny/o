@@ -74,8 +74,9 @@ mutating the caller's set later has no effect. A filtered callback receives
 only matching IDs; a global callback receives the full delivered batch.
 
 A filtered **empty** set receives no ordinary change events, but still
-receives a full invalidation (`None`). Unknown affected owners are reported
-to Sync as `None` (legacy Memory owner `None` also maps to `None`).
+receives a full invalidation (`None`). Memory retains its existing internal
+owner ID `0` for unknown affected owners; Sync converts it to `None` only
+when delivering callbacks or sending notifications through Transport.
 When full and specific invalidations combine, `None` supersedes the IDs.
 Unsubscribing an unknown callback is harmless.
 
@@ -131,8 +132,9 @@ nested failure poisons the outermost transaction. Internal Memory reads
 during an open write see staged data. Missing-key and empty-prefix
 deletions do not notify. Infrastructure writes require an explicit integer
 or nonempty iterable of affected IDs; `Zone` normally supplies its own
-owner ID and `None` represents unknown ownership; legacy `0` maps to `None`. Memory does not infer
-owners by parsing key names.
+owner ID and `0` represents unknown ownership. Sync translates that marker
+to `None` at the notification boundary. Memory does not infer owners by
+parsing key names.
 
 A failure from registering a candidate marks the transaction failed and
 causes rollback. A failure from **post-commit** confirmation leaves LMDB
