@@ -36,29 +36,29 @@ The service derives the daemon script path from its own `__file__` with `os.path
 
 The daemon stops approximately three seconds after the final client disconnects. It is a normal subprocess, not a second O ontology or an Almasi service. The socket directory defaults to a private directory named `o-transport-<uid>` beneath `tempfile.gettempdir()`. `O_TRANSPORT_DIR` may specify a shared, private directory for a deployment; it must be owned by the calling UID and inaccessible to group/other users.
 
-On initial connection, O synchronously refreshes its caches before `o.start()` returns. If the daemon later disconnects, clients reconnect and enqueue ID `0`, which invalidates all subscriptions and clears potentially stale caches after missed messages.
+On initial connection, O clears its local cache before `o.start()` returns. If the daemon disconnects, clients reconnect, notify local Sync with `None`, and send `None` to peers to repair possibly missed invalidations.
 
-## Internal wire protocol
+## Wire protocol
 
-One JSON array per newline-terminated frame:
+The first frame registers the canonical LMDB directory path; the daemon acknowledges with `true`. Every subsequent frame is either a JSON list of positive owner IDs or `null` (full invalidation):
 
 ```text
-client -> daemon: ['join', canonical_ontology_path]
-daemon -> client: ['ready', canonical_ontology_path]
-client -> daemon: ['change', canonical_ontology_path, [id, ...]]
-daemon -> peers:  ['invalidate', canonical_ontology_path, [id, ...]]
+client -> daemon: "/canonical/ontology/path"
+daemon -> client: true
+client -> daemon: [42, 57]
+daemon -> peers:  [42, 57]
+client -> daemon: null
+daemon -> peers:  null
 ```
 
-The arrays above describe the message schema; on the wire they use JSON double-quoted strings.
+Frames are newline-separated JSON; the path is bound to the connection and is not repeated in later frames. The daemon relays a message only to other clients registered for that pathname. Clients connected to the same pathname **must actually share the same LMDB database**.
 
-Each client has one registered ontology. The daemon broadcasts only to other clients registered under the same `os.path.realpath()` pathname. The integer `0` means full invalidation and supersedes other IDs. Each client must see the **same LMDB database** at that canonical pathname, not merely have an equal pathname inside an isolated container.
-
-The relay excludes the sender, coalesces duplicate IDs per message, rejects malformed frames, and bounds per-connection buffers. Socket file permissions are restrictive. The daemon does not authorize access to ontology data; LMDB access and permissions are controlled outside this transport.
+The relay uses nonblocking `selectors`, bounds input/output buffers, and validates message types. It does not read or authorize database contents; access to LMDB is controlled separately.
 
 ## Guarantees and limitations
 
 - Notifications are **invalidation hints**, not snapshots or proofs of commit. Existing `Sync` speculative fallback signals can also be forwarded.
-- Delivery is asynchronous and **not durable**. Restart/reconnection prompts a full invalidation, but there is no persistent replay or exact once-only guarantee.
+- Delivery is asynchronous and **not durable**. Reconnection prompts a full invalidation, but there is no persistent replay or exact once-only guarantee.
 - Existing local subscribe/unsubscribe semantics remain unchanged.
 - This transport works between processes on **one host**. Across containers, the Unix socket directory and the actual LMDB files must be shared and correctly permissioned; merely running a daemon inside an ephemeral application container does not give it a host-independent lifecycle.
 - TCP, cross-host consistency, deployment orchestration, and storage sharding are outside this feature.
