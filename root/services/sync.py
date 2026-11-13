@@ -37,7 +37,7 @@ class Sync(o.Service):
 	# Notify subscribers after coalescing all available committed batches.
 	# ----------------------------------------------------------------------
 	def _update(self, ids):
-		with self._condition:
+		with self._lock:
 			callbacks = tuple(self._subscribers)
 
 		for callback in callbacks:
@@ -46,6 +46,16 @@ class Sync(o.Service):
 			except Exception:
 				logging.exception('O Sync subscriber failed')
 
+	# Deliver all IDs from the available batches exactly once per cycle.
+	# ----------------------------------------------------------------------
+	def _deliver(self, batches):
+		ids = set()
+
+		for batch in batches:
+			ids.update(batch)
+
+		self._update(frozenset({0}) if 0 in ids else frozenset(ids))
+
 	# Sleep without a deadline when idle; otherwise poll for committed
 	# batches and fallback candidates with minimal producer interference.
 	# ----------------------------------------------------------------------
@@ -53,7 +63,7 @@ class Sync(o.Service):
 		pending       = []
 		last_activity = monotonic()
 
-		while not self._stopped.is_set():
+		while not self._closed:
 			# Recheck the queues after declaring sleep, so a simultaneous
 			# commit can always wake the worker.
 			# ----------------------------------------------------------
@@ -69,10 +79,10 @@ class Sync(o.Service):
 					self._wake.wait()
 
 				self._sleeping = False
-				self._wake.clear()
 			else:
 				self._wake.wait(self.batch_delay)
-				self._wake.clear()
+
+			self._wake.clear()
 
 			# The worker owns the list of pending fallback records. Records
 			# are uniquely allocated, so reused LMDB txn IDs cannot collide.
@@ -97,24 +107,14 @@ class Sync(o.Service):
 
 			if batches:
 				last_activity = now
-				ids = set()
-
-				for batch in batches:
-					ids.update(batch)
-
-				self._update(frozenset({0}) if 0 in ids else frozenset(ids))
+				self._deliver(batches)
 
 		# A close requested after commit must still deliver queued changes.
 		# ------------------------------------------------------------------
 		batches = self._drain(self._ready)
 
 		if batches:
-			ids = set()
-
-			for batch in batches:
-				ids.update(batch)
-
-			self._update(frozenset({0}) if 0 in ids else frozenset(ids))
+			self._deliver(batches)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -138,8 +138,7 @@ class Sync(o.Service):
 		self._registered  = SimpleQueue()
 		self._ready       = SimpleQueue()
 		self._wake        = threading.Event()
-		self._stopped     = threading.Event()
-		self._condition   = threading.Condition()
+		self._lock        = threading.Lock()
 		self._subscribers = set()
 		self._sleeping    = False
 		self._closed      = False
@@ -158,7 +157,7 @@ class Sync(o.Service):
 		if not callable(callback):
 			raise TypeError('Sync subscriber must be callable')
 
-		with self._condition:
+		with self._lock:
 			if self._closed:
 				raise RuntimeError('Sync is closed')
 
@@ -169,7 +168,7 @@ class Sync(o.Service):
 	# Stop notifications to the given callback.
 	# ----------------------------------------------------------------------
 	def unsubscribe(self, callback):
-		with self._condition:
+		with self._lock:
 			self._subscribers.discard(callback)
 
 	# Append an ID without acquiring the worker's lock. Each LMDB write
@@ -185,11 +184,11 @@ class Sync(o.Service):
 			record = [monotonic() + self.fallback_delay, [id], True]
 			self.changes[txn] = record
 			self._registered.put(record)
+
+			if self._sleeping:
+				self._wake.set()
 		else:
 			record[1].append(id)
-
-		if self._sleeping:
-			self._wake.set()
 
 	# Transfer a committed record to the worker without waiting for it.
 	# ----------------------------------------------------------------------
@@ -203,9 +202,6 @@ class Sync(o.Service):
 			record[2] = False
 			self._ready.put(record[1])
 
-			if self._sleeping:
-				self._wake.set()
-
 	# Drop a rolled-back candidate. A fallback already delivered is allowed.
 	# ----------------------------------------------------------------------
 	def on_aborted(self, txn):
@@ -218,11 +214,10 @@ class Sync(o.Service):
 	# ----------------------------------------------------------------------
 	def close(self):
 		self._closed = True
-		self._stopped.set()
 		self._wake.set()
 
 		if self._worker is not threading.current_thread():
 			self._worker.join()
 
-		with self._condition:
+		with self._lock:
 			self._subscribers.clear()

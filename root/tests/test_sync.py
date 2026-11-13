@@ -293,6 +293,31 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
+	# Confirm commit delivery through repeated transitions to idle sleep.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_repeated_idle_wakeups(cls):
+		sync    = cls._sync()
+		results = Queue()
+
+		sync.idle_delay = 0.005
+
+		try:
+			sync.subscribe(results.put)
+
+			for txn in range(20):
+				deadline = time.monotonic() + 2
+
+				while not sync._sleeping and time.monotonic() < deadline:
+					time.sleep(0.0005)
+
+				assert sync._sleeping
+				sync.on_change(txn, txn + 1)
+				sync.on_changed(txn)
+				assert results.get(timeout=2) == frozenset({txn + 1})
+		finally:
+			sync.close()
+
 	# A burst of confirmations must not lose IDs while the worker coalesces.
 	# ----------------------------------------------------------------------
 	@classmethod

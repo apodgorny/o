@@ -28,30 +28,6 @@ class TestPerformanceSync(o.Tester):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Keep the original Sync locking but poll instead of waking its worker
-	# at each commit; production Sync remains unchanged.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def _poll_mode(cls, sync, interval):
-		condition       = sync._condition
-		original_notify = condition.notify
-		original_wait   = condition.wait
-		original_close  = sync.close
-
-		condition.notify = lambda n=1: None
-		condition.wait   = lambda timeout=None: original_wait(
-			min(timeout, interval) if timeout is not None else interval
-		)
-
-		# Restore wake-up semantics before closing the original worker.
-		# ------------------------------------------------------------------
-		def close():
-			condition.notify = original_notify
-			original_close()
-			condition.wait = original_wait
-
-		sync.close = close
-
 	# Run a test-only queue consumer that never locks the writing thread.
 	# Polling preserves cheap storage; event mode trades write-side signalling
 	# for faster delivery under sparse traffic.
@@ -346,11 +322,7 @@ class TestPerformanceSync(o.Tester):
 		else:
 			type(sync).initialize(sync, fallback_delay=1.0)
 
-			if mode == 'poll1':
-				cls._poll_mode(sync, 0.001)
-			elif mode == 'poll5':
-				cls._poll_mode(sync, 0.005)
-			elif mode == 'queue1':
+			if mode == 'queue1':
 				cls._queue_mode(sync, 0.001, False)
 			elif mode == 'queue5':
 				cls._queue_mode(sync, 0.005, False)
@@ -452,10 +424,10 @@ if __name__ == '__main__':
 	parser.add_argument('--rounds', type=int, default=5)
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	parser.add_argument('--scenario', choices=('single', 'batch', 'latency', 'idle'))
-	parser.add_argument('--mode', choices=('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid', 'handoff'))
+	parser.add_argument('--mode', choices=('stub', 'current', 'queue1', 'queue5', 'event1', 'hybrid', 'handoff'))
 	args = parser.parse_args()
 
-	modes = ('stub', 'current', 'poll1', 'poll5', 'queue1', 'queue5', 'event1', 'hybrid', 'handoff')
+	modes = ('stub', 'current', 'queue1', 'queue5', 'event1', 'hybrid', 'handoff')
 
 	if args._json:
 		result = TestPerformanceSync.measure(args.scenario, args.mode, args.size)
