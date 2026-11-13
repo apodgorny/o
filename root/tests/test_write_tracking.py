@@ -50,7 +50,7 @@ class TestWriteTracking(o.Tester):
 			assert schema.owner_id == class_id
 			assert fields.owner_id == class_id
 			assert instance.owner_id == item_id
-			assert memory.zone('garbage/items/').owner_id == 0
+			assert memory.zone('garbage/items/').owner_id is None
 
 			events = cls._observe()
 			schema.set('field.type', 123)
