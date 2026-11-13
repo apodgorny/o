@@ -36,7 +36,7 @@ The service derives the daemon script path from its own `__file__` with `os.path
 
 The daemon stops approximately three seconds after the final client disconnects. It is a normal subprocess, not a second O ontology or an Almasi service. The socket directory defaults to a private directory named `o-transport-<uid>` beneath `tempfile.gettempdir()`. `O_TRANSPORT_DIR` may specify a shared, private directory for a deployment; it must be owned by the calling UID and inaccessible to group/other users.
 
-If the daemon disconnects, clients reconnect. **Every successful connection triggers ID `0`**, which clears local caches and invalidates all subscriptions: a conservative resynchronization after any potentially missed messages.
+On initial connection, O synchronously refreshes its caches before `o.start()` returns. If the daemon later disconnects, clients reconnect and enqueue ID `0`, which invalidates all subscriptions and clears potentially stale caches after missed messages.
 
 ## Internal wire protocol
 
