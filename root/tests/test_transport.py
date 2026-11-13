@@ -7,7 +7,10 @@
 import json
 import os
 import queue
+import select
 import socket
+import subprocess
+import sys
 
 from types import SimpleNamespace
 
@@ -128,6 +131,63 @@ class TestTransport(o.Tester):
 		finally:
 			o.services.Sync.unsubscribe(callback)
 			peer.close()
+
+
+	# A second O process re-reads committed LMDB state after an IPC update.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_two_ontology_processes(cls):
+		memory   = o.services.Memory
+		owner_id = 780005
+		key      = f'transport/integration/{os.getpid()}'
+		script   = '''
+import json
+import queue
+import sys
+
+import o
+
+type(o).__app__ = o
+o.start()
+
+key      = sys.argv[1]
+owner_id = int(sys.argv[2])
+received = queue.Queue()
+
+assert o.services.Memory.get(key) == 1
+callback = o.services.Sync.subscribe({owner_id}, received.put)
+
+print('READY', flush=True)
+assert received.get(timeout=12) == frozenset({owner_id})
+assert o.services.Memory.get(key) == 2
+print('UPDATED', flush=True)
+'''
+		directory = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+		memory.set(key, 1, owner_id)
+		process = subprocess.Popen(
+			[sys.executable, '-c', script, key, str(owner_id)],
+			cwd    = directory,
+			stdout = subprocess.PIPE,
+			stderr = subprocess.PIPE,
+			text   = True,
+		)
+
+		try:
+			ready, _, _ = select.select([process.stdout], [], [], 15)
+			assert ready and process.stdout.readline().strip() == 'READY'
+
+			memory.set(key, 2, owner_id)
+			stdout, stderr = process.communicate(timeout=15)
+
+			assert process.returncode == 0, stderr
+			assert 'UPDATED' in stdout
+		finally:
+			if process.poll() is None:
+				process.kill()
+				process.communicate()
+
+			memory.unset(key, owner_id)
+
 
 
 if __name__ == '__main__':
