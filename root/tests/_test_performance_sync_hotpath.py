@@ -25,6 +25,101 @@ class TestPerformanceSyncHotpath(o.Tester):
 	# PRIVATE METHODS
 	# ======================================================================
 
+	# Prototype a single registration queue: commit changes record state.
+	# The worker observes state transitions without a second producer enqueue.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _single_queue_mode(cls, sync):
+		def on_change(txn, id):
+			if sync._closed:
+				raise RuntimeError('Sync is closed')
+
+			record = sync.changes.get(txn)
+
+			if record is None:
+				record = [time.monotonic() + sync.fallback_delay, [id], 1]
+				sync.changes[txn] = record
+				sync._registered.put(record)
+
+				if sync._sleeping:
+					sync._wake.set()
+			else:
+				record[1].append(id)
+
+		def on_changed(txn):
+			if sync._closed:
+				raise RuntimeError('Sync is closed')
+
+			record = sync.changes.pop(txn, None)
+
+			if record is not None:
+				record[2] = 2
+
+		def on_aborted(txn):
+			record = sync.changes.pop(txn, None)
+
+			if record is not None:
+				record[2] = 0
+
+		def run():
+			pending       = []
+			last_activity = time.monotonic()
+
+			while not sync._closed:
+				if (
+					time.monotonic() - last_activity >= sync.idle_delay
+					and not pending and sync._registered.empty()
+				):
+					sync._wake.clear()
+					sync._sleeping = True
+
+					if not pending and sync._registered.empty():
+						sync._wake.wait()
+
+					sync._sleeping = False
+				else:
+					sync._wake.wait(sync.batch_delay)
+
+				sync._wake.clear()
+				pending.extend(sync._drain(sync._registered))
+				batches = []
+				active  = []
+				now     = time.monotonic()
+
+				for record in pending:
+					state = record[2]
+
+					if state == 2:
+						batches.append(record[1])
+					elif state == 1:
+						if now >= record[0]:
+							batches.append(tuple(record[1]))
+							record[0] = now + sync.fallback_delay
+
+						active.append(record)
+
+				pending = active
+
+				if batches:
+					last_activity = now
+					sync._deliver(batches)
+
+			# A committed record must survive immediate close.
+			# --------------------------------------------------------------
+			batches = []
+
+			for record in pending + sync._drain(sync._registered):
+				if record[2] == 2:
+					batches.append(record[1])
+
+			if batches:
+				sync._deliver(batches)
+
+		sync.on_change  = on_change
+		sync.on_changed = on_changed
+		sync.on_aborted = on_aborted
+		sync._run       = run
+
 	# Install a test-only producer variation on the real Sync singleton.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -38,6 +133,9 @@ class TestPerformanceSyncHotpath(o.Tester):
 				on_aborted = lambda txn: None,
 			)
 		else:
+			if mode == 'single_queue':
+				cls._single_queue_mode(sync)
+
 			type(sync).initialize(sync)
 
 			if mode in ('no_register', 'worker_deadline'):
@@ -144,6 +242,49 @@ class TestPerformanceSyncHotpath(o.Tester):
 					elapsed = time.perf_counter_ns() - started
 					memory.sync.on_aborted(-1)
 
+				elif scenario == 'validate':
+					from queue import Empty, Queue
+
+					events = Queue()
+					sync.subscribe(events.put)
+					sync.fallback_delay = 0.03
+
+					sync.on_change(-9, 11)
+					assert events.get(timeout=2) == frozenset({11})
+					sync.on_change(-9, 12)
+					sync.on_changed(-9)
+					assert events.get(timeout=2) == frozenset({11, 12})
+
+					sync.on_change(-8, 21)
+					sync.on_aborted(-8)
+					time.sleep(0.06)
+
+					try:
+						unexpected = events.get_nowait()
+					except Empty:
+						unexpected = None
+
+					assert unexpected is None
+					assert sync.changes == {}
+					elapsed = 0
+
+				elif scenario == 'latency':
+					from queue import Queue
+
+					events = Queue()
+					sync.subscribe(lambda ids: events.put(time.perf_counter_ns()))
+					samples = []
+
+					for index in range(80):
+						txn = -index - 1
+						memory.sync.on_change(txn, index + 1)
+						started = time.perf_counter_ns()
+						memory.sync.on_changed(txn)
+						finished = events.get(timeout=2)
+						samples.append((finished - started) / 1000)
+
+					elapsed = statistics.median(samples) * 1000 * size
+
 				elif scenario == 'pair':
 					started = time.perf_counter_ns()
 
@@ -185,7 +326,7 @@ if __name__ == '__main__':
 	parser.add_argument('--_json', action='store_true', help=argparse.SUPPRESS)
 	args = parser.parse_args()
 
-	modes     = ('stub', 'current', 'no_register', 'worker_deadline', 'unchecked')
+	modes     = ('stub', 'current', 'no_register', 'worker_deadline', 'unchecked', 'single_queue')
 	scenarios = ('change', 'pair', 'batch', 'single')
 
 	if args._json:
@@ -225,3 +366,37 @@ if __name__ == '__main__':
 					f'[{min(values):8.3f}..{max(values):8.3f}]',
 					flush = True,
 				)
+
+		# Validate speculative fallback and commit delivery before recommending.
+		# ----------------------------------------------------------------------
+		for mode in ('current', 'single_queue'):
+			completed = subprocess.run(
+				[
+					sys.executable, runner, '--size', '1',
+					'--_mode', mode, '--_scenario', 'validate', '--_json',
+				],
+				capture_output = True,
+				text           = True,
+			)
+
+			if completed.returncode:
+				raise RuntimeError(completed.stdout + completed.stderr)
+
+			print(f'{mode} validation passed', flush=True)
+
+		# Measure sparse delivery separately from write throughput.
+		# ----------------------------------------------------------------------
+		for mode in ('current', 'single_queue'):
+			completed = subprocess.run(
+				[
+					sys.executable, runner, '--size', '1',
+					'--_mode', mode, '--_scenario', 'latency', '--_json',
+				],
+				capture_output = True,
+				text           = True,
+			)
+
+			if completed.returncode:
+				raise RuntimeError(completed.stdout + completed.stderr)
+
+			print(f'{mode} latency p50: {float(completed.stdout.strip().splitlines()[-1]):.1f} us', flush=True)

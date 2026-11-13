@@ -36,10 +36,6 @@ jobs:
           python -m pip install -e ./o
           python -m pip install jsonschema
 
-      - name: 'Benchmark 10000 writes: stub vs Sync'
-        working-directory: o
-        run: python root/tests/_test_performance_sync.py --size 10000 --rounds 5
-
       - name: 'Benchmark Sync transaction hot path'
         working-directory: o
         run: python root/tests/_test_performance_sync_hotpath.py --size 10000 --rounds 7
