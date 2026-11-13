@@ -40,30 +40,27 @@ class Sync(o.Service):
 		with self._lock:
 			callbacks = tuple(self._subscribers.items())
 
-		full = 0 in ids
+		full = ids is None
 
 		for callback, watched in callbacks:
 			matching = ids if full or watched is None else ids & watched
 
-			if matching:
+			if full or matching:
 				try:
 					callback(matching)
 				except Exception:
 					logging.exception('O Sync subscriber failed')
 
-	# Deliver all IDs from the available batches exactly once per cycle.
+	# Coalesce local or remote invalidations; do not republish incoming events.
 	# ----------------------------------------------------------------------
-	def _deliver(self, batches, publish=True):
-		ids = set()
+	def _deliver(self, batches, remote=False):
+		full = any(batch is None or None in batch for batch in batches)
+		ids  = None if full else frozenset(id for batch in batches for id in batch)
 
-		for batch in batches:
-			ids.update(batch)
-
-		ids = frozenset({0}) if 0 in ids else frozenset(ids)
-
-		if publish and self._transport is not None:
-			if o.services.Memory.path == self._transport.path:
-				self._transport.send(ids)
+		if remote:
+			o.services.Cache.invalidate(ids)
+		elif self._transport is not None and o.services.Memory.path == self._transport.path:
+			self._transport.send(ids)
 
 		self._update(ids)
 
@@ -123,9 +120,7 @@ class Sync(o.Service):
 
 			if remote:
 				last_activity = now
-				ids = frozenset().union(*remote)
-				o.services.Cache.invalidate(ids)
-				self._deliver(remote, publish=False)
+				self._deliver(remote, remote=True)
 
 		# A close requested after commit must still deliver queued changes.
 		# ------------------------------------------------------------------
@@ -136,8 +131,7 @@ class Sync(o.Service):
 			self._deliver(batches)
 
 		if remote:
-			o.services.Cache.invalidate(frozenset().union(*remote))
-			self._deliver(remote, publish=False)
+			self._deliver(remote, remote=True)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -176,7 +170,7 @@ class Sync(o.Service):
 		self._worker.start()
 
 	# Subscribe globally or to a set of owner IDs, before the initial read.
-	# Callback receives matching frozenset IDs; zero invalidates every scope.
+	# Callback receives matching frozenset IDs, or None for a full refresh.
 	# Accept subscribe(callback) or subscribe({id, ...}, callback).
 	# ----------------------------------------------------------------------
 	def subscribe(self, ids=None, callback=None):
@@ -206,18 +200,22 @@ class Sync(o.Service):
 	def attach_transport(self, transport):
 		self._transport = transport
 
-	# Accept remote IDs; the existing worker owns cache and callback delivery.
+	# Enqueue remote owner IDs, or None for full invalidation.
 	# ----------------------------------------------------------------------
 	def receive(self, ids):
-		ids = frozenset(ids)
-
 		if self._closed:
 			raise RuntimeError('Sync is closed')
 
-		if not ids or any(type(id) is not int or id < 0 for id in ids):
-			raise ValueError('Sync invalidations must contain non-negative integer IDs')
+		if ids is not None:
+			if not isinstance(ids, (set, frozenset)):
+				raise TypeError('Sync invalidations must be a set or None')
 
-		self._remote.put(frozenset({0}) if 0 in ids else ids)
+			if not ids or any(type(id) is not int or id <= 0 for id in ids):
+				raise ValueError('Sync invalidations must contain positive integer IDs')
+
+			ids = frozenset(ids)
+
+		self._remote.put(ids)
 		self._wake.set()
 
 	# Stop notifications to the given callback.
