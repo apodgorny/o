@@ -85,4 +85,4 @@ jobs:
 
       - name: Benchmark immediate per-ID notifications and commit confirmation (PR)
         working-directory: o
-        run: python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --ipl stub
+        run: python root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --sync stub
