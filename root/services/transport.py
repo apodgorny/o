@@ -107,10 +107,16 @@ class Transport(o.Service):
 				else:
 					connection.close()
 
-			# A reconnect may have missed notifications; discard stale O caches.
+			# Reconnects must notify subscribers; initial startup needs only a
+			# synchronous cache refresh before O.start() returns.
 			# --------------------------------------------------------------
 			if not self._closed.is_set():
-				self.receive(frozenset({0}))
+				if self._ever_connected:
+					self.receive(frozenset({0}))
+				else:
+					o.services.Cache.invalidate_all()
+
+				self._ever_connected = True
 				self._connected.set()
 
 		except Exception:
@@ -197,6 +203,7 @@ class Transport(o.Service):
 		self._lock        = threading.Lock()
 		self._connected   = threading.Event()
 		self._closed      = threading.Event()
+		self._ever_connected = False
 
 		buffer = self._connect()
 		self._worker = threading.Thread(target=self._run, args=(buffer,), name='o-transport', daemon=True)
