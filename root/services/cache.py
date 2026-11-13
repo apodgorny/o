@@ -46,6 +46,21 @@ class Cache(o.Service):
 			self.entities[entity.id]        = entity
 			self.entities[entity.__proto__] = entity
 
+	# Invalidate only the cached owners affected by a remote O write.
+	# ----------------------------------------------------------------------
+	def invalidate(self, ids):
+		if 0 in ids:
+			self.invalidate_all()
+		else:
+			for id in ids:
+				entity = self.entities.get(id)
+
+				if entity is not None:
+					if isinstance(entity, type):
+						entity.__zone__.cache.clear()
+					else:
+						entity.__invalidate__()
+
 	# Invalidate cached entities without replacing their instances.
 	# ----------------------------------------------------------------------
 	def invalidate_all(self):
