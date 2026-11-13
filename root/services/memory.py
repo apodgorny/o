@@ -118,13 +118,13 @@ class MemoryBatch:
 	def _notify(self, owner_id):
 		self.notified = True
 
-		if owner_id is None or type(owner_id) is int:
-			self.sync.register_change(self.txn_id, None if owner_id in (None, 0) else owner_id)
+		if type(owner_id) is int:
+			self.sync.register_change(self.txn_id, owner_id)
 		else:
 			sent = False
 
 			for id in owner_id:
-				self.sync.register_change(self.txn_id, None if id == 0 else id)
+				self.sync.register_change(self.txn_id, id)
 				sent = True
 
 			if not sent:
@@ -236,7 +236,7 @@ class Zone:
 		self.prefix   = prefix
 		self.cache    = {}
 		self.memory   = o.services.Memory
-		self.owner_id = None
+		self.owner_id = 0
 
 		if prefix.startswith('o.T.') and prefix.endswith('.'):
 			proto = prefix[:-1]
@@ -414,7 +414,7 @@ class Memory(o.Service):
 		return Zone(prefix)
 
 	# Store a value with its affected ID or iterable of IDs.
-	# None requests full Sync invalidation; legacy owner ID 0 maps to None.
+	# ID zero requests full Sync invalidation for unknown owners.
 	# ----------------------------------------------------------------------
 	def set(self, key, value, owner_id):
 		with self.write() as batch:
