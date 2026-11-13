@@ -110,7 +110,7 @@ class TestSync(o.Tester):
 			sync.register_change(30, 100)
 			sync.register_change(30, 0)
 			sync.register_change_commit(30)
-			assert results.get(timeout=2) == frozenset({0})
+			assert results.get(timeout=2) is None
 		finally:
 			sync.close()
 
@@ -166,7 +166,7 @@ class TestSync(o.Tester):
 			sync.register_change_commit(802)
 
 			for result in (global_q, filtered, empty_ids):
-				assert result.get(timeout=2) == frozenset({0})
+				assert result.get(timeout=2) is None
 		finally:
 			sync.close()
 

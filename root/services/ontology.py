@@ -110,3 +110,11 @@ class Ontology(o.Service):
 
 		o.services.Entity.ensure_value()
 		o.__cached_names__.add('V')
+
+		if not is_reconnecting:
+			self._initialize_service(
+				o.services.Transport,
+				path = o.services.Memory.path,
+				sync = o.services.Sync,
+			)
+			o.services.Sync.attach_transport(o.services.Transport)

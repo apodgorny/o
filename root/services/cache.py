@@ -46,15 +46,24 @@ class Cache(o.Service):
 			self.entities[entity.id]        = entity
 			self.entities[entity.__proto__] = entity
 
-	# Invalidate cached entities without replacing their instances.
+	# Invalidate selected owners, or the entire ontology for None.
+	# ----------------------------------------------------------------------
+	def invalidate(self, ids):
+		if ids is None:
+			entities = (entity for id, entity in tuple(self.entities.items()) if isinstance(id, int))
+		else:
+			entities = (self.entities.get(id) for id in ids)
+
+		for entity in entities:
+			if isinstance(entity, type):
+				entity.__zone__.cache.clear()
+			elif entity is not None:
+				entity.__invalidate__()
+
+	# Invalidate all cached objects without replacing their identities.
 	# ----------------------------------------------------------------------
 	def invalidate_all(self):
-		for id, entity in tuple(self.entities.items()):
-			if isinstance(id, int):
-				if isinstance(entity, type):
-					entity.__zone__.cache.clear()
-				else:
-					entity.__invalidate__()
+		self.invalidate(None)
 
 	# Unregister both lookup keys and the annotation belonging to a class.
 	# ----------------------------------------------------------------------

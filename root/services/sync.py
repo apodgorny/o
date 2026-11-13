@@ -40,26 +40,38 @@ class Sync(o.Service):
 		with self._lock:
 			callbacks = tuple(self._subscribers.items())
 
-		full = 0 in ids
+		full = ids is None
 
 		for callback, watched in callbacks:
 			matching = ids if full or watched is None else ids & watched
 
-			if matching:
+			if full or matching:
 				try:
 					callback(matching)
 				except Exception:
 					logging.exception('O Sync subscriber failed')
 
-	# Deliver all IDs from the available batches exactly once per cycle.
+	# Coalesce once, then dispatch local or remote invalidations.
 	# ----------------------------------------------------------------------
-	def _deliver(self, batches):
+	def _deliver(self, batches, remote=False):
 		ids = set()
 
 		for batch in batches:
+			if batch is None:
+				ids = None
+				break
+
 			ids.update(batch)
 
-		self._update(frozenset({0}) if 0 in ids else frozenset(ids))
+		if ids is not None:
+			ids = None if 0 in ids else frozenset(ids)
+
+		if remote:
+			o.services.Cache.invalidate(ids)
+		elif self._transport is not None and o.services.Memory.path == self._transport.path:
+			self._transport.send(ids)
+
+		self._update(ids)
 
 	# Sleep without a deadline when idle; otherwise poll for committed
 	# batches and fallback candidates with minimal producer interference.
@@ -75,12 +87,12 @@ class Sync(o.Service):
 			if (
 				monotonic() - last_activity >= self.idle_delay
 				and not pending and self._registered.empty()
-				and self._ready.empty()
+				and self._ready.empty() and self._remote.empty()
 			):
 				self._wake.clear()
 				self._sleeping = True
 
-				if not pending and self._registered.empty() and self._ready.empty():
+				if not pending and self._registered.empty() and self._ready.empty() and self._remote.empty():
 					self._wake.wait()
 
 				self._sleeping = False
@@ -97,6 +109,7 @@ class Sync(o.Service):
 					pending.append(record)
 
 			batches = self._drain(self._ready)
+			remote  = self._drain(self._remote)
 			now     = monotonic()
 			active  = []
 
@@ -114,12 +127,20 @@ class Sync(o.Service):
 				last_activity = now
 				self._deliver(batches)
 
+			if remote:
+				last_activity = now
+				self._deliver(remote, remote=True)
+
 		# A close requested after commit must still deliver queued changes.
 		# ------------------------------------------------------------------
 		batches = self._drain(self._ready)
+		remote  = self._drain(self._remote)
 
 		if batches:
 			self._deliver(batches)
+
+		if remote:
+			self._deliver(remote, remote=True)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -142,6 +163,8 @@ class Sync(o.Service):
 		self.changes      = {}
 		self._registered  = SimpleQueue()
 		self._ready       = SimpleQueue()
+		self._remote      = SimpleQueue()
+		self._transport   = None
 		self._wake        = threading.Event()
 		self._lock        = threading.Lock()
 		self._subscribers = {}
@@ -156,7 +179,7 @@ class Sync(o.Service):
 		self._worker.start()
 
 	# Subscribe globally or to a set of owner IDs, before the initial read.
-	# Callback receives matching frozenset IDs; zero invalidates every scope.
+	# Callback receives matching frozenset IDs, or None for a full refresh.
 	# Accept subscribe(callback) or subscribe({id, ...}, callback).
 	# ----------------------------------------------------------------------
 	def subscribe(self, ids=None, callback=None):
@@ -180,6 +203,29 @@ class Sync(o.Service):
 			self._subscribers[callback] = ids
 
 		return callback
+
+	# Connect a host-local relay without changing the subscriber API.
+	# ----------------------------------------------------------------------
+	def attach_transport(self, transport):
+		self._transport = transport
+
+	# Enqueue remote owner IDs, or None for full invalidation.
+	# ----------------------------------------------------------------------
+	def receive(self, ids):
+		if self._closed:
+			raise RuntimeError('Sync is closed')
+
+		if ids is not None:
+			if not isinstance(ids, (set, frozenset)):
+				raise TypeError('Sync invalidations must be a set or None')
+
+			if not ids or any(type(id) is not int or id <= 0 for id in ids):
+				raise ValueError('Sync invalidations must contain positive integer IDs')
+
+			ids = frozenset(ids)
+
+		self._remote.put(ids)
+		self._wake.set()
 
 	# Stop notifications to the given callback.
 	# ----------------------------------------------------------------------
@@ -229,6 +275,9 @@ class Sync(o.Service):
 	# Flush confirmed notifications and terminate cleanly.
 	# ----------------------------------------------------------------------
 	def close(self):
+		if self._transport is not None:
+			self._transport.close()
+
 		self._closed = True
 		self._wake.set()
 
