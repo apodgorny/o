@@ -181,6 +181,12 @@ class Transport(o.Service):
 					connection.sendall(message)
 				except OSError:
 					self._connection = None
+
+					try:
+						connection.shutdown(socket.SHUT_RDWR)
+					except OSError:
+						pass
+
 					connection.close()
 
 	# Disconnect; the relay will exit when its final client is gone.
