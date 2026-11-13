@@ -4,7 +4,8 @@
 # Verify dependency completeness at public O object and discovery boundaries.
 # ==============================================================================
 
-from types import SimpleNamespace
+from contextlib import contextmanager
+from queue      import Queue
 
 import o
 
@@ -16,15 +17,28 @@ class TestTrackerPublicApi(o.Tester):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Observe identities confirmed after successful commits.
+	# Collect confirmed owner IDs from the real asynchronous Sync service.
 	# ----------------------------------------------------------------------
 	@classmethod
+	@contextmanager
 	def _observe_writes(cls):
+		sync     = o.services.Sync
+		received = Queue()
+		callback = sync.subscribe(received.put)
+
+		try:
+			yield received
+		finally:
+			sync.unsubscribe(callback)
+
+	# Wait until all expected owners have been published by Sync.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _wait_for_writes(cls, received, expected):
 		writes = set()
-		o.services.Memory.ipl = SimpleNamespace(
-			pre_invalidate = lambda owner_id: writes.add(owner_id),
-			invalidate     = lambda: None,
-		)
+
+		while not expected <= writes:
+			writes.update(received.get(timeout=2))
 
 		return writes
 
@@ -53,12 +67,13 @@ class TestTrackerPublicApi(o.Tester):
 			assert employee.id in reads
 			assert finance.id in reads
 
-			writes = cls._observe_writes()
-			finance.salary = 250
+			with cls._observe_writes() as received:
+				finance.salary = 250
+				writes = cls._wait_for_writes(received, {finance.id})
+
 			assert finance.id in writes
 			assert set(reads) & set(writes)
 		finally:
-			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Even an empty traversal depends on the object being traversed.
@@ -94,13 +109,14 @@ class TestTrackerPublicApi(o.Tester):
 
 			assert Model.id in reads
 
-			writes = cls._observe_writes()
-			item     = Model(value=1)
+			with cls._observe_writes() as received:
+				item   = Model(value=1)
+				writes = cls._wait_for_writes(received, {item.id, Model.id})
+
 			assert item.id in writes
 			assert Model.id in writes
 			assert set(reads) & set(writes)
 		finally:
-			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Class membership must invalidate when an instance is dropped.
@@ -117,14 +133,15 @@ class TestTrackerPublicApi(o.Tester):
 			with o.services.Tracker.track_reads(reads):
 				assert item.id in [value.id for value in Model.__instances__()]
 
-			writes = cls._observe_writes()
-			item.drop()
+			with cls._observe_writes() as received:
+				item.drop()
+				writes = cls._wait_for_writes(received, {item.id, Model.id})
+
 			assert Model.id in reads
 			assert Model.id in writes
 			assert item.id in writes
 			assert set(reads) & set(writes)
 		finally:
-			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Reading an absent entity records the identity that its birth will write.
@@ -143,13 +160,14 @@ class TestTrackerPublicApi(o.Tester):
 
 			assert o.services.Id.hash(proto) in reads
 
-			writes = cls._observe_writes()
-			item     = Model(value=7)
+			with cls._observe_writes() as received:
+				item   = Model(value=7)
+				writes = cls._wait_for_writes(received, {item.id})
+
 			assert item.__proto__ == proto
 			assert item.id in writes
 			assert set(reads) & set(writes)
 		finally:
-			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Subclass membership uses the parent class as a dependency.
@@ -165,14 +183,15 @@ class TestTrackerPublicApi(o.Tester):
 			with o.services.Tracker.track_reads(reads):
 				assert Base.__subclasses__() == []
 
-			writes = cls._observe_writes()
-			Child    = Base.extend('TrackerPublicChild')
+			with cls._observe_writes() as received:
+				Child  = Base.extend('TrackerPublicChild')
+				writes = cls._wait_for_writes(received, {Base.id})
+
 			assert Child.__parent__ is Base
 			assert Base.id in reads
 			assert Base.id in writes
 			assert set(reads) & set(writes)
 		finally:
-			o.services.Memory.ipl = None
 			cls._restore_runtime(state)
 
 	# Newly introduced observation paths must restore their original methods.

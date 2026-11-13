@@ -51,6 +51,19 @@ jobs:
           o.tests.TestSync.run()
           PY
 
+      - name: Run Tracker public API correctness tests
+        working-directory: o
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, 'root')
+          import o
+          type(o).__app__ = o
+          o.start()
+          import tester
+          o.tests.TestTrackerPublicApi.run()
+          PY
+
       - name: Run ontology tests
         working-directory: o
         run: python root/test.py

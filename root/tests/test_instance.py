@@ -6,7 +6,7 @@
 
 import os
 
-from types import SimpleNamespace
+from queue import Queue
 
 import o
 
@@ -490,36 +490,30 @@ class TestInstance(o.Tester):
 		finally:
 			cls._restore_runtime(state)
 
-	# Persist mutations emit a pair of IPL calls per successful commit.
+	# Attribute updates and deletion publish their owner through Sync.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_ipl_receives_attr_transitions(cls):
-		state = cls._patch_runtime()
+	def test_sync_receives_attr_transitions(cls):
+		state    = cls._patch_runtime()
+		sync     = o.services.Sync
+		received = Queue()
+		callback = None
 
 		try:
 			root_name = os.path.basename(state['root'])
 			Tracked   = o.T.extend(f'Tracked_{root_name}', foo=str)
 			x         = Tracked(foo='a')
-			calls     = []
-
-			memory = o.services.Memory
-			memory.ipl = SimpleNamespace(
-				pre_invalidate = lambda owner_id: calls.append(('pre', owner_id)),
-				invalidate     = lambda: calls.append(('post', None)),
-			)
+			callback  = sync.subscribe(received.put)
 
 			x.foo = 'b'
-			assert ('pre', x.id) in calls
-			assert calls[-1] == ('post', None)
-			assert calls.count(('post', None)) == 1
+			assert x.id in received.get(timeout=2)
 
-			calls.clear()
 			del x.foo
-			assert ('pre', x.id) in calls
-			assert calls[-1] == ('post', None)
-			assert calls.count(('post', None)) == 1
+			assert x.id in received.get(timeout=2)
 		finally:
-			o.services.Memory.ipl = None
+			if callback is not None:
+				sync.unsubscribe(callback)
+
 			cls._restore_runtime(state)
 
 	# ----------------------------------------------------------------------
