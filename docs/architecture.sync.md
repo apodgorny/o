@@ -74,12 +74,12 @@ mutating the caller's set later has no effect. A filtered callback receives
 only matching IDs; a global callback receives the full delivered batch.
 
 A filtered **empty** set receives no ordinary change events, but still
-receives full invalidation (ID `0`). An unknown affected owner must be
-reported as `0`; this delivers `frozenset({0})` to **all** subscribers.
-When zero and other IDs are combined, the payload is `{0}` alone.
+receives a full invalidation (`None`). Unknown affected owners are reported
+to Sync as `None` (legacy Memory owner `None` also maps to `None`).
+When full and specific invalidations combine, `None` supersedes the IDs.
 Unsubscribing an unknown callback is harmless.
 
-Callbacks receive `frozenset[int]` and execute on the **`o-sync` worker
+Callbacks receive `frozenset[int] | None` and execute on the **`o-sync` worker
 thread**, not the writer's thread or an asyncio task. Cross-thread consumers
 must hand off to their own loop, e.g. via
 `loop.call_soon_threadsafe(...)`. Subscribers may safely subscribe or
@@ -131,7 +131,7 @@ nested failure poisons the outermost transaction. Internal Memory reads
 during an open write see staged data. Missing-key and empty-prefix
 deletions do not notify. Infrastructure writes require an explicit integer
 or nonempty iterable of affected IDs; `Zone` normally supplies its own
-owner ID and `0` represents unknown ownership. Memory does not infer
+owner ID and `None` represents unknown ownership; legacy `0` maps to `None`. Memory does not infer
 owners by parsing key names.
 
 A failure from registering a candidate marks the transaction failed and
@@ -179,7 +179,7 @@ is not automatically reversed by `o.start()` reopening Memory. Use
 ## Verification and non-goals
 
 - `test_sync.py`: filtered/global/empty subscriptions, scope replacement,
-  zero/full invalidation, worker-thread callbacks, transaction IDs,
+  None/full invalidation, worker-thread callbacks, transaction IDs,
   commit visibility, fallback/repetition/abort, concurrent producers,
   wakeups, reentrant and failing callbacks, blocked listeners, and close.
 - `test_write_tracking.py`: actual field, collection, class and instance
