@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from queue              import Empty, Queue
 from types              import SimpleNamespace
+from unittest.mock      import patch
 
 import o
 
@@ -152,22 +153,30 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# Subscriber failures do not block other subscribers or later commits.
+	# Subscriber failures are logged without interrupting later deliveries.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_failing_subscriber(cls):
 		sync    = cls._sync()
 		results = Queue()
+		errors  = []
 
 		def fail(ids):
 			raise ValueError('Expected subscriber failure')
 
 		try:
-			sync.subscribe(fail)
-			sync.subscribe(results.put)
-			sync.on_change(50, 41)
-			sync.on_changed(50)
-			assert results.get(timeout=2) == frozenset({41})
+			with patch('logging.exception', side_effect=errors.append):
+				sync.subscribe(fail)
+				sync.subscribe(results.put)
+
+				for txn, id in ((50, 41), (51, 42)):
+					sync.on_change(txn, id)
+					sync.on_changed(txn)
+					assert results.get(timeout=2) == frozenset({id})
+
+				sync.close()
+
+			assert errors == ['O Sync subscriber failed'] * 2
 		finally:
 			sync.close()
 
