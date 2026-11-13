@@ -51,11 +51,20 @@ class Sync(o.Service):
 				except Exception:
 					logging.exception('O Sync subscriber failed')
 
-	# Coalesce local or remote invalidations; do not republish incoming events.
+	# Coalesce once, then dispatch local or remote invalidations.
 	# ----------------------------------------------------------------------
 	def _deliver(self, batches, remote=False):
-		full = any(batch is None or 0 in batch for batch in batches)
-		ids  = None if full else frozenset(id for batch in batches for id in batch)
+		ids = set()
+
+		for batch in batches:
+			if batch is None:
+				ids = None
+				break
+
+			ids.update(batch)
+
+		if ids is not None:
+			ids = None if 0 in ids else frozenset(ids)
 
 		if remote:
 			o.services.Cache.invalidate(ids)
