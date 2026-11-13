@@ -54,7 +54,7 @@ class Sync(o.Service):
 	# Coalesce local or remote invalidations; do not republish incoming events.
 	# ----------------------------------------------------------------------
 	def _deliver(self, batches, remote=False):
-		full = any(batch is None or None in batch for batch in batches)
+		full = any(batch is None or 0 in batch for batch in batches)
 		ids  = None if full else frozenset(id for batch in batches for id in batch)
 
 		if remote:
