@@ -95,12 +95,12 @@ reads    = []
 callback = sync.subscribe(on_change)     # Broad scope before first read
 
 try:
-    with o.services.Tracker.track_reads(reads):
-        value = o.V.counter['count']
+	with o.services.Tracker.track_reads(reads):
+		value = o.V.counter['count']
 
-    sync.subscribe(set(reads), callback)  # Watch the actual owners
+	sync.subscribe(set(reads), callback)  # Watch the actual owners
 finally:
-    sync.unsubscribe(callback)
+	sync.unsubscribe(callback)
 ~~~
 
 This assumes `o.V.counter` and `on_change` already exist. It only
