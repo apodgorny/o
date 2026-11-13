@@ -162,7 +162,7 @@ class TestSync(o.Tester):
 			sync.subscribe(frozenset({55}), filtered.put)
 			sync.subscribe(set(), empty_ids.put)
 			sync.register_change(802, 99)
-			sync.register_change(802, None)
+			sync.register_change(802, 0)
 			sync.register_change_commit(802)
 
 			for result in (global_q, filtered, empty_ids):
