@@ -1,15 +1,15 @@
 # ==============================================================================
 # SYNC SERVICE
 # ==============================================================================
-# Deliver local ontology invalidations asynchronously. Keep candidate changes
-# until commit or rollback, with periodic fallback for missing confirmations.
+# Keep transaction bookkeeping in the producer and notification delivery in a
+# separate worker. Handoff uses SimpleQueue; the worker sleeps when idle.
 # ==============================================================================
 
 import logging
 import threading
 
-from collections import defaultdict, deque
-from time        import monotonic
+from queue import Empty, SimpleQueue
+from time  import monotonic
 
 import o
 
@@ -20,29 +20,21 @@ class Sync(o.Service):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Start one worker for commits and transaction fallback deadlines.
-	# The caller holds the condition lock.
+	# Drain the queue at its current size. New arrivals wait for the next
+	# cycle so that the producer can always make progress.
 	# ----------------------------------------------------------------------
-	def _start_worker(self):
-		if self._worker is None:
-			worker = threading.Thread(
-				target = self._run,
-				name   = 'o-sync',
-				daemon = True,
-			)
-			worker.start()
-			self._worker = worker
+	def _drain(self, queue):
+		items = []
 
-	# Schedule a new fallback, identifying its generation separately from
-	# LMDB's transaction ID, which may be reused after a rollback.
-	# The caller holds the condition lock.
-	# ----------------------------------------------------------------------
-	def _schedule(self, txn, deadline):
-		self._generation += 1
-		self._scheduled[txn] = self._generation
-		self._deadlines.append((deadline, self._generation, txn))
+		for index in range(queue.qsize()):
+			try:
+				items.append(queue.get_nowait())
+			except Empty:
+				break
 
-	# Notify subscribers without blocking the write transaction.
+		return items
+
+	# Notify subscribers after coalescing all available committed batches.
 	# ----------------------------------------------------------------------
 	def _update(self, ids):
 		with self._condition:
@@ -54,39 +46,57 @@ class Sync(o.Service):
 			except Exception:
 				logging.exception('O Sync subscriber failed')
 
-	# Wake for confirmed changes or speculative fallback deadlines.
-	# Deduplication and subscriber callbacks run outside the writer's lock.
+	# Sleep without a deadline when idle; otherwise poll for committed
+	# batches and fallback candidates with minimal producer interference.
 	# ----------------------------------------------------------------------
 	def _run(self):
-		running = True
+		pending       = []
+		last_activity = monotonic()
 
-		while running:
-			batches = ()
+		while not self._stopped.is_set():
+			# Recheck the queues after declaring sleep, so a simultaneous
+			# commit can always wake the worker.
+			# ----------------------------------------------------------
+			if (
+				monotonic() - last_activity >= self.idle_delay
+				and not pending and self._registered.empty()
+				and self._ready.empty()
+			):
+				self._wake.clear()
+				self._sleeping = True
 
-			with self._condition:
-				now = monotonic()
+				if not pending and self._registered.empty() and self._ready.empty():
+					self._wake.wait()
 
-				while self._deadlines and self._deadlines[0][0] <= now:
-					_deadline, generation, txn = self._deadlines.popleft()
+				self._sleeping = False
+				self._wake.clear()
+			else:
+				self._wake.wait(self.batch_delay)
+				self._wake.clear()
 
-					if self._scheduled.get(txn) == generation:
-						self._ready.append(tuple(self.changes[txn]))
-						self._schedule(txn, now + self.fallback_delay)
+			# The worker owns the list of pending fallback records. Records
+			# are uniquely allocated, so reused LMDB txn IDs cannot collide.
+			# ----------------------------------------------------------
+			for record in self._drain(self._registered):
+				if record[2]:
+					pending.append(record)
 
-				if self._ready:
-					batches = tuple(self._ready)
-					self._ready.clear()
-				elif self._closed:
-					running = False
-				else:
-					timeout = None
+			batches = self._drain(self._ready)
+			now     = monotonic()
+			active  = []
 
-					if self._deadlines:
-						timeout = max(0.0, self._deadlines[0][0] - monotonic())
+			for record in pending:
+				if record[2]:
+					if now >= record[0]:
+						batches.append(tuple(record[1]))
+						record[0] = now + self.fallback_delay
 
-					self._condition.wait(timeout)
+					active.append(record)
+
+			pending = active
 
 			if batches:
+				last_activity = now
 				ids = set()
 
 				for batch in batches:
@@ -94,30 +104,55 @@ class Sync(o.Service):
 
 				self._update(frozenset({0}) if 0 in ids else frozenset(ids))
 
+		# A close requested after commit must still deliver queued changes.
+		# ------------------------------------------------------------------
+		batches = self._drain(self._ready)
+
+		if batches:
+			ids = set()
+
+			for batch in batches:
+				ids.update(batch)
+
+			self._update(frozenset({0}) if 0 in ids else frozenset(ids))
+
 	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Initialize independently for each ontology; default fallback is 1 second.
+	# Create one worker per ontology. Default delivery poll is 1 ms,
+	# fallback is 1 second, and the worker sleeps after 20 ms of quiet.
 	# ----------------------------------------------------------------------
-	def initialize(self, fallback_delay=1.0):
-		if fallback_delay <= 0:
-			raise ValueError('fallback_delay must be positive')
+	def initialize(self, batch_delay=0.001, fallback_delay=1.0, idle_delay=0.02):
+		if batch_delay <= 0 or fallback_delay <= 0 or idle_delay <= 0:
+			raise ValueError('Sync delays must be positive')
 
+		self.batch_delay    = batch_delay
 		self.fallback_delay = fallback_delay
+		self.idle_delay     = idle_delay
 
-		self.changes        = defaultdict(list)
-		self._deadlines     = deque()
-		self._scheduled     = {}
-		self._generation    = 0
-		self._ready         = deque()
-		self._subscribers   = set()
-		self._condition     = threading.Condition()
-		self._worker        = None
-		self._closed        = False
+		# The producer exclusively owns changes; the worker receives
+		# independently allocated records and completed ID lists.
+		# --------------------------------------------------------------
+		self.changes      = {}
+		self._registered  = SimpleQueue()
+		self._ready       = SimpleQueue()
+		self._wake        = threading.Event()
+		self._stopped     = threading.Event()
+		self._condition   = threading.Condition()
+		self._subscribers = set()
+		self._sleeping    = False
+		self._closed      = False
 
-	# Register a subscriber; callbacks receive immutable sets of owner IDs
-	# on the worker thread. Return the callback as its subscription token.
+		self._worker = threading.Thread(
+			target = self._run,
+			name   = 'o-sync',
+			daemon = True,
+		)
+		self._worker.start()
+
+	# Subscribe before taking the initial read snapshot. Callback receives
+	# a frozenset of changed owner IDs; zero means full invalidation.
 	# ----------------------------------------------------------------------
 	def subscribe(self, callback):
 		if not callable(callback):
@@ -131,65 +166,63 @@ class Sync(o.Service):
 
 		return callback
 
-	# Remove a subscriber without disturbing pending changes.
+	# Stop notifications to the given callback.
 	# ----------------------------------------------------------------------
 	def unsubscribe(self, callback):
 		with self._condition:
 			self._subscribers.discard(callback)
 
-	# Record a candidate owner ID; LMDB supplies txn once per write batch.
+	# Append an ID without acquiring the worker's lock. Each LMDB write
+	# transaction has one producer and a private record.
 	# ----------------------------------------------------------------------
 	def on_change(self, txn, id):
-		with self._condition:
-			if self._closed:
-				raise RuntimeError('Sync is closed')
+		if self._closed:
+			raise RuntimeError('Sync is closed')
 
-			first = txn not in self.changes
-			self.changes[txn].append(id)
+		record = self.changes.get(txn)
 
-			if first:
-				self._schedule(txn, monotonic() + self.fallback_delay)
-				self._start_worker()
-				self._condition.notify()
+		if record is None:
+			record = [monotonic() + self.fallback_delay, [id], True]
+			self.changes[txn] = record
+			self._registered.put(record)
+		else:
+			record[1].append(id)
 
-	# Publish committed changes immediately; keep any earlier fallback as
-	# a harmless duplicate rather than risking a missed late write.
+		if self._sleeping:
+			self._wake.set()
+
+	# Transfer a committed record to the worker without waiting for it.
 	# ----------------------------------------------------------------------
 	def on_changed(self, txn):
-		with self._condition:
-			if self._closed:
-				raise RuntimeError('Sync is closed')
+		if self._closed:
+			raise RuntimeError('Sync is closed')
 
-			ids = self.changes.pop(txn, None)
-			self._scheduled.pop(txn, None)
+		record = self.changes.pop(txn, None)
 
-			if ids:
-				self._ready.append(ids)
-				self._start_worker()
-				self._condition.notify()
+		if record is not None:
+			record[2] = False
+			self._ready.put(record[1])
 
-	# Cancel candidate changes on rollback; an already-delivered speculative
-	# invalidation is harmless.
+			if self._sleeping:
+				self._wake.set()
+
+	# Drop a rolled-back candidate. A fallback already delivered is allowed.
 	# ----------------------------------------------------------------------
 	def on_aborted(self, txn):
-		with self._condition:
-			self.changes.pop(txn, None)
-			self._scheduled.pop(txn, None)
-			self._condition.notify()
+		record = self.changes.pop(txn, None)
 
-	# Deliver queued commits and stop the worker without waiting for timers.
+		if record is not None:
+			record[2] = False
+
+	# Flush confirmed notifications and terminate cleanly.
 	# ----------------------------------------------------------------------
 	def close(self):
-		with self._condition:
-			self._closed = True
-			self.changes.clear()
-			self._deadlines.clear()
-			self._scheduled.clear()
-			self._condition.notify_all()
-			worker = self._worker
+		self._closed = True
+		self._stopped.set()
+		self._wake.set()
 
-		if worker is not None and worker is not threading.current_thread():
-			worker.join()
+		if self._worker is not threading.current_thread():
+			self._worker.join()
 
 		with self._condition:
 			self._subscribers.clear()

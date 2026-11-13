@@ -5,6 +5,7 @@
 # ==============================================================================
 
 import threading
+import time
 
 from concurrent.futures import ThreadPoolExecutor
 from queue              import Empty, Queue
@@ -65,7 +66,7 @@ class TestSync(o.Tester):
 			sync.subscribe(results.put)
 			sync.on_change(10, 19)
 			assert results.get(timeout=2) == frozenset({19})
-			assert sync.changes[10] == [19]
+			assert sync.changes[10][1] == [19]
 
 			sync.on_change(10, 23)
 			sync.on_changed(10)
@@ -269,6 +270,53 @@ class TestSync(o.Tester):
 		finally:
 			memory.sync = sync
 			cls._restore_runtime(state)
+
+	# Wake a dormant worker and deliver the first committed change.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_wake_after_idle(cls):
+		sync    = cls._sync()
+		results = Queue()
+
+		try:
+			sync.subscribe(results.put)
+			deadline = time.monotonic() + 2
+
+			while not sync._sleeping and time.monotonic() < deadline:
+				time.sleep(0.002)
+
+			assert sync._sleeping
+			sync.on_change(70, 71)
+			sync.on_changed(70)
+
+			assert results.get(timeout=2) == frozenset({71})
+		finally:
+			sync.close()
+
+	# A burst of confirmations must not lose IDs while the worker coalesces.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_burst_delivery(cls):
+		sync    = cls._sync()
+		results = []
+
+		try:
+			sync.subscribe(results.append)
+
+			for txn in range(1000):
+				sync.on_change(txn, txn + 1)
+				sync.on_changed(txn)
+
+			sync.close()
+
+			ids = set()
+
+			for batch in results:
+				ids.update(batch)
+
+			assert ids == set(range(1, 1001))
+		finally:
+			sync.close()
 
 	# Close waits for queued commits but refuses future writes.
 	# ----------------------------------------------------------------------
