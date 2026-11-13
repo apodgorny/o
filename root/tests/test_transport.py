@@ -43,9 +43,9 @@ class TestTransport(o.Tester):
 		connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 		connection.settimeout(2.0)
 		connection.connect(o.services.Transport.socket_path)
-		connection.sendall(json.dumps(['join', path]).encode('utf-8') + b'\n')
+		connection.sendall(json.dumps(path).encode('utf-8') + b'\n')
 
-		assert cls._frame(connection) == ['ready', path]
+		assert cls._frame(connection) is True
 		return connection
 
 	# ======================================================================
@@ -64,7 +64,7 @@ class TestTransport(o.Tester):
 			o.services.Sync.register_change(7800001, 780002)
 			o.services.Sync.register_change_commit(7800001)
 
-			assert cls._frame(peer) == ['invalidate', path, [780001, 780002]]
+			assert cls._frame(peer) == [780001, 780002]
 		finally:
 			peer.close()
 
@@ -84,7 +84,7 @@ class TestTransport(o.Tester):
 
 		try:
 			cache[owner_id] = entity
-			peer.sendall(json.dumps(['change', path, [owner_id]]).encode('utf-8') + b'\n')
+			peer.sendall(json.dumps([owner_id]).encode('utf-8') + b'\n')
 
 			assert received.get(timeout=2) == frozenset({owner_id})
 			assert changed == [owner_id]
@@ -109,6 +109,34 @@ class TestTransport(o.Tester):
 
 			peer.close()
 
+	# None invalidates every subscription and every local O cache.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_full_invalidation(cls):
+		path     = o.services.Transport.path
+		peer     = cls._peer(path)
+		received = queue.Queue()
+		changed  = []
+		owner_id = 780006
+		cache    = o.services.Cache.entities
+		original = cache.get(owner_id)
+		cache[owner_id] = SimpleNamespace(__invalidate__=lambda: changed.append(owner_id))
+		callback = o.services.Sync.subscribe({owner_id}, received.put)
+
+		try:
+			peer.sendall(b'null\n')
+			assert received.get(timeout=2) is None
+			assert changed == [owner_id]
+		finally:
+			o.services.Sync.unsubscribe(callback)
+
+			if original is None:
+				cache.pop(owner_id, None)
+			else:
+				cache[owner_id] = original
+
+			peer.close()
+
 	# An unrelated ontology must never receive another ontology's changes.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -120,7 +148,7 @@ class TestTransport(o.Tester):
 		callback = o.services.Sync.subscribe({780004}, received.put)
 
 		try:
-			peer.sendall(json.dumps(['change', other, [780004]]).encode('utf-8') + b'\n')
+			peer.sendall(json.dumps([780004]).encode('utf-8') + b'\n')
 
 			try:
 				notification = received.get(timeout=0.15)
