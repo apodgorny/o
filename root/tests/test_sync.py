@@ -343,6 +343,284 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
+
+	# Concurrent writers must deliver every committed owner ID exactly once
+	# or in a coalesced batch, without leaking aborted transaction records.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_many_concurrent_commits(cls):
+		sync     = cls._sync()
+		received = []
+		barrier  = threading.Barrier(6)
+
+		def write(worker):
+			barrier.wait(timeout=5)
+
+			for index in range(40):
+				id  = worker * 1000 + index + 1
+				txn = worker * 1000 + index
+				sync.on_change(txn, id)
+				sync.on_changed(txn)
+
+		try:
+			sync.subscribe(received.append)
+
+			with ThreadPoolExecutor(max_workers=6) as pool:
+				list(pool.map(write, range(6)))
+
+			sync.close()
+
+			observed = set()
+
+			for batch in received:
+				assert isinstance(batch, frozenset)
+				observed.update(batch)
+
+			expected = {
+				worker * 1000 + index + 1
+				for worker in range(6)
+				for index in range(40)
+			}
+			assert observed == expected
+			assert sync.changes == {}
+			assert not sync._worker.is_alive()
+		finally:
+			sync.close()
+
+	# Repeated fallback includes newly changed IDs while keeping the
+	# transaction open, and a later commit publishes its complete state.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_multiple_fallbacks_before_commit(cls):
+		sync    = cls._sync(0.04)
+		results = Queue()
+
+		try:
+			sync.subscribe(results.put)
+			sync.on_change(301, 81)
+			assert results.get(timeout=2) == frozenset({81})
+
+			sync.on_change(301, 82)
+			assert results.get(timeout=2) == frozenset({81, 82})
+
+			sync.on_changed(301)
+			assert results.get(timeout=2) == frozenset({81, 82})
+			assert sync.changes == {}
+		finally:
+			sync.close()
+
+	# Aborting after one speculative notification prevents subsequent
+	# fallback delivery from the abandoned transaction.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_abort_after_fallback(cls):
+		sync    = cls._sync(0.04)
+		results = Queue()
+
+		try:
+			sync.subscribe(results.put)
+			sync.on_change(302, 91)
+			assert results.get(timeout=2) == frozenset({91})
+
+			sync.on_aborted(302)
+			assert sync.changes == {}
+
+			try:
+				unexpected = results.get(timeout=0.12)
+			except Empty:
+				unexpected = None
+
+			assert unexpected is None
+		finally:
+			sync.close()
+
+	# An LMDB ID reused after speculative invalidation must not revive
+	# the previous transaction or publish its old owner IDs.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_reuse_after_speculative_fallback(cls):
+		sync    = cls._sync(0.04)
+		results = Queue()
+
+		try:
+			sync.subscribe(results.put)
+			sync.on_change(303, 101)
+			assert results.get(timeout=2) == frozenset({101})
+			sync.on_aborted(303)
+
+			sync.on_change(303, 102)
+			sync.on_changed(303)
+			assert results.get(timeout=2) == frozenset({102})
+
+			try:
+				unexpected = results.get(timeout=0.12)
+			except Empty:
+				unexpected = None
+
+			assert unexpected is None
+		finally:
+			sync.close()
+
+	# Callbacks may change subscriptions during delivery without deadlock.
+	# Only subscribers registered for the next dispatch receive it.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_subscriber_reentrancy(cls):
+		sync    = cls._sync()
+		first   = Queue()
+		second  = Queue()
+
+		def change_subscriptions(ids):
+			sync.unsubscribe(change_subscriptions)
+			sync.subscribe(second.put)
+			first.put(ids)
+
+		try:
+			sync.subscribe(change_subscriptions)
+			sync.on_change(304, 111)
+			sync.on_changed(304)
+			assert first.get(timeout=2) == frozenset({111})
+
+			sync.on_change(305, 112)
+			sync.on_changed(305)
+			assert second.get(timeout=2) == frozenset({112})
+
+			try:
+				unexpected = first.get(timeout=0.1)
+			except Empty:
+				unexpected = None
+
+			assert unexpected is None
+		finally:
+			sync.close()
+
+	# A blocked subscriber must not hold the writer's transaction path.
+	# Confirmations queued during a callback must arrive after it resumes.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_slow_subscriber_does_not_block_writes(cls):
+		sync     = cls._sync()
+		entered  = threading.Event()
+		release  = threading.Event()
+		received = []
+
+		def callback(ids):
+			entered.set()
+			assert release.wait(timeout=5)
+			received.append(ids)
+
+		def write():
+			for txn in range(400, 600):
+				sync.on_change(txn, txn + 1000)
+				sync.on_changed(txn)
+
+		try:
+			sync.subscribe(callback)
+			sync.on_change(399, 1399)
+			sync.on_changed(399)
+			assert entered.wait(timeout=2)
+
+			with ThreadPoolExecutor(max_workers=1) as pool:
+				result = pool.submit(write)
+				result.result(timeout=3)
+
+			assert not release.is_set()
+			release.set()
+			sync.close()
+
+			observed = set()
+
+			for batch in received:
+				observed.update(batch)
+
+			assert observed == set(range(1399, 1600))
+		finally:
+			release.set()
+			sync.close()
+
+	# Close delivers already committed changes but discards candidates
+	# belonging to transactions that never committed.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_close_with_uncommitted_transaction(cls):
+		sync     = cls._sync()
+		received = []
+
+		try:
+			sync.subscribe(received.append)
+			sync.on_change(601, 1601)
+			sync.on_changed(601)
+			sync.on_change(602, 1602)
+			sync.close()
+
+			observed = set()
+
+			for batch in received:
+				observed.update(batch)
+
+			assert observed == {1601}
+			assert not sync._worker.is_alive()
+		finally:
+			sync.close()
+
+	# A subscriber is allowed to close its own Sync worker, without
+	# joining the current thread or leaving future writes enabled.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_close_from_subscriber(cls):
+		sync     = cls._sync()
+		received = Queue()
+
+		def callback(ids):
+			sync.close()
+			received.put(ids)
+
+		try:
+			sync.subscribe(callback)
+			sync.on_change(603, 1603)
+			sync.on_changed(603)
+			assert received.get(timeout=2) == frozenset({1603})
+
+			sync.close()
+			assert not sync._worker.is_alive()
+
+			failed = False
+
+			try:
+				sync.on_change(604, 1604)
+			except RuntimeError:
+				failed = True
+
+			assert failed
+		finally:
+			sync.close()
+
+	# A real LMDB commit must be visible to subscribers running on the
+	# worker thread, after the writer has finished the transaction.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_real_memory_commit_visibility(cls):
+		state   = cls._patch_runtime()
+		memory  = o.services.Memory
+		original = memory.sync
+		sync    = cls._sync()
+		results = Queue()
+		key     = 'sync/correctness/committed'
+
+		def observe(ids):
+			results.put((ids, memory.get(key)))
+
+		try:
+			memory.sync = sync
+			sync.subscribe(observe)
+			memory.set(key, 42, 1701)
+
+			assert results.get(timeout=2) == (frozenset({1701}), 42)
+		finally:
+			memory.sync = original
+			sync.close()
+			cls._restore_runtime(state)
+
 	# Close waits for queued commits but refuses future writes.
 	# ----------------------------------------------------------------------
 	@classmethod
