@@ -80,10 +80,10 @@ assert not any(thread.name == 'o-transport' for thread in threading.enumerate())
 '''
 		result = subprocess.run(
 			[sys.executable, '-c', script],
-			cwd     = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))),
+			cwd            = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))),
 			capture_output = True,
-			text    = True,
-			timeout = 15,
+			text           = True,
+			timeout        = 15,
 		)
 		assert result.returncode == 0, result.stderr
 
