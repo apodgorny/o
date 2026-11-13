@@ -38,13 +38,18 @@ class Sync(o.Service):
 	# ----------------------------------------------------------------------
 	def _update(self, ids):
 		with self._lock:
-			callbacks = tuple(self._subscribers)
+			callbacks = tuple(self._subscribers.items())
 
-		for callback in callbacks:
-			try:
-				callback(ids)
-			except Exception:
-				logging.exception('O Sync subscriber failed')
+		full = 0 in ids
+
+		for callback, watched in callbacks:
+			matching = ids if full or watched is None else ids & watched
+
+			if matching:
+				try:
+					callback(matching)
+				except Exception:
+					logging.exception('O Sync subscriber failed')
 
 	# Deliver all IDs from the available batches exactly once per cycle.
 	# ----------------------------------------------------------------------
@@ -139,7 +144,7 @@ class Sync(o.Service):
 		self._ready       = SimpleQueue()
 		self._wake        = threading.Event()
 		self._lock        = threading.Lock()
-		self._subscribers = set()
+		self._subscribers = {}
 		self._sleeping    = False
 		self._closed      = False
 
@@ -150,18 +155,29 @@ class Sync(o.Service):
 		)
 		self._worker.start()
 
-	# Subscribe before taking the initial read snapshot. Callback receives
-	# a frozenset of changed owner IDs; zero means full invalidation.
+	# Subscribe globally or to a set of owner IDs, before the initial read.
+	# Callback receives matching frozenset IDs; zero invalidates every scope.
+	# Accept subscribe(callback) or subscribe({id, ...}, callback).
 	# ----------------------------------------------------------------------
-	def subscribe(self, callback):
+	def subscribe(self, ids=None, callback=None):
+		if callback is None:
+			callback = ids
+			ids      = None
+
 		if not callable(callback):
 			raise TypeError('Sync subscriber must be callable')
+
+		if ids is not None:
+			if not isinstance(ids, (set, frozenset)):
+				raise TypeError('Sync subscription IDs must be a set')
+
+			ids = frozenset(ids)
 
 		with self._lock:
 			if self._closed:
 				raise RuntimeError('Sync is closed')
 
-			self._subscribers.add(callback)
+			self._subscribers[callback] = ids
 
 		return callback
 
@@ -169,12 +185,12 @@ class Sync(o.Service):
 	# ----------------------------------------------------------------------
 	def unsubscribe(self, callback):
 		with self._lock:
-			self._subscribers.discard(callback)
+			self._subscribers.pop(callback, None)
 
 	# Append an ID without acquiring the worker's lock. Each LMDB write
 	# transaction has one producer and a private record.
 	# ----------------------------------------------------------------------
-	def on_change(self, txn, id):
+	def register_change(self, txn, id):
 		if self._closed:
 			raise RuntimeError('Sync is closed')
 
@@ -192,7 +208,7 @@ class Sync(o.Service):
 
 	# Transfer a committed record to the worker without waiting for it.
 	# ----------------------------------------------------------------------
-	def on_changed(self, txn):
+	def register_change_commit(self, txn):
 		if self._closed:
 			raise RuntimeError('Sync is closed')
 
@@ -204,7 +220,7 @@ class Sync(o.Service):
 
 	# Drop a rolled-back candidate. A fallback already delivered is allowed.
 	# ----------------------------------------------------------------------
-	def on_aborted(self, txn):
+	def register_abort(self, txn):
 		record = self.changes.pop(txn, None)
 
 		if record is not None:

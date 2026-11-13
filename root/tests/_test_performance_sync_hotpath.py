@@ -30,7 +30,7 @@ class TestPerformanceSyncHotpath(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _single_queue_mode(cls, sync):
-		def on_change(txn, id):
+		def register_change(txn, id):
 			if sync._closed:
 				raise RuntimeError('Sync is closed')
 
@@ -46,7 +46,7 @@ class TestPerformanceSyncHotpath(o.Tester):
 			else:
 				record[1].append(id)
 
-		def on_changed(txn):
+		def register_change_commit(txn):
 			if sync._closed:
 				raise RuntimeError('Sync is closed')
 
@@ -55,7 +55,7 @@ class TestPerformanceSyncHotpath(o.Tester):
 			if record is not None:
 				record[2] = 2
 
-		def on_aborted(txn):
+		def register_abort(txn):
 			record = sync.changes.pop(txn, None)
 
 			if record is not None:
@@ -115,9 +115,9 @@ class TestPerformanceSyncHotpath(o.Tester):
 			if batches:
 				sync._deliver(batches)
 
-		sync.on_change  = on_change
-		sync.on_changed = on_changed
-		sync.on_aborted = on_aborted
+		sync.register_change  = register_change
+		sync.register_change_commit = register_change_commit
+		sync.register_abort = register_abort
 		sync._run       = run
 
 	# Install a test-only producer variation on the real Sync singleton.
@@ -128,9 +128,9 @@ class TestPerformanceSyncHotpath(o.Tester):
 
 		if mode == 'stub':
 			memory.sync = SimpleNamespace(
-				on_change  = lambda txn, id: None,
-				on_changed = lambda txn: None,
-				on_aborted = lambda txn: None,
+				register_change  = lambda txn, id: None,
+				register_change_commit = lambda txn: None,
+				register_abort = lambda txn: None,
 			)
 		else:
 			if mode == 'single_queue':
@@ -142,7 +142,7 @@ class TestPerformanceSyncHotpath(o.Tester):
 				# Remove first-change queue insertion as a diagnostic, or
 				# move deadline calculation to the consumer as a candidate.
 				# ----------------------------------------------------------
-				def on_change(txn, id):
+				def register_change(txn, id):
 					if sync._closed:
 						raise RuntimeError('Sync is closed')
 
@@ -160,7 +160,7 @@ class TestPerformanceSyncHotpath(o.Tester):
 					else:
 						record[1].append(id)
 
-				sync.on_change = on_change
+				sync.register_change = register_change
 
 				if mode == 'worker_deadline':
 					original_drain = sync._drain
@@ -180,7 +180,7 @@ class TestPerformanceSyncHotpath(o.Tester):
 				# Assess the cost of the closed-state check alone. This
 				# diagnostic must NOT be shipped as production behavior.
 				# ----------------------------------------------------------
-				def on_change(txn, id):
+				def register_change(txn, id):
 					record = sync.changes.get(txn)
 
 					if record is None:
@@ -193,15 +193,15 @@ class TestPerformanceSyncHotpath(o.Tester):
 					else:
 						record[1].append(id)
 
-				def on_changed(txn):
+				def register_change_commit(txn):
 					record = sync.changes.pop(txn, None)
 
 					if record is not None:
 						record[2] = False
 						sync._ready.put(record[1])
 
-				sync.on_change  = on_change
-				sync.on_changed = on_changed
+				sync.register_change  = register_change
+				sync.register_change_commit = register_change_commit
 
 	# Measure one producer stage or an entire LMDB write with fresh storage.
 	# ----------------------------------------------------------------------
@@ -237,10 +237,10 @@ class TestPerformanceSyncHotpath(o.Tester):
 					started = time.perf_counter_ns()
 
 					for index in range(size):
-						memory.sync.on_change(-1, 12345)
+						memory.sync.register_change(-1, 12345)
 
 					elapsed = time.perf_counter_ns() - started
-					memory.sync.on_aborted(-1)
+					memory.sync.register_abort(-1)
 
 				elif scenario == 'validate':
 					from queue import Empty, Queue
@@ -249,14 +249,14 @@ class TestPerformanceSyncHotpath(o.Tester):
 					sync.subscribe(events.put)
 					sync.fallback_delay = 0.03
 
-					sync.on_change(-9, 11)
+					sync.register_change(-9, 11)
 					assert events.get(timeout=2) == frozenset({11})
-					sync.on_change(-9, 12)
-					sync.on_changed(-9)
+					sync.register_change(-9, 12)
+					sync.register_change_commit(-9)
 					assert events.get(timeout=2) == frozenset({11, 12})
 
-					sync.on_change(-8, 21)
-					sync.on_aborted(-8)
+					sync.register_change(-8, 21)
+					sync.register_abort(-8)
 					time.sleep(0.06)
 
 					try:
@@ -277,9 +277,9 @@ class TestPerformanceSyncHotpath(o.Tester):
 
 					for index in range(80):
 						txn = -index - 1
-						memory.sync.on_change(txn, index + 1)
+						memory.sync.register_change(txn, index + 1)
 						started = time.perf_counter_ns()
-						memory.sync.on_changed(txn)
+						memory.sync.register_change_commit(txn)
 						finished = events.get(timeout=2)
 						samples.append((finished - started) / 1000)
 
@@ -290,8 +290,8 @@ class TestPerformanceSyncHotpath(o.Tester):
 
 					for index in range(size):
 						txn = -index - 1
-						memory.sync.on_change(txn, 12345)
-						memory.sync.on_changed(txn)
+						memory.sync.register_change(txn, 12345)
+						memory.sync.register_change_commit(txn)
 
 					elapsed = time.perf_counter_ns() - started
 

@@ -86,11 +86,11 @@ class MemoryBatch:
 				self.ctx      = None
 
 				if not committed and sync is not None:
-					sync.on_aborted(txn_id)
+					sync.register_abort(txn_id)
 
 			if committed and sync is not None:
 				try:
-					sync.on_changed(txn_id)
+					sync.register_change_commit(txn_id)
 				except Exception as error:
 					raise RuntimeError('LMDB committed; Sync confirmation failed') from error
 
@@ -119,12 +119,12 @@ class MemoryBatch:
 		self.notified = True
 
 		if type(owner_id) is int:
-			self.sync.on_change(self.txn_id, owner_id)
+			self.sync.register_change(self.txn_id, owner_id)
 		else:
 			sent = False
 
 			for id in owner_id:
-				self.sync.on_change(self.txn_id, id)
+				self.sync.register_change(self.txn_id, id)
 				sent = True
 
 			if not sent:

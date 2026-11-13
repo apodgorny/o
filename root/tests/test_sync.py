@@ -44,10 +44,10 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(lambda ids: results.put((ids, threading.get_ident())))
-			sync.on_change(7, 11)
-			sync.on_change(7, 11)
-			sync.on_change(7, 22)
-			sync.on_changed(7)
+			sync.register_change(7, 11)
+			sync.register_change(7, 11)
+			sync.register_change(7, 22)
+			sync.register_change_commit(7)
 
 			ids, thread_id = results.get(timeout=2)
 			assert ids == frozenset({11, 22})
@@ -65,12 +65,12 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(results.put)
-			sync.on_change(10, 19)
+			sync.register_change(10, 19)
 			assert results.get(timeout=2) == frozenset({19})
 			assert sync.changes[10][1] == [19]
 
-			sync.on_change(10, 23)
-			sync.on_changed(10)
+			sync.register_change(10, 23)
+			sync.register_change_commit(10)
 			assert results.get(timeout=2) == frozenset({19, 23})
 			assert sync.changes == {}
 		finally:
@@ -85,8 +85,8 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(results.put)
-			sync.on_change(20, 17)
-			sync.on_aborted(20)
+			sync.register_change(20, 17)
+			sync.register_abort(20)
 			assert sync.changes == {}
 
 			try:
@@ -107,10 +107,178 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(results.put)
-			sync.on_change(30, 100)
-			sync.on_change(30, 0)
-			sync.on_changed(30)
+			sync.register_change(30, 100)
+			sync.register_change(30, 0)
+			sync.register_change_commit(30)
 			assert results.get(timeout=2) == frozenset({0})
+		finally:
+			sync.close()
+
+
+	# Global subscribers see every owner; selective subscribers see only
+	# the intersection with the changed IDs, never unrelated owners.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_filtered_and_global_subscriptions(cls):
+		sync     = cls._sync()
+		global_q = Queue()
+		filter_q = Queue()
+		other_q  = Queue()
+
+		try:
+			sync.subscribe(global_q.put)
+			sync.subscribe({11, 33}, filter_q.put)
+			sync.subscribe({77}, other_q.put)
+
+			for id in (11, 22, 33):
+				sync.register_change(801, id)
+
+			sync.register_change_commit(801)
+
+			assert global_q.get(timeout=2) == frozenset({11, 22, 33})
+			assert filter_q.get(timeout=2) == frozenset({11, 33})
+
+			try:
+				unexpected = other_q.get(timeout=0.05)
+			except Empty:
+				unexpected = None
+
+			assert unexpected is None
+		finally:
+			sync.close()
+
+	# ID zero requests full invalidation even for empty subscriptions.
+	# Every subscriber receives only the zero sentinel in that case.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_filtered_full_invalidation(cls):
+		sync      = cls._sync()
+		global_q  = Queue()
+		filtered  = Queue()
+		empty_ids = Queue()
+
+		try:
+			sync.subscribe(global_q.put)
+			sync.subscribe(frozenset({55}), filtered.put)
+			sync.subscribe(set(), empty_ids.put)
+			sync.register_change(802, 99)
+			sync.register_change(802, 0)
+			sync.register_change_commit(802)
+
+			for result in (global_q, filtered, empty_ids):
+				assert result.get(timeout=2) == frozenset({0})
+		finally:
+			sync.close()
+
+	# Capture the watched set at subscribe time. A second registration of
+	# the same callback replaces its scope rather than duplicating delivery.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_filtered_subscription_snapshot_and_replace(cls):
+		sync    = cls._sync()
+		global_q = Queue()
+		results = Queue()
+		watched = {101}
+
+		try:
+			sync.subscribe(global_q.put)
+			callback = sync.subscribe(watched, results.put)
+			assert callback == results.put
+
+			watched.clear()
+			watched.add(102)
+			sync.register_change(803, 101)
+			sync.register_change_commit(803)
+
+			assert global_q.get(timeout=2) == frozenset({101})
+			assert results.get(timeout=2) == frozenset({101})
+
+			sync.subscribe({102}, callback)
+			sync.register_change(804, 101)
+			sync.register_change(804, 102)
+			sync.register_change_commit(804)
+
+			assert global_q.get(timeout=2) == frozenset({101, 102})
+			assert results.get(timeout=2) == frozenset({102})
+
+			try:
+				unexpected = results.get(timeout=0.05)
+			except Empty:
+				unexpected = None
+
+			assert unexpected is None
+		finally:
+			sync.close()
+
+	# Unsubscribing a selective callback stops further notifications,
+	# while a global callback continues to receive the same changes.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_filtered_unsubscribe(cls):
+		sync     = cls._sync()
+		global_q = Queue()
+		filtered = Queue()
+
+		try:
+			sync.subscribe(global_q.put)
+			callback = sync.subscribe({121}, filtered.put)
+			sync.unsubscribe(callback)
+
+			sync.register_change(805, 121)
+			sync.register_change_commit(805)
+			assert global_q.get(timeout=2) == frozenset({121})
+
+			try:
+				unexpected = filtered.get(timeout=0.05)
+			except Empty:
+				unexpected = None
+
+			assert unexpected is None
+		finally:
+			sync.close()
+
+	# Both speculative fallback and final confirmation must honor the
+	# same selective subscription without losing a newly registered ID.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_filtered_fallback_then_commit(cls):
+		sync    = cls._sync(0.04)
+		results = Queue()
+
+		try:
+			sync.subscribe({131, 133}, results.put)
+			sync.register_change(806, 131)
+			sync.register_change(806, 132)
+			assert results.get(timeout=2) == frozenset({131})
+
+			sync.register_change(806, 133)
+			sync.register_change_commit(806)
+			assert results.get(timeout=2) == frozenset({131, 133})
+		finally:
+			sync.close()
+
+	# Preserve the callback keyword and reject unsupported ID collections.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_subscription_arguments(cls):
+		sync    = cls._sync()
+		results = Queue()
+
+		try:
+			callback = sync.subscribe(callback=results.put)
+			assert callback == results.put
+			sync.register_change(807, 141)
+			sync.register_change_commit(807)
+			assert results.get(timeout=2) == frozenset({141})
+
+			failed = False
+
+			try:
+				sync.subscribe([141], results.put)
+			except TypeError:
+				failed = True
+
+			assert failed
 		finally:
 			sync.close()
 
@@ -124,8 +292,8 @@ class TestSync(o.Tester):
 
 		try:
 			sync.unsubscribe(callback)
-			sync.on_change(40, 81)
-			sync.on_changed(40)
+			sync.register_change(40, 81)
+			sync.register_change_commit(40)
 
 			try:
 				unexpected = results.get(timeout=0.1)
@@ -145,10 +313,10 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(results.put)
-			sync.on_change(45, 1)
-			sync.on_aborted(45)
-			sync.on_change(45, 2)
-			sync.on_changed(45)
+			sync.register_change(45, 1)
+			sync.register_abort(45)
+			sync.register_change(45, 2)
+			sync.register_change_commit(45)
 			assert results.get(timeout=2) == frozenset({2})
 		finally:
 			sync.close()
@@ -170,8 +338,8 @@ class TestSync(o.Tester):
 				sync.subscribe(results.put)
 
 				for txn, id in ((50, 41), (51, 42)):
-					sync.on_change(txn, id)
-					sync.on_changed(txn)
+					sync.register_change(txn, id)
+					sync.register_change_commit(txn)
 					assert results.get(timeout=2) == frozenset({id})
 
 				sync.close()
@@ -189,9 +357,9 @@ class TestSync(o.Tester):
 
 		def write(txn):
 			for id in range(txn * 10, txn * 10 + 5):
-				sync.on_change(txn, id)
+				sync.register_change(txn, id)
 
-			sync.on_changed(txn)
+			sync.register_change_commit(txn)
 
 		try:
 			sync.subscribe(results.put)
@@ -226,9 +394,9 @@ class TestSync(o.Tester):
 		events = []
 
 		memory.sync = SimpleNamespace(
-			on_change  = lambda txn, id: events.append(('change', txn, id)),
-			on_changed = lambda txn: events.append(('commit', txn)),
-			on_aborted = lambda txn: events.append(('abort', txn)),
+			register_change  = lambda txn, id: events.append(('change', txn, id)),
+			register_change_commit = lambda txn: events.append(('commit', txn)),
+			register_abort = lambda txn: events.append(('abort', txn)),
 		)
 
 		try:
@@ -260,9 +428,9 @@ class TestSync(o.Tester):
 		events = []
 
 		memory.sync = SimpleNamespace(
-			on_change  = lambda txn, id: events.append(('change', txn, id)),
-			on_changed = lambda txn: events.append(('commit', txn)),
-			on_aborted = lambda txn: events.append(('abort', txn)),
+			register_change  = lambda txn, id: events.append(('change', txn, id)),
+			register_change_commit = lambda txn: events.append(('commit', txn)),
+			register_abort = lambda txn: events.append(('abort', txn)),
 		)
 
 		try:
@@ -295,8 +463,8 @@ class TestSync(o.Tester):
 				time.sleep(0.002)
 
 			assert sync._sleeping
-			sync.on_change(70, 71)
-			sync.on_changed(70)
+			sync.register_change(70, 71)
+			sync.register_change_commit(70)
 
 			assert results.get(timeout=2) == frozenset({71})
 		finally:
@@ -321,8 +489,8 @@ class TestSync(o.Tester):
 					time.sleep(0.0005)
 
 				assert sync._sleeping
-				sync.on_change(txn, txn + 1)
-				sync.on_changed(txn)
+				sync.register_change(txn, txn + 1)
+				sync.register_change_commit(txn)
 				assert results.get(timeout=2) == frozenset({txn + 1})
 		finally:
 			sync.close()
@@ -338,8 +506,8 @@ class TestSync(o.Tester):
 			sync.subscribe(results.append)
 
 			for txn in range(1000):
-				sync.on_change(txn, txn + 1)
-				sync.on_changed(txn)
+				sync.register_change(txn, txn + 1)
+				sync.register_change_commit(txn)
 
 			sync.close()
 
@@ -368,8 +536,8 @@ class TestSync(o.Tester):
 			for index in range(40):
 				id  = worker * 1000 + index + 1
 				txn = worker * 1000 + index
-				sync.on_change(txn, id)
-				sync.on_changed(txn)
+				sync.register_change(txn, id)
+				sync.register_change_commit(txn)
 
 		try:
 			sync.subscribe(received.append)
@@ -406,13 +574,13 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(results.put)
-			sync.on_change(301, 81)
+			sync.register_change(301, 81)
 			assert results.get(timeout=2) == frozenset({81})
 
-			sync.on_change(301, 82)
+			sync.register_change(301, 82)
 			assert results.get(timeout=2) == frozenset({81, 82})
 
-			sync.on_changed(301)
+			sync.register_change_commit(301)
 			assert results.get(timeout=2) == frozenset({81, 82})
 			assert sync.changes == {}
 		finally:
@@ -428,10 +596,10 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(results.put)
-			sync.on_change(302, 91)
+			sync.register_change(302, 91)
 			assert results.get(timeout=2) == frozenset({91})
 
-			sync.on_aborted(302)
+			sync.register_abort(302)
 			assert sync.changes == {}
 
 			try:
@@ -453,12 +621,12 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(results.put)
-			sync.on_change(303, 101)
+			sync.register_change(303, 101)
 			assert results.get(timeout=2) == frozenset({101})
-			sync.on_aborted(303)
+			sync.register_abort(303)
 
-			sync.on_change(303, 102)
-			sync.on_changed(303)
+			sync.register_change(303, 102)
+			sync.register_change_commit(303)
 			assert results.get(timeout=2) == frozenset({102})
 
 			try:
@@ -486,12 +654,12 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(change_subscriptions)
-			sync.on_change(304, 111)
-			sync.on_changed(304)
+			sync.register_change(304, 111)
+			sync.register_change_commit(304)
 			assert first.get(timeout=2) == frozenset({111})
 
-			sync.on_change(305, 112)
-			sync.on_changed(305)
+			sync.register_change(305, 112)
+			sync.register_change_commit(305)
 			assert second.get(timeout=2) == frozenset({112})
 
 			try:
@@ -520,13 +688,13 @@ class TestSync(o.Tester):
 
 		def write():
 			for txn in range(400, 600):
-				sync.on_change(txn, txn + 1000)
-				sync.on_changed(txn)
+				sync.register_change(txn, txn + 1000)
+				sync.register_change_commit(txn)
 
 		try:
 			sync.subscribe(callback)
-			sync.on_change(399, 1399)
-			sync.on_changed(399)
+			sync.register_change(399, 1399)
+			sync.register_change_commit(399)
 			assert entered.wait(timeout=2)
 
 			with ThreadPoolExecutor(max_workers=1) as pool:
@@ -557,9 +725,9 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(received.append)
-			sync.on_change(601, 1601)
-			sync.on_changed(601)
-			sync.on_change(602, 1602)
+			sync.register_change(601, 1601)
+			sync.register_change_commit(601)
+			sync.register_change(602, 1602)
 			sync.close()
 
 			observed = set()
@@ -586,8 +754,8 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(callback)
-			sync.on_change(603, 1603)
-			sync.on_changed(603)
+			sync.register_change(603, 1603)
+			sync.register_change_commit(603)
 			assert received.get(timeout=2) == frozenset({1603})
 
 			sync.close()
@@ -596,7 +764,7 @@ class TestSync(o.Tester):
 			failed = False
 
 			try:
-				sync.on_change(604, 1604)
+				sync.register_change(604, 1604)
 			except RuntimeError:
 				failed = True
 
@@ -638,8 +806,8 @@ class TestSync(o.Tester):
 		results = []
 
 		sync.subscribe(results.append)
-		sync.on_change(60, 61)
-		sync.on_changed(60)
+		sync.register_change(60, 61)
+		sync.register_change_commit(60)
 		sync.close()
 
 		assert results == [frozenset({61})]
@@ -647,7 +815,7 @@ class TestSync(o.Tester):
 		failed = False
 
 		try:
-			sync.on_change(61, 62)
+			sync.register_change(61, 62)
 		except RuntimeError:
 			failed = True
 

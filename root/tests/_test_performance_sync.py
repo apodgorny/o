@@ -117,7 +117,7 @@ class TestPerformanceSync(o.Tester):
 		sync._closed    = False
 		sync._sleeping  = False
 
-		def on_change(txn, id):
+		def register_change(txn, id):
 			state = sync._pending.get(txn)
 
 			if state is None:
@@ -129,7 +129,7 @@ class TestPerformanceSync(o.Tester):
 			if hybrid and sync._sleeping:
 				sync._wake.set()
 
-		def on_changed(txn):
+		def register_change_commit(txn):
 			state = sync._pending.pop(txn, None)
 
 			if state is not None:
@@ -138,7 +138,7 @@ class TestPerformanceSync(o.Tester):
 				if event_mode or (hybrid and sync._sleeping):
 					sync._wake.set()
 
-		def on_aborted(txn):
+		def register_abort(txn):
 			sync._pending.pop(txn, None)
 
 		def close():
@@ -148,9 +148,9 @@ class TestPerformanceSync(o.Tester):
 			sync._subscribers.clear()
 			sync._closed = True
 
-		sync.on_change  = on_change
-		sync.on_changed = on_changed
-		sync.on_aborted = on_aborted
+		sync.register_change  = register_change
+		sync.register_change_commit = register_change_commit
+		sync.register_abort = register_abort
 		sync.close      = close
 
 		sync._queue_worker = threading.Thread(
@@ -257,7 +257,7 @@ class TestPerformanceSync(o.Tester):
 		sync._sleeping   = False
 		sync._closed     = False
 
-		def on_change(txn, id):
+		def register_change(txn, id):
 			state = sync._pending.get(txn)
 
 			if state is None:
@@ -270,7 +270,7 @@ class TestPerformanceSync(o.Tester):
 			if sync._sleeping:
 				sync._wake.set()
 
-		def on_changed(txn):
+		def register_change_commit(txn):
 			state = sync._pending.pop(txn, None)
 
 			if state is not None:
@@ -280,7 +280,7 @@ class TestPerformanceSync(o.Tester):
 				if sync._sleeping:
 					sync._wake.set()
 
-		def on_aborted(txn):
+		def register_abort(txn):
 			state = sync._pending.pop(txn, None)
 
 			if state is not None:
@@ -293,9 +293,9 @@ class TestPerformanceSync(o.Tester):
 			sync._subscribers.clear()
 			sync._closed = True
 
-		sync.on_change  = on_change
-		sync.on_changed = on_changed
-		sync.on_aborted = on_aborted
+		sync.register_change  = register_change
+		sync.register_change_commit = register_change_commit
+		sync.register_abort = register_abort
 		sync.close      = close
 
 		sync._queue_worker = threading.Thread(
@@ -315,9 +315,9 @@ class TestPerformanceSync(o.Tester):
 
 		if mode == 'stub':
 			memory.sync = SimpleNamespace(
-				on_change  = lambda txn, id: None,
-				on_changed = lambda txn: None,
-				on_aborted = lambda txn: None,
+				register_change  = lambda txn, id: None,
+				register_change_commit = lambda txn: None,
+				register_abort = lambda txn: None,
 			)
 		else:
 			type(sync).initialize(sync, fallback_delay=1.0)
@@ -374,9 +374,9 @@ class TestPerformanceSync(o.Tester):
 
 					for index in range(size):
 						txn = -(index + 1)
-						memory.sync.on_change(txn, index + 1)
+						memory.sync.register_change(txn, index + 1)
 						started = time.perf_counter_ns()
-						memory.sync.on_changed(txn)
+						memory.sync.register_change_commit(txn)
 
 						if mode != 'stub':
 							finished = observed.get(timeout=3)
@@ -387,8 +387,8 @@ class TestPerformanceSync(o.Tester):
 				elif scenario == 'idle':
 					if mode != 'stub':
 						# Prime the worker, then allow the initial event to drain.
-						memory.sync.on_change(-1, 1)
-						memory.sync.on_changed(-1)
+						memory.sync.register_change(-1, 1)
+						memory.sync.register_change_commit(-1)
 						time.sleep(0.05)
 
 					started = time.process_time_ns()
