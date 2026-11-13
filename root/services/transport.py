@@ -196,13 +196,13 @@ class Transport(o.Service):
 	# Start an automatic daemon connection for a canonical LMDB path.
 	# ----------------------------------------------------------------------
 	def initialize(self, path, sync):
-		self.path         = os.path.realpath(path)
-		self.sync         = sync
-		self.socket_path  = self._socket_path()
-		self._connection  = None
-		self._lock        = threading.Lock()
-		self._connected   = threading.Event()
-		self._closed      = threading.Event()
+		self.path            = os.path.realpath(path)
+		self.sync            = sync
+		self.socket_path     = self._socket_path()
+		self._connection     = None
+		self._lock           = threading.Lock()
+		self._connected      = threading.Event()
+		self._closed         = threading.Event()
 		self._ever_connected = False
 
 		buffer = self._connect()
