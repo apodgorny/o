@@ -50,7 +50,7 @@ class TestWriteTracking(o.Tester):
 			assert schema.owner_id == class_id
 			assert fields.owner_id == class_id
 			assert instance.owner_id == item_id
-			assert memory.zone('garbage/items/').owner_id is None
+			assert memory.zone('garbage/items/').owner_id == 0
 
 			events = cls._observe()
 			schema.set('field.type', 123)
@@ -312,9 +312,9 @@ class TestWriteTracking(o.Tester):
 		try:
 			memory = o.services.Memory
 			events = cls._observe()
-			memory.set('custom/unknown', 1, None)
+			memory.set('custom/unknown', 1, 0)
 
-			assert events == [('register_change', None), ('register_change_commit', None)]
+			assert events == [('register_change', 0), ('register_change_commit', None)]
 
 			events.clear()
 			memory.set('ids/12345', 'o.T.Unknown', 12345)
