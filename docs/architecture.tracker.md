@@ -1,10 +1,10 @@
-# Architecture: Read Tracker and storage write invalidation
+# Architecture: Tracker — persistent read dependencies
 
-**Status:** Implemented read dependency tracking and local IPL notification hooks; cross-process transport and browser synchronization are separate concerns.
+**Status:** Implemented read dependency tracking. The separate Sync service owns write-owner notification delivery; browser transport belongs to consumers.
 **Sources:** `root/services/tracker.py`, `root/services/memory.py`, `root/t.py`, `root/t_meta.py`, and the O persistence services.
 **Tests:** `root/tests/test_tracker.py`, `root/tests/test_tracker_public_api.py`, `root/tests/test_tracker_transparency.py`, `root/tests/test_write_tracking.py`.
 **Benchmarks:** `root/tests/_test_performance_tracker.py`, `root/tests/_test_performance_write_tracking.py`.
-**Companion contract:** [Public O API](architecture.public_api.md).
+**Companions:** [Public O API](architecture.public_api.md), [Sync delivery](architecture.sync.md).
 
 ## Mandatory application API boundary
 
@@ -17,7 +17,7 @@ The public API is necessary but does not guarantee complete reactive coverage fo
 ## Two independent responsibilities
 
 - **Tracker:** observes reads of persistent O objects while a caller-owned scope is active, recording owner entity IDs in caller-supplied lists.
-- **Memory/Zone:** persist O changes and report explicitly identified affected owner IDs to optional IPL callbacks. Write notification no longer depends on Tracker scopes or Python method interception.
+- **Memory/Zone/Sync:** persist O changes and asynchronously deliver explicit affected-owner IDs, independently of Tracker scopes or Python read interception.
 
 The intended coherence relationship is **read dependency ID ↔ committed write owner ID** within the same ontology world. Neither a read trace nor a pre-commit notification is, by itself, a complete subscription system.
 
@@ -95,35 +95,26 @@ Original class attributes/descriptors are restored when the last read scope clos
 
 Direct atom conversion, some schema reflection, custom rendering callbacks and administrative authorization remain outside fully verified read coverage. Observing a method does not prove that every dependency of an arbitrary computation is recorded.
 
-## Storage write notification contract (internal)
+## Storage write notifications belong to Sync
 
-The persistence layer reports changed owners explicitly rather than deriving identity from LMDB key names.
+The O persistence layer reports **explicit changed-owner IDs** to its
+`Sync` service. Tracker does not determine those IDs, intercept writes,
+manage subscribers, or interpret transaction state. Owner ID `0` requests
+a full invalidation when ownership is unknown.
 
-```python
-# Internal infrastructure only; not the application object API.
-memory.set(key, value, owner_id)
-memory.unset(key, owner_id)
-memory.unset_all(prefix, owner_id)
+The former `Memory.ipl`, `pre_invalidate()` and `invalidate()` callback
+API **no longer exists**. Current infrastructure calls
+`Sync.register_change(txn_id, owner_id)` inside the write transaction;
+`Sync.register_change_commit(txn_id)` follows a successful outer commit,
+while `Sync.register_abort(txn_id)` handles rollback. Only code inside O
+persistence may use these producer methods; application services use the
+public persistent object API.
 
-zone.set(key, value, owner_id=None)
-zone.unset(key, owner_id=None)
-zone.clear(owner_id=None)
-```
-
-`owner_id` is expected to be an integer or an iterable of affected integer IDs. An ID of `0` denotes **full invalidation** when ownership is unknown. The caller is responsible for providing correct affected IDs; do not rely on exhaustive input-type validation by `Memory`. A `Zone` supplies its own cached owner ID unless an explicit override is supplied.
-
-When `Memory.ipl` is connected, each successful write that affects data calls `ipl.pre_invalidate(owner_id)` **within the active write transaction**, for every supplied owner ID and without deduplicating repeated IDs. A deletion of a missing key, or deletion of a prefix with no matching keys, emits no notification. The outermost successful transaction emits **one** `ipl.invalidate()` confirmation if there were notifications, after LMDB has committed. Read-only and empty write scopes do not confirm a change.
-
-### Failure and transaction semantics
-
-- A pre-invalidation announces a **candidate change**, not committed state. On rollback no commit confirmation is issued; the IPL implementation must handle an unconfirmed pre-invalidation without treating it as a committed update.
-- Nested writes share the outer transaction. A failed nested write or nested scope poisons the outer transaction even if the inner exception is caught. The outer write then aborts rather than committing a partially failed operation.
-- A failed transaction rolls back LMDB. Zones registered through write operations in the batch have their caches cleared on rollback; application code must still use the public object API.
-- `Memory` reads within its active write transaction observe pending writes and deletions. This is an internal persistence contract, not a promise of concurrent multi-thread transaction isolation.
-- If `ipl.pre_invalidate(...)` raises, the write transaction aborts. If `ipl.invalidate()` raises **after** LMDB has committed, O raises `RuntimeError('LMDB committed; IPL confirmation failed')` chained to the transport failure. The committed write is preserved.
-- With `Memory.ipl = None`, storage writes proceed without IPL callbacks. This PR defines local callback integration, **not** a tested inter-process notification transport or revision protocol.
-
-For writes to O fields, collections, class/instance membership and metadata, the owning O implementation and its services supply the affected IDs. The storage layer does not introspect application objects or reverse-engineer owners from arbitrary key strings.
+Ordinary Sync notifications arrive after commit, but long-running writes
+may emit a **speculative fallback invalidation** before commit; a later
+rollback cannot retract it. A callback is therefore **not** evidence of
+commit. See [architecture.sync.md](architecture.sync.md) for worker
+lifecycle, filtered subscriptions, batching, fallback and error behavior.
 
 ## Event and correctness semantics
 
@@ -135,7 +126,11 @@ For a previously calculated result with read IDs `R`, and a later **committed** 
 result_before != result_after  =>  R_before ∩ W_committed != ∅
 ```
 
-A consumer that receives a valid intersecting invalidation can re-run its computation under read tracking and replace its dependency set. Subscription management, batching, identity/revision ordering, WebSocket delivery and recovery are **not implemented by Tracker**.
+A consumer receiving an intersecting invalidation can re-run its
+computation under read tracking and **replace** its dependency set.
+Speculative Sync notifications must be treated as hints to refetch, not
+committed values. Tracker does not own subscriptions, result caching,
+network delivery, reconnection or replay.
 
 ## Forked ontologies
 
@@ -175,12 +170,12 @@ py root/tests/_test_performance_tracker.py
 py root/tests/_test_performance_tracker.py --mode r --workload expanded
 py root/tests/_test_performance_tracker.py --size 1000 --rounds 2
 
-# Storage writes with no IPL callbacks, then local no-op IPL callbacks.
-py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3
-py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --ipl stub
+# Compare native Sync with a no-op producer stub.
+py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --sync native
+py root/tests/_test_performance_write_tracking.py --size 1500 --rounds 3 --sync stub
 ```
 
-The benchmarking harness retains `none` and `r` as **measurement labels** (or `all` to compare both), not as arguments to `Tracker.track_reads(ids)`. There is no `w`/`rw` tracker mode. Measurements use fresh storage per run. The IPL stub measures Python callback overhead, **not network IPC latency**. Do not assume a performance result carries across workloads or Python versions.
+The Tracker benchmark retains `none` and `r` as **measurement labels** (or `all`), not arguments to `Tracker.track_reads(ids)`; there are no `w`/`rw` tracker modes. The write benchmark compares local Sync behavior with a stub; it does **not** measure MCP or network latency. Measurements use fresh storage.
 
 ## Verification and limits
 
@@ -191,7 +186,8 @@ py root/test.py
 - `test_tracker.py`: cached and uncached field/collection reads, nested scopes, field publication, exception cleanup, async/thread observation and fork isolation.
 - `test_tracker_public_api.py`: structural reads, conversion, enumeration, lifecycle dependency intersections and existence checks.
 - `test_tracker_transparency.py`: normal behavior with no tracking versus `'r'`, including failure and schema/mutation cases.
-- `test_write_tracking.py`: explicit owner IDs, local IPL order, one confirmation per outer commit, missing deletes, nested failures, rollback, zone write-cache rollback, and post-commit callback failure.
+- `test_write_tracking.py`: explicit owner IDs, Sync calls, outer commit confirmation, rollback, nested failures, Zone-cache recovery and post-commit confirmation errors.
+- `test_sync.py`: filtered subscriptions, full invalidation, speculative fallback, concurrency, worker behavior and shutdown.
 
 The functional read-tracking contract is observation without changing the ordinary public object's results, mutations or persistence. Temporary instrumentation does change class introspection (`__dict__`, descriptor identity, `inspect.getattr_static(...)`) while active, so that introspection is outside the transparency claim.
 
