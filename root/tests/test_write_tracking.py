@@ -312,9 +312,9 @@ class TestWriteTracking(o.Tester):
 		try:
 			memory = o.services.Memory
 			events = cls._observe()
-			memory.set('custom/unknown', 1, 0)
+			memory.set('custom/unknown', 1, None)
 
-			assert events == [('register_change', 0), ('register_change_commit', None)]
+			assert events == [('register_change', None), ('register_change_commit', None)]
 
 			events.clear()
 			memory.set('ids/12345', 'o.T.Unknown', 12345)
