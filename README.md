@@ -1002,6 +1002,13 @@ This can reduce mapping layers and make divergence between runtime state and per
 
 > **Built for AI. Remarkably natural for the Web.**
 
+For the current reactive integration contract, see
+[Tracker read dependencies](docs/architecture.tracker.md),
+[Sync change delivery](docs/architecture.sync.md) and the
+[application-facing object API](docs/architecture.public_api.md).
+O supplies identities and invalidations; the consuming Web layer owns
+MCP subscriptions, cache management and browser updates.
+
 ---
 
 # Performance

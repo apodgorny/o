@@ -108,7 +108,7 @@ O resolves names against the source world for the current fork, rather than usin
        default/        alice/         bob/
 ```
 
-Each started world has its own resolved O types (including `T`), service singletons (including `Memory`), entity/cache state, `TREE_MODE`, and on-disk LMDB data. A type created in one world does not thereby appear in another. A write to Alice's LMDB is not a write to Bob's.
+Each started world has its own resolved O types (including `T`), service singletons (including `Memory` and notification `Sync`), entity/cache state, `TREE_MODE`, and on-disk LMDB data. A type created in one world does not thereby appear in another. A write to Alice's LMDB is not a write to Bob's.
 
 Almasi provides runtime isolation through forked module globals, type identities, and service instances. O supplies its own startup and storage mapping. No source files, persistent records, or existing ontology graphs are copied by `fork()`.
 
@@ -118,7 +118,7 @@ Almasi provides runtime isolation through forked module globals, type identities
 
 1. Verify that the active Almasi application exists; derive and assign the fork's absolute `DATA_DIR`.
 2. Validate `tree_mode` (only `True`, `False`, or `None`).
-3. Initialize `Cache` on first start, and initialize or reopen `Memory` using the selected LMDB path and `sync` policy.
+3. Initialize `Cache` and the in-process `Sync` worker on first start, then initialize or reopen `Memory` using the selected LMDB path and durability `sync` policy. The existing Sync worker is retained on Memory reopen.
 4. Read the stored `system/tree_mode` value and establish `o.TREE_MODE`; reject a conflicting explicit mode.
 5. Initialize `Id`, `Route`, and `Garbage`.
 6. Load ontology component classes; leave test-runner helper files outside fork startup.
@@ -144,7 +144,7 @@ The persisted mode is stored in that world's LMDB under `system/tree_mode`.
 - `sync=True` asks LMDB to synchronize commits for stronger crash durability.
 - Each world can choose its policy when opened. Changing policy requires an explicit reopening, not a casual mutation of a config value.
 
-LMDB's transaction guarantees remain distinct from whether a recent committed write survives a power failure.
+LMDB's transaction guarantees remain distinct from whether a recent committed write survives a power failure. This `sync` parameter is unrelated to [O Sync change notifications](architecture.sync.md), which remain enabled.
 
 ## 8. Why `memory.py` did not change
 

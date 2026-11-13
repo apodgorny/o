@@ -1,7 +1,7 @@
 # Architecture: Tracker — persistent read dependencies
 
 **Status:** Implemented read dependency tracking. The separate Sync service owns write-owner notification delivery; browser transport belongs to consumers.
-**Sources:** `root/services/tracker.py`, `root/services/memory.py`, `root/t.py`, `root/t_meta.py`, and the O persistence services.
+**Sources:** `root/services/tracker.py`, `root/services/memory.py`, `root/services/sync.py`, `root/t.py`, `root/t_meta.py`, and the O persistence services.
 **Tests:** `root/tests/test_tracker.py`, `root/tests/test_tracker_public_api.py`, `root/tests/test_tracker_transparency.py`, `root/tests/test_write_tracking.py`.
 **Benchmarks:** `root/tests/_test_performance_tracker.py`, `root/tests/_test_performance_write_tracking.py`.
 **Companions:** [Public O API](architecture.public_api.md), [Sync delivery](architecture.sync.md).
