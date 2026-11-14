@@ -96,7 +96,7 @@ class Transport(o.Service):
 
 	# Receive invalidations without retransmitting them.
 	# ----------------------------------------------------------------------
-	def _run(self, connection, reader):
+	def _run_worker_loop(self, connection, reader):
 		while not self._closed.is_set():
 			if connection is None:
 				try:
@@ -154,7 +154,7 @@ class Transport(o.Service):
 		o.services.Cache.invalidate_all()
 		self.sync.subscribe(self.send, local_only=True)
 		self._worker = threading.Thread(
-			target = self._run,
+			target = self._run_worker_loop,
 			args   = (connection, reader),
 			name   = 'o-transport',
 			daemon = True,
