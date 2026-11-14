@@ -56,6 +56,40 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
+	# Both IPC and local commits reach subscribers through the same worker.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_single_local_remote_dispatch(cls):
+		sync         = cls._sync()
+		published    = Queue()
+		subscribed   = Queue()
+		transport    = SimpleNamespace(
+			path  = o.services.Memory.path,
+			send  = lambda ids: published.put((ids, threading.get_ident())),
+			close = lambda: None,
+		)
+
+		try:
+			sync.attach_transport(transport)
+			sync.subscribe(lambda ids: subscribed.put((ids, threading.get_ident())))
+
+			sync.register_change(90001, 90002)
+			sync.register_change_commit(90001)
+
+			local_out, local_thread = published.get(timeout=2)
+			local_in, subscriber_thread = subscribed.get(timeout=2)
+			assert local_out == local_in == frozenset({90002})
+			assert local_thread == subscriber_thread != threading.get_ident()
+
+			sync.receive(frozenset({90003}))
+
+			remote_in, remote_thread = subscribed.get(timeout=2)
+			assert remote_in == frozenset({90003})
+			assert remote_thread == local_thread
+			assert published.empty()
+		finally:
+			sync.close()
+
 	# An open transaction gets a fallback, then a final commit notification.
 	# ----------------------------------------------------------------------
 	@classmethod
