@@ -170,6 +170,12 @@ class Sync(o.Service):
 
 		return callback
 
+	# Stop notifications to the given callback.
+	# ----------------------------------------------------------------------
+	def unsubscribe(self, callback):
+		with self._lock:
+			self._subscribers.pop(callback, None)
+
 	# Queue changes immediately; only the worker coalesces and dispatches.
 	# ----------------------------------------------------------------------
 	def publish_change(self, ids, local=True):
@@ -189,12 +195,6 @@ class Sync(o.Service):
 
 		if self._sleeping:
 			self._wake.set()
-
-	# Stop notifications to the given callback.
-	# ----------------------------------------------------------------------
-	def unsubscribe(self, callback):
-		with self._lock:
-			self._subscribers.pop(callback, None)
 
 	# Collect owner IDs during writes without publishing speculative changes.
 	# ----------------------------------------------------------------------
