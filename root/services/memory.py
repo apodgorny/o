@@ -116,14 +116,8 @@ class MemoryBatch:
 		elif type(owner_id) is int:
 			if self.ids is not None:
 				self.ids.append(owner_id)
-		else:
-			ids = tuple(owner_id)
-
-			if not ids:
-				raise ValueError('owner_id iterable must contain at least one ID')
-
-			if self.ids is not None:
-				self.ids.extend(ids)
+		elif self.ids is not None:
+			self.ids.extend(owner_id)
 
 	# Store a value, aborting the transaction when a write or notification fails.
 	# ----------------------------------------------------------------------
