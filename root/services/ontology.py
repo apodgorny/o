@@ -117,4 +117,3 @@ class Ontology(o.Service):
 				path = o.services.Memory.path,
 				sync = o.services.Sync,
 			)
-			o.services.Sync.attach_transport(o.services.Transport)
