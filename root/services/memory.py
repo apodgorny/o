@@ -114,16 +114,13 @@ class MemoryBatch:
 		if owner_id is None:
 			self.ids = None
 		elif type(owner_id) is int:
-			if owner_id <= 0:
-				raise ValueError('owner_id must be positive')
-
 			if self.ids is not None:
 				self.ids.append(owner_id)
 		else:
 			ids = tuple(owner_id)
 
-			if not ids or any(type(id) is not int or id <= 0 for id in ids):
-				raise ValueError('owner_id iterable must contain positive IDs')
+			if not ids:
+				raise ValueError('owner_id iterable must contain at least one ID')
 
 			if self.ids is not None:
 				self.ids.extend(ids)
