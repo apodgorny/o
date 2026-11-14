@@ -52,6 +52,42 @@ class TestTransport(o.Tester):
 	# PUBLIC METHODS
 	# ======================================================================
 
+	# Enable IPC for these tests, then restore the default in-process mode.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def run(cls):
+		o.start(multiprocess=True)
+
+		try:
+			return super().run()
+		finally:
+			o.start(multiprocess=False)
+			assert o.services.Transport.send not in o.services.Sync._subscribers
+
+	# A normal O.start() never creates a transport client.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_opt_in_default(cls):
+		script = '''
+import threading
+import o
+
+type(o).__app__ = o
+o.start()
+
+assert not any(local_only for watched, local_only in o.services.Sync._subscribers.values())
+assert not any(thread.name == 'o-transport' for thread in threading.enumerate())
+'''
+		result = subprocess.run(
+			[sys.executable, '-c', script],
+			cwd            = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))),
+			capture_output = True,
+			text           = True,
+			timeout        = 15,
+		)
+		assert result.returncode == 0, result.stderr
+
+
 	# O Sync publishes locally committed owner IDs to another process.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -176,7 +212,7 @@ import sys
 import o
 
 type(o).__app__ = o
-o.start()
+o.start(multiprocess=True)
 
 key      = sys.argv[1]
 owner_id = int(sys.argv[2])
