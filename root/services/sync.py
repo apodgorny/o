@@ -19,20 +19,6 @@ class Sync(o.Service):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Drain the queue at its current size. New arrivals wait for the next
-	# cycle so that the producer can always make progress.
-	# ----------------------------------------------------------------------
-	def _drain(self, queue):
-		items = []
-
-		for index in range(queue.qsize()):
-			try:
-				items.append(queue.get_nowait())
-			except Empty:
-				break
-
-		return items
-
 	# One delivery point for local and external invalidations.
 	# ----------------------------------------------------------------------
 	def _update(self, ids, local=True):
@@ -56,24 +42,7 @@ class Sync(o.Service):
 				except Exception:
 					logging.exception('O Sync subscriber failed')
 
-	# Coalesce once, then dispatch local or remote invalidations.
-	# ----------------------------------------------------------------------
-	def _deliver(self, batches, local=True):
-		ids = set()
-
-		for batch in batches:
-			if batch is None:
-				ids = None
-				break
-
-			ids.update(batch)
-
-		if ids is not None:
-			ids = None if 0 in ids else frozenset(ids)
-
-		self._update(ids, local=local)
-
-	# Group queued committed changes by origin and deliver them in the worker.
+	# Deliver each queued change separately, in publication order.
 	# ----------------------------------------------------------------------
 	def _run(self):
 		last_activity = monotonic()
@@ -92,24 +61,15 @@ class Sync(o.Service):
 
 			self._wake.clear()
 
-			events = self._drain(self._queue)
+			while not self._queue.empty():
+				try:
+					ids, local = self._queue.get_nowait()
+				except Empty:
+					break
 
-			if events:
-				last_activity  = monotonic()
-				local_batches  = []
-				remote_batches = []
-
-				for ids, local in events:
-					if local:
-						local_batches.append(ids)
-					else:
-						remote_batches.append(ids)
-
-				if local_batches:
-					self._deliver(local_batches, local=True)
-
-				if remote_batches:
-					self._deliver(remote_batches, local=False)
+				last_activity = monotonic()
+				ids = None if ids is None or 0 in ids else frozenset(ids)
+				self._update(ids, local=local)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -174,7 +134,7 @@ class Sync(o.Service):
 		with self._lock:
 			self._subscribers.pop(callback, None)
 
-	# Queue changes immediately; only the worker coalesces and dispatches.
+	# Queue changes immediately; the worker dispatches each event.
 	# ----------------------------------------------------------------------
 	def publish_change(self, ids, local=True):
 		if self._closed:
