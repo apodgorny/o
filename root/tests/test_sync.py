@@ -158,19 +158,16 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# Unknown owner zero requires a full invalidation rather than partial IDs.
+	# None requests full invalidation for every subscriber.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_full_invalidation(cls):
-		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
-			pending.setdefault(30, []).append(100)
-			pending.setdefault(30, []).append(0)
-			sync.publish_change(pending.pop(30), local=True)
+			sync.publish_change(None, local=True)
 			assert results.get(timeout=2) is None
 		finally:
 			sync.close()
@@ -209,12 +206,10 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# ID zero requests full invalidation even for empty subscriptions.
-	# Every subscriber receives only the zero sentinel in that case.
+	# None invalidates all subscribers, including empty subscriptions.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_filtered_full_invalidation(cls):
-		pending = {}
 		sync      = cls._sync()
 		global_q  = Queue()
 		filtered  = Queue()
@@ -224,9 +219,7 @@ class TestSync(o.Tester):
 			sync.subscribe(global_q.put)
 			sync.subscribe(frozenset({55}), filtered.put)
 			sync.subscribe(set(), empty_ids.put)
-			pending.setdefault(802, []).append(99)
-			pending.setdefault(802, []).append(0)
-			sync.publish_change(pending.pop(802), local=True)
+			sync.publish_change(None, local=True)
 
 			for result in (global_q, filtered, empty_ids):
 				assert result.get(timeout=2) is None
