@@ -44,7 +44,7 @@ class Sync(o.Service):
 
 	# Deliver each queued change separately, in publication order.
 	# ----------------------------------------------------------------------
-	def _run(self):
+	def _run_worker_loop(self):
 		last_activity = monotonic()
 
 		while not self._closed or not self._queue.empty():
@@ -94,7 +94,7 @@ class Sync(o.Service):
 		self._closed      = False
 
 		self._worker = threading.Thread(
-			target = self._run,
+			target = self._run_worker_loop,
 			name   = 'o-sync',
 			daemon = True,
 		)
