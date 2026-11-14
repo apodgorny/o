@@ -37,7 +37,7 @@ class MemoryBatch:
 			self.ctx      = self.memory.env.begin(write=self.write)
 			self.tx       = self.ctx.__enter__()
 			self.sync     = self.memory.sync if self.write else None
-			self.ids      = [] if self.sync is not None else None
+			self.ids      = [] if self.write else None
 			self.failed   = False
 			self.zones    = None
 
@@ -83,7 +83,7 @@ class MemoryBatch:
 				self.ctx      = None
 
 
-			if committed and sync is not None and (ids is None or ids):
+			if committed and self.write and (ids is None or ids):
 				try:
 					sync.publish_change(ids, local=True)
 				except Exception as error:
@@ -125,8 +125,7 @@ class MemoryBatch:
 		try:
 			self.tx.put(self.memory._key(key), self.memory.to_bytes(value))
 
-			if self.sync is not None:
-				self._notify(owner_id)
+			self._notify(owner_id)
 		except Exception:
 			self.failed = True
 			raise
@@ -137,7 +136,7 @@ class MemoryBatch:
 		try:
 			deleted = self.tx.delete(self.memory._key(key))
 
-			if deleted and self.sync is not None:
+			if deleted:
 				self._notify(owner_id)
 		except Exception:
 			self.failed = True
@@ -151,7 +150,7 @@ class MemoryBatch:
 			cursor = self.tx.cursor()
 			ok     = cursor.set_range(prefix)
 
-			if ok and cursor.key().startswith(prefix) and self.sync is not None:
+			if ok and cursor.key().startswith(prefix):
 				self._notify(owner_id)
 
 			while ok:
