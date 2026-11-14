@@ -99,22 +99,21 @@ Direct atom conversion, some schema reflection, custom rendering callbacks and a
 
 The O persistence layer reports **explicit changed-owner IDs** to its
 `Sync` service. Tracker does not determine those IDs, intercept writes,
-manage subscribers, or interpret transaction state. Owner ID `0` requests
-a full invalidation when ownership is unknown.
+manage subscribers, or interpret transaction state. `None` requests a
+full invalidation when ownership is unknown; `0` is not a sentinel.
 
-The former `Memory.ipl`, `pre_invalidate()` and `invalidate()` callback
-API **no longer exists**. Current infrastructure calls
-`Sync.register_change(txn_id, owner_id)` inside the write transaction;
-`Sync.register_change_commit(txn_id)` follows a successful outer commit,
-while `Sync.register_abort(txn_id)` handles rollback. Only code inside O
-persistence may use these producer methods; application services use the
-public persistent object API.
+The former `Memory.ipl`, `pre_invalidate()`, speculative fallback, and
+transaction-ID-based Sync registration methods are no longer part of the
+implementation. `MemoryBatch` accumulates changed owner IDs during a write
+transaction and calls `Sync.publish_change(ids, local=True)` once after its
+outermost successful commit. Failed transactions discard notifications;
+nested writes share the outer transaction.
 
-Ordinary Sync notifications arrive after commit, but long-running writes
-may emit a **speculative fallback invalidation** before commit; a later
-rollback cannot retract it. A callback is therefore **not** evidence of
-commit. See [architecture.sync.md](architecture.sync.md) for worker
-lifecycle, filtered subscriptions, batching, fallback and error behavior.
+Ordinary Sync notifications are asynchronous but never speculative: they
+represent changes committed by the producer. They remain non-durable and
+can be lost if a process exits before its worker delivers them. See
+[architecture.sync.md](architecture.sync.md) for worker lifetime,
+filtered subscriptions and error behavior.
 
 ## Event and correctness semantics
 
@@ -128,9 +127,9 @@ result_before != result_after  =>  R_before ∩ W_committed != ∅
 
 A consumer receiving an intersecting invalidation can re-run its
 computation under read tracking and **replace** its dependency set.
-Speculative Sync notifications must be treated as hints to refetch, not
-committed values. Tracker does not own subscriptions, result caching,
-network delivery, reconnection or replay.
+Sync notifications signal invalidation rather than transporting values.
+Tracker does not own subscriptions, result caching, network delivery,
+reconnection or replay.
 
 ## Forked ontologies
 
@@ -187,7 +186,8 @@ py root/test.py
 - `test_tracker_public_api.py`: structural reads, conversion, enumeration, lifecycle dependency intersections and existence checks.
 - `test_tracker_transparency.py`: normal behavior with no tracking versus `'r'`, including failure and schema/mutation cases.
 - `test_write_tracking.py`: explicit owner IDs, Sync calls, outer commit confirmation, rollback, nested failures, Zone-cache recovery and post-commit confirmation errors.
-- `test_sync.py`: filtered subscriptions, full invalidation, speculative fallback, concurrency, worker behavior and shutdown.
+- `test_sync.py`: filtered subscriptions, full invalidation, commit visibility,
+  concurrency and worker delivery.
 
 The functional read-tracking contract is observation without changing the ordinary public object's results, mutations or persistence. Temporary instrumentation does change class introspection (`__dict__`, descriptor identity, `inspect.getattr_static(...)`) while active, so that introspection is outside the transparency claim.
 
