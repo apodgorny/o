@@ -156,33 +156,32 @@ read dependencies, or the result can remain stale.
 
 This is a necessary correctness condition, not a claim that all public transformations already satisfy it.
 
-`Tracker` records **reads only** and does not determine transaction
-success. `MemoryBatch` registers affected owners with `Sync` during the
-LMDB transaction, confirms once after a successful outermost commit or
-aborts on rollback. O initializes Sync with the world; the former
-`Memory.ipl` callback API no longer exists.
+ `Tracker` records **reads only** and does not determine transaction
+success. `MemoryBatch` collects affected owner IDs during LMDB write
+transactions, publishes them through `Sync.publish_change(ids, local=True)`
+only after a successful outermost commit, and discards them on rollback.
+O initializes Sync with its world; the former `Memory.ipl` callback API
+no longer exists.
 
-Infrastructure writes require an integer or nonempty iterable of affected
-owner IDs. `0` means full invalidation when ownership is unknown;
-`Zone` normally supplies its cached owner ID and `Memory` does not
-infer ownership by parsing LMDB keys. Deleting a missing key or an empty
-prefix does not notify. These methods are **internal**, not the public
-application object API.
+Infrastructure writes require an owner ID or an iterable of affected owner
+IDs. `None` means full invalidation when ownership is unknown; `0`
+is not a special invalidation value. `Zone` normally supplies its owner ID,
+and `Memory` does not infer ownership by parsing LMDB keys. Deleting a
+missing key or an empty prefix does not notify. These methods are
+**internal**, not the public application object API.
 
 Nested write scopes share one transaction; an inner failure poisons the
 outer transaction even if caught. Rollbacks restore tracked Zone caches
 and internal Memory reads during an open write see staged changes. If
-post-commit Sync confirmation fails, LMDB **has committed** and O raises
-`RuntimeError('LMDB committed; Sync confirmation failed')`.
+post-commit Sync publication fails, LMDB **has committed** and O raises
+`RuntimeError('LMDB committed; Sync publication failed')`.
 
-Sync normally delivers committed owner IDs, but a transaction left open
-past the fallback deadline may cause a **speculative invalidation** before
-commit, repeated or followed by rollback. A callback therefore signals
-"refetch", **not** "this transaction committed". Consumers must tolerate
-early/duplicate events, read actual committed state and replace tracked
-dependencies on recomputation. Sync's exact scheduling/filtering contract
-is in [architecture.sync.md](architecture.sync.md); networking, reconnect
-and revision handling remain responsibilities of the consumer.
+Sync delivers committed owner-ID invalidations asynchronously through
+its process-lifetime worker, without speculative pre-commit notifications.
+Consumers must refetch committed state and replace tracked dependencies
+on recomputation. Sync's exact scheduling/filtering contract is in
+[architecture.sync.md](architecture.sync.md); optional host-local IPC is
+described in [architecture.transport.md](architecture.transport.md).
 
 Coverage must be established **with tests**, including initially absent fields, empty collections/enumerations, nested references, class changes and tree-mode authorization. These gaps are recorded rather than silently represented as guarantees.
 
@@ -194,10 +193,10 @@ Relevant tests and benchmarks:
 - `root/tests/test_tracker_transparency.py`: public behavior with no read tracking versus `'r'`.
 - `root/tests/test_tracker_public_api.py`: traversal, empty enumerations, lifecycle dependency intersections and existence checks.
 - `root/tests/test_write_tracking.py`: explicit write owners, Sync producer callbacks, commit/rollback boundaries and write-cache recovery.
-- `root/tests/test_sync.py`: in-process delivery, filters, fallback, concurrency, commit visibility and shutdown.
+- `root/tests/test_sync.py`: in-process delivery, filters, concurrency and commit visibility.
 - `root/tests/_test_performance_tracker.py`: compare `none` with `r`, not removed `w`/`rw` modes.
 - `root/tests/_test_performance_write_tracking.py`: compare native Sync with a local producer stub (`--sync native` / `--sync stub`); network IPC is outside the benchmark.
 
 Tracker read interceptors remain **temporary**. Outside active read scopes original Python descriptors must be restored. Sync write notifications are independent of Tracker scopes. A new feature must be verified for both read dependencies and committed write-owner coverage before claiming reactive correctness.
 
-See [architecture.tracker.md](architecture.tracker.md) for read instrumentation and [architecture.sync.md](architecture.sync.md) for write notifications, transaction/fallback semantics and subscriber behavior.
+See [architecture.tracker.md](architecture.tracker.md) for read instrumentation and [architecture.sync.md](architecture.sync.md) for post-commit write notifications, worker lifetime and subscriber behavior.
