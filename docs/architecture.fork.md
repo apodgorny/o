@@ -126,7 +126,7 @@ Almasi provides runtime isolation through forked module globals, type identities
 
 On a subsequent explicit `start()` call, the Memory environment is reopened and loaded cache state is invalidated. Reopening is not an in-place switch of a live ontology's topology. Treat startup as a lifecycle boundary, not as an ordinary data operation.
 
-`multiprocess=False` is the default and leaves the Unix socket transport inactive. `multiprocess=True` enables the shared-host invalidation relay for the current ontology. Repeated `start()` calls can turn IPC on or off; the choice is per fork and independent of LMDB durability `sync`.
+`multiprocess=False` is the default and does not start the Unix socket transport. `multiprocess=True` enables the shared-host invalidation relay for the current ontology. Once started, Transport remains active until process exit: a later `start(multiprocess=False)` does not disable it. The choice to enable IPC is per fork and independent of LMDB durability `sync`.
 
 ## 7. Topology and durability are per world
 
