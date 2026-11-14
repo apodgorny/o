@@ -101,9 +101,7 @@ with tempfile.TemporaryDirectory(prefix='o_test_') as directory:
 		peer = cls._peer(path)
 
 		try:
-			o.services.Sync.register_change(7800001, 780001)
-			o.services.Sync.register_change(7800001, 780002)
-			o.services.Sync.publish_change(o.services.Sync.changes.pop(7800001), local=True)
+			o.services.Sync.publish_change([780001, 780002], local=True)
 
 			assert cls._frame(peer) == [780001, 780002]
 		finally:
