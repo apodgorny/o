@@ -162,9 +162,12 @@ class Transport(o.Service):
 		self._worker.start()
 		atexit.register(self.close)
 
-	# Send one owner-ID set, or None for full invalidation.
+	# Send only changes from the ontology registered with this relay.
 	# ----------------------------------------------------------------------
 	def send(self, ids):
+		if o.services.Memory.path != self.path:
+			return
+
 		if ids is None:
 			payload = None
 		elif isinstance(ids, (set, frozenset)) and ids and all(type(id) is int and id > 0 for id in ids):
