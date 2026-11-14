@@ -34,20 +34,21 @@ class Sync(o.Service):
 
 		return items
 
-	# Publish from the worker: remote refresh or local relay, then subscribers.
+	# One delivery point for local and external invalidations.
 	# ----------------------------------------------------------------------
 	def _update(self, ids, remote=False):
 		if remote:
 			o.services.Cache.invalidate(ids)
-		elif self._transport is not None and o.services.Memory.path == self._transport.path:
-			self._transport.send(ids)
 
 		with self._lock:
 			callbacks = tuple(self._subscribers.items())
 
 		full = ids is None
 
-		for callback, watched in callbacks:
+		for callback, (watched, local_only) in callbacks:
+			if remote and local_only:
+				continue
+
 			matching = ids if full or watched is None else ids & watched
 
 			if full or matching:
@@ -164,7 +165,6 @@ class Sync(o.Service):
 		self._registered  = SimpleQueue()
 		self._ready       = SimpleQueue()
 		self._remote      = SimpleQueue()
-		self._transport   = None
 		self._wake        = threading.Event()
 		self._lock        = threading.Lock()
 		self._subscribers = {}
@@ -178,17 +178,19 @@ class Sync(o.Service):
 		)
 		self._worker.start()
 
-	# Subscribe globally or to a set of owner IDs, before the initial read.
-	# Callback receives matching frozenset IDs, or None for a full refresh.
+	# Subscribe to all changes or only those originating in this process.
 	# Accept subscribe(callback) or subscribe({id, ...}, callback).
 	# ----------------------------------------------------------------------
-	def subscribe(self, ids=None, callback=None):
+	def subscribe(self, ids=None, callback=None, local_only=False):
 		if callback is None:
 			callback = ids
 			ids      = None
 
 		if not callable(callback):
 			raise TypeError('Sync subscriber must be callable')
+
+		if type(local_only) is not bool:
+			raise TypeError('local_only must be bool')
 
 		if ids is not None:
 			if not isinstance(ids, (set, frozenset)):
@@ -200,16 +202,11 @@ class Sync(o.Service):
 			if self._closed:
 				raise RuntimeError('Sync is closed')
 
-			self._subscribers[callback] = ids
+			self._subscribers[callback] = (ids, local_only)
 
 		return callback
 
-	# Connect a host-local relay without changing the subscriber API.
-	# ----------------------------------------------------------------------
-	def attach_transport(self, transport):
-		self._transport = transport
-
-	# Enqueue remote owner IDs, or None for full invalidation.
+	# Queue externally received invalidations; no new local transaction.
 	# ----------------------------------------------------------------------
 	def receive(self, ids):
 		if self._closed:
@@ -275,9 +272,6 @@ class Sync(o.Service):
 	# Flush confirmed notifications and terminate cleanly.
 	# ----------------------------------------------------------------------
 	def close(self):
-		if self._transport is not None:
-			self._transport.close()
-
 		self._closed = True
 		self._wake.set()
 
