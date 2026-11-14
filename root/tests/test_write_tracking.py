@@ -1,7 +1,7 @@
 # ==============================================================================
 # TEST WRITE INVALIDATION
 # ==============================================================================
-# Collect owner IDs in Sync during writes; publish only after LMDB commit.
+# Collect owner IDs in MemoryBatch; publish once after LMDB commit.
 # ==============================================================================
 
 from types import SimpleNamespace
@@ -20,18 +20,14 @@ class TestWriteTracking(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _observe(cls):
-		events  = []
-		changes = {}
+		events = []
 
-		def register_change(txn, owner_id):
-			changes.setdefault(txn, []).append(owner_id)
-			events.append(('register_change', owner_id))
+		def publish_change(ids, local=True):
+			assert local
+			events.extend(('change', id) for id in ids)
+			events.append(('publish', None))
 
-		o.services.Memory.sync = SimpleNamespace(
-			changes         = changes,
-			register_change = register_change,
-			publish_change  = lambda ids, local=True: events.append(('register_change_commit', None)),
-		)
+		o.services.Memory.sync = SimpleNamespace(publish_change=publish_change)
 
 		return events
 
@@ -62,8 +58,8 @@ class TestWriteTracking(o.Tester):
 			schema.set('field.type', 123)
 
 			assert events == [
-				('register_change', class_id),
-				('register_change_commit', None),
+				('change', class_id),
+				('publish', None),
 			]
 		finally:
 			o.services.Memory.sync = o.services.Sync
@@ -81,14 +77,8 @@ class TestWriteTracking(o.Tester):
 			owner_id = o.services.Id.hash('o.T.WriteBoundary._1')
 			events   = []
 
-			changes = {}
-
-			def register_change(txn, entity_id):
-				with memory.env.begin() as tx:
-					assert tx.get(memory._key(key)) is None
-
-				changes.setdefault(txn, []).append(entity_id)
-				events.append(('register_change', entity_id))
+			with memory.env.begin() as tx:
+				assert tx.get(memory._key(key)) is None
 
 			def publish_change(ids, local=True):
 				assert memory._write is None
@@ -97,19 +87,12 @@ class TestWriteTracking(o.Tester):
 				with memory.env.begin() as tx:
 					assert memory.from_bytes(tx.get(memory._key(key))) == 17
 
-				events.append(('register_change_commit', None))
+				events.append(('publish', None))
 
-			memory.sync = SimpleNamespace(
-				changes         = changes,
-				register_change = register_change,
-				publish_change  = publish_change,
-			)
+			memory.sync = SimpleNamespace(publish_change=publish_change)
 			memory.set(key, 17, owner_id)
 
-			assert events == [
-				('register_change', owner_id),
-				('register_change_commit', None),
-			]
+			assert events == [('publish', None)]
 			assert list(memory.keys('changes/')) == []
 		finally:
 			o.services.Memory.sync = o.services.Sync
@@ -127,13 +110,13 @@ class TestWriteTracking(o.Tester):
 			events = cls._observe()
 
 			item.value = 2
-			assert ('register_change', item.id) in events
-			assert events[-1] == ('register_change_commit', None)
+			assert ('change', item.id) in events
+			assert events[-1] == ('publish', None)
 
 			events.clear()
 			del item.value
-			assert ('register_change', item.id) in events
-			assert events[-1] == ('register_change_commit', None)
+			assert ('change', item.id) in events
+			assert events[-1] == ('publish', None)
 			assert item.value == 0
 		finally:
 			o.services.Memory.sync = o.services.Sync
@@ -157,7 +140,7 @@ class TestWriteTracking(o.Tester):
 			mapping['b'] = 3
 			del mapping['b']
 
-			written = {owner for name, owner in events if name == 'register_change'}
+			written = {owner for name, owner in events if name == 'change'}
 
 			assert items.id in written
 			assert mapping.id in written
@@ -177,13 +160,13 @@ class TestWriteTracking(o.Tester):
 			Model  = o.T.extend('WriteLifecycle', value=int)
 			events = cls._observe()
 			item   = Model(value=5)
-			born   = {owner for name, owner in events if name == 'register_change'}
+			born   = {owner for name, owner in events if name == 'change'}
 
 			assert {item.id, Model.id} <= born
 
 			events.clear()
 			item.drop()
-			dropped = {owner for name, owner in events if name == 'register_change'}
+			dropped = {owner for name, owner in events if name == 'change'}
 
 			assert {item.id, Model.id} <= dropped
 		finally:
@@ -200,13 +183,13 @@ class TestWriteTracking(o.Tester):
 			Base   = o.T.extend('WriteClassBase')
 			events = cls._observe()
 			Child  = Base.extend('WriteClassChild')
-			born   = {owner for name, owner in events if name == 'register_change'}
+			born   = {owner for name, owner in events if name == 'change'}
 
 			assert {Child.id, Base.id} <= born
 
 			events.clear()
 			Child.drop()
-			dropped = {owner for name, owner in events if name == 'register_change'}
+			dropped = {owner for name, owner in events if name == 'change'}
 
 			assert {Child.id, Base.id} <= dropped
 		finally:
@@ -227,20 +210,22 @@ class TestWriteTracking(o.Tester):
 			with memory.write() as outer:
 				zone.set('left', 1)
 
-				assert events == [('register_change', zone.owner_id)]
+				assert events == []
+				assert outer.ids == [zone.owner_id]
 
 				with memory.write() as inner:
 					assert inner is outer
 					zone.set('right', 2)
 					zone.set('left', 3)
 
-				assert events == [('register_change', zone.owner_id)] * 3
+				assert events == []
+				assert outer.ids == [zone.owner_id] * 3
 
 			assert events == [
-				('register_change', zone.owner_id),
-				('register_change', zone.owner_id),
-				('register_change', zone.owner_id),
-				('register_change_commit', None),
+				('change', zone.owner_id),
+				('change', zone.owner_id),
+				('change', zone.owner_id),
+				('publish', None),
 			]
 			assert memory.get('o.T.WriteNested._1.left') == 3
 			assert memory.get('o.T.WriteNested._1.right') == 2
@@ -267,47 +252,36 @@ class TestWriteTracking(o.Tester):
 				failed = True
 
 			assert failed
-			assert events == [('register_change', o.services.Id.hash('o.T.WriteRollback._1'))]
+			assert events == []
 			assert memory.get('o.T.WriteRollback._1.value') is o.Undefined
 
 			memory.set('o.T.WriteRollback._2.value', 8, o.services.Id.hash('o.T.WriteRollback._2'))
-			assert events[-2:] == [
-				('register_change', o.services.Id.hash('o.T.WriteRollback._2')),
-				('register_change_commit', None),
+			assert events == [
+				('change', o.services.Id.hash('o.T.WriteRollback._2')),
+				('publish', None),
 			]
 		finally:
 			o.services.Memory.sync = o.services.Sync
 			cls._restore_runtime(state)
 
-	# A Sync notification error rolls back the uncommitted data.
+	# Invalid owner IDs abort the write without publishing changes.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_failed_register_change_prevents_commit(cls):
+	def test_invalid_owner_ids_prevent_commit(cls):
 		state = cls._patch_runtime()
 
 		try:
 			memory = o.services.Memory
-			calls  = []
-
-			def fail(txn, owner_id):
-				calls.append('register_change')
-				raise RuntimeError('Sync disconnected')
-
-			memory.sync = SimpleNamespace(
-				changes         = {},
-				register_change = fail,
-				publish_change  = lambda ids, local=True: calls.append('register_change_commit'),
-			)
-
+			events = cls._observe()
 			failed = False
 
 			try:
-				memory.set('o.T.WriteFailure._1.value', 3, o.services.Id.hash('o.T.WriteFailure._1'))
-			except RuntimeError:
+				memory.set('o.T.WriteFailure._1.value', 3, ())
+			except ValueError:
 				failed = True
 
 			assert failed
-			assert calls == ['register_change']
+			assert events == []
 			assert memory.get('o.T.WriteFailure._1.value') is o.Undefined
 		finally:
 			o.services.Memory.sync = o.services.Sync
@@ -324,7 +298,7 @@ class TestWriteTracking(o.Tester):
 			events = cls._observe()
 			memory.set('custom/unknown', 1, 0)
 
-			assert events == [('register_change', 0), ('register_change_commit', None)]
+			assert events == [('change', 0), ('publish', None)]
 
 			events.clear()
 			memory.set('ids/12345', 'o.T.Unknown', 12345)
@@ -332,7 +306,7 @@ class TestWriteTracking(o.Tester):
 			memory.set('routes/example', {'id': 34567}, (memory.root_id, 34567))
 			memory.set('tree/parents/45678', 56789, (45678, 56789))
 
-			written = {owner for name, owner in events if name == 'register_change'}
+			written = {owner for name, owner in events if name == 'change'}
 			assert {12345, 23456, 34567, 45678, 56789, memory.root_id} <= written
 		finally:
 			o.services.Memory.sync = o.services.Sync
@@ -353,17 +327,17 @@ class TestWriteTracking(o.Tester):
 			o.services.Id.set(proto)
 
 			assert events == [
-				('register_change', id),
-				('register_change_commit', None),
+				('change', id),
+				('publish', None),
 			]
 
 			events.clear()
 			o.services.Route.set('write_mapping_route', {'id': id})
 
 			assert events == [
-				('register_change', memory.root_id),
-				('register_change', id),
-				('register_change_commit', None),
+				('change', memory.root_id),
+				('change', id),
+				('publish', None),
 			]
 		finally:
 			o.services.Memory.sync = o.services.Sync
@@ -383,9 +357,9 @@ class TestWriteTracking(o.Tester):
 			o.services.Auth.set(node, 7, 'rw')
 
 			assert events == [
-				('register_change', o.V.id),
-				('register_change', node.id),
-				('register_change_commit', None),
+				('change', o.V.id),
+				('change', node.id),
+				('publish', None),
 			]
 		finally:
 			o.TREE_MODE = old_mode
@@ -408,8 +382,8 @@ class TestWriteTracking(o.Tester):
 			zone.clear()
 
 			assert events == [
-				('register_change', zone.owner_id),
-				('register_change_commit', None),
+				('change', zone.owner_id),
+				('publish', None),
 			]
 			assert memory.get('o.T.WriteClear._1.a') is o.Undefined
 		finally:
@@ -433,10 +407,10 @@ class TestWriteTracking(o.Tester):
 				o.services.Id.hash('o.T.WriteMixed._2'),
 			))
 
-			written = {owner for name, owner in events if name == 'register_change'}
+			written = {owner for name, owner in events if name == 'change'}
 			assert o.services.Id.hash('o.T.WriteMixed._1') in written
 			assert o.services.Id.hash('o.T.WriteMixed._2') in written
-			assert events[-1] == ('register_change_commit', None)
+			assert events[-1] == ('publish', None)
 		finally:
 			o.services.Memory.sync = o.services.Sync
 			cls._restore_runtime(state)
@@ -455,7 +429,7 @@ class TestWriteTracking(o.Tester):
 
 			zone.clear((zone.owner_id, 12345))
 
-			written = {owner for name, owner in events if name == 'register_change'}
+			written = {owner for name, owner in events if name == 'change'}
 			assert zone.owner_id in written
 			assert 12345 in written
 		finally:
@@ -475,8 +449,8 @@ class TestWriteTracking(o.Tester):
 			memory.set('custom/opaque', 'updated', owner_id=13579)
 
 			assert events == [
-				('register_change', 13579),
-				('register_change_commit', None),
+				('change', 13579),
+				('publish', None),
 			]
 		finally:
 			o.services.Memory.sync = o.services.Sync
@@ -543,7 +517,7 @@ class TestWriteTracking(o.Tester):
 
 
 
-	# A failed nested notification poisons the outer transaction even if caught.
+	# Invalid nested owner IDs abort the outer transaction even when caught.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_failed_nested_notification_aborts_outer_batch(cls):
@@ -552,22 +526,7 @@ class TestWriteTracking(o.Tester):
 		try:
 			memory = o.services.Memory
 			zone   = memory.zone('o.T.WriteNestedFailure._1.')
-			events = []
-
-			changes = {}
-
-			def register_change(txn, owner_id):
-				events.append(('register_change', owner_id))
-				if len(events) == 2:
-					raise ValueError('Sync refused change')
-
-				changes.setdefault(txn, []).append(owner_id)
-
-			memory.sync = SimpleNamespace(
-				changes         = changes,
-				register_change = register_change,
-				publish_change  = lambda ids, local=True: events.append(('register_change_commit', None)),
-			)
+			events = cls._observe()
 			aborted = False
 
 			try:
@@ -576,7 +535,7 @@ class TestWriteTracking(o.Tester):
 
 					try:
 						with memory.write():
-							zone.set('second', 2)
+							zone.set('second', 2, owner_id=())
 					except ValueError:
 						assert zone.get('first') == 1
 
@@ -585,10 +544,7 @@ class TestWriteTracking(o.Tester):
 				aborted = str(error) == 'Transaction aborted after an earlier failure'
 
 			assert aborted
-			assert events == [
-				('register_change', zone.owner_id),
-				('register_change', zone.owner_id),
-			]
+			assert events == []
 			assert zone.get('first') is o.Undefined
 			assert zone.get('second') is o.Undefined
 			assert memory.get('o.T.WriteNestedFailure._1.first') is o.Undefined
@@ -640,21 +596,12 @@ class TestWriteTracking(o.Tester):
 			owner_id = o.services.Id.hash('o.T.WriteCommitError._1')
 			events   = []
 
-			changes = {}
-
-			def register_change(txn, id):
-				changes.setdefault(txn, []).append(id)
-				events.append(('register_change', id))
 
 			def fail(ids, local=True):
-				events.append('register_change_commit')
+				events.append('publish')
 				raise ValueError('transport failed after commit')
 
-			memory.sync = SimpleNamespace(
-				changes         = changes,
-				register_change = register_change,
-				publish_change  = fail,
-			)
+			memory.sync = SimpleNamespace(publish_change=fail)
 			committed = False
 
 			try:
@@ -666,7 +613,7 @@ class TestWriteTracking(o.Tester):
 				)
 
 			assert committed
-			assert events == [('register_change', owner_id), 'register_change_commit']
+			assert events == ['publish']
 			assert memory._write is None
 			assert memory.get(key) == 7
 		finally:
