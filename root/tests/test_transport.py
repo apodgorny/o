@@ -52,17 +52,12 @@ class TestTransport(o.Tester):
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Enable IPC for these tests, then restore the default in-process mode.
+	# Enable IPC for these tests; Transport lives until process exit.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def run(cls):
 		o.start(multiprocess=True)
-
-		try:
-			return super().run()
-		finally:
-			o.start(multiprocess=False)
-			assert o.services.Transport.send not in o.services.Sync._subscribers
+		return super().run()
 
 	# A normal O.start() never creates a transport client.
 	# ----------------------------------------------------------------------
