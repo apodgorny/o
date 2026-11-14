@@ -5,7 +5,6 @@
 # ==============================================================================
 
 import threading
-import time
 
 from concurrent.futures import ThreadPoolExecutor
 from queue              import Empty, Queue
@@ -487,52 +486,33 @@ class TestSync(o.Tester):
 			memory.sync = sync
 			cls._restore_runtime(state)
 
-	# Wake a dormant worker and deliver the first committed change.
+	# A blocked worker receives a new publication without a wake timer.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_wake_after_idle(cls):
-		pending = {}
+	def test_delivery_after_idle(cls):
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
-			deadline = time.monotonic() + 2
-
-			while not sync._sleeping and time.monotonic() < deadline:
-				time.sleep(0.002)
-
-			assert sync._sleeping
-			pending.setdefault(70, []).append(71)
-			sync.publish_change(pending.pop(70), local=True)
-
+			sync.publish_change([71], local=True)
 			assert results.get(timeout=2) == frozenset({71})
 		finally:
 			sync.close()
 
-	# Confirm commit delivery through repeated transitions to idle sleep.
+	# Repeated publications wake the blocking queue reader.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def test_repeated_idle_wakeups(cls):
-		pending = {}
+	def test_repeated_delivery(cls):
 		sync    = cls._sync()
 		results = Queue()
-
-		sync.idle_delay = 0.005
 
 		try:
 			sync.subscribe(results.put)
 
-			for txn in range(20):
-				deadline = time.monotonic() + 2
-
-				while not sync._sleeping and time.monotonic() < deadline:
-					time.sleep(0.0005)
-
-				assert sync._sleeping
-				pending.setdefault(txn, []).append(txn + 1)
-				sync.publish_change(pending.pop(txn), local=True)
-				assert results.get(timeout=2) == frozenset({txn + 1})
+			for id in range(1, 21):
+				sync.publish_change([id], local=True)
+				assert results.get(timeout=2) == frozenset({id})
 		finally:
 			sync.close()
 
