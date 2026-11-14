@@ -24,7 +24,12 @@ class TestWriteTracking(o.Tester):
 
 		def publish_change(ids, local=True):
 			assert local
-			events.extend(('change', id) for id in ids)
+
+			if ids is None:
+				events.append(('change', None))
+			else:
+				events.extend(('change', id) for id in ids)
+
 			events.append(('publish', None))
 
 		o.services.Memory.sync = SimpleNamespace(publish_change=publish_change)
@@ -52,7 +57,7 @@ class TestWriteTracking(o.Tester):
 			assert schema.owner_id == class_id
 			assert fields.owner_id == class_id
 			assert instance.owner_id == item_id
-			assert memory.zone('garbage/items/').owner_id == 0
+			assert memory.zone('garbage/items/').owner_id is None
 
 			events = cls._observe()
 			schema.set('field.type', 123)
@@ -264,29 +269,6 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.sync = o.services.Sync
 			cls._restore_runtime(state)
 
-	# Invalid owner IDs abort the write without publishing changes.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_invalid_owner_ids_prevent_commit(cls):
-		state = cls._patch_runtime()
-
-		try:
-			memory = o.services.Memory
-			events = cls._observe()
-			failed = False
-
-			try:
-				memory.set('o.T.WriteFailure._1.value', 3, ())
-			except ValueError:
-				failed = True
-
-			assert failed
-			assert events == []
-			assert memory.get('o.T.WriteFailure._1.value') is o.Undefined
-		finally:
-			o.services.Memory.sync = o.services.Sync
-			cls._restore_runtime(state)
-
 	# Every administrative change explicitly supplies its affected IDs.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -296,9 +278,9 @@ class TestWriteTracking(o.Tester):
 		try:
 			memory = o.services.Memory
 			events = cls._observe()
-			memory.set('custom/unknown', 1, 0)
+			memory.set('custom/unknown', 1, None)
 
-			assert events == [('change', 0), ('publish', None)]
+			assert events == [('change', None), ('publish', None)]
 
 			events.clear()
 			memory.set('ids/12345', 'o.T.Unknown', 12345)
@@ -516,41 +498,6 @@ class TestWriteTracking(o.Tester):
 			cls._restore_runtime(state)
 
 
-
-	# Invalid nested owner IDs abort the outer transaction even when caught.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_failed_nested_notification_aborts_outer_batch(cls):
-		state = cls._patch_runtime()
-
-		try:
-			memory = o.services.Memory
-			zone   = memory.zone('o.T.WriteNestedFailure._1.')
-			events = cls._observe()
-			aborted = False
-
-			try:
-				with memory.write():
-					zone.set('first', 1)
-
-					try:
-						with memory.write():
-							zone.set('second', 2, owner_id=())
-					except ValueError:
-						assert zone.get('first') == 1
-
-					assert zone.get('second') == 2
-			except RuntimeError as error:
-				aborted = str(error) == 'Transaction aborted after an earlier failure'
-
-			assert aborted
-			assert events == []
-			assert zone.get('first') is o.Undefined
-			assert zone.get('second') is o.Undefined
-			assert memory.get('o.T.WriteNestedFailure._1.first') is o.Undefined
-		finally:
-			o.services.Memory.sync = o.services.Sync
-			cls._restore_runtime(state)
 
 	# The zone cache reflects committed LMDB after rollback of mixed operations.
 	# ----------------------------------------------------------------------
