@@ -10,7 +10,7 @@ O already owns the application-level contract:
 - `Sync` coalesces those IDs and dispatches subscriptions.
 - `Cache` invalidates existing O entities without changing identity.
 
-`Transport` only carries invalidation sets between processes. It never reads or transfers LMDB values. Remote notifications enter `Sync.receive(ids)`, invalidate the local cache, and notify subscribers without broadcasting the same message again.
+`Transport` only carries invalidation sets between processes. It never reads or transfers LMDB values. It subscribes with `Sync.subscribe(Transport.send, local_only=True)` and forwards only locally originated invalidations. Incoming messages call `Sync.receive(ids)`: the Sync worker invalidates the local cache, then notifies ordinary subscribers without echoing those messages.
 
 ## Layout
 
