@@ -51,7 +51,7 @@ class Sync(o.Service):
 				break
 
 			ids, local = event
-			ids = None if ids is None or 0 in ids else frozenset(ids)
+			ids = None if ids is None else frozenset(ids)
 			self._update(ids, local=local)
 
 	# ======================================================================
