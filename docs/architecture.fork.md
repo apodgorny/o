@@ -39,7 +39,7 @@ assert o['default'] is o
 The current startup signature is:
 
 ```python
-o.start(sync: bool = False, tree_mode: bool | None = None)
+o.start(sync: bool = False, tree_mode: bool | None = None, multiprocess: bool = False)
 ```
 
 `start()` returns `None`; `fork(name)` returns a library instance. There is **no** public `path` argument.
@@ -125,6 +125,8 @@ Almasi provides runtime isolation through forked module globals, type identities
 7. Ensure the root value through `Entity.ensure_value()` and expose `o.V`.
 
 On a subsequent explicit `start()` call, the Memory environment is reopened and loaded cache state is invalidated. Reopening is not an in-place switch of a live ontology's topology. Treat startup as a lifecycle boundary, not as an ordinary data operation.
+
+`multiprocess=False` is the default and leaves the Unix socket transport inactive. `multiprocess=True` enables the shared-host invalidation relay for the current ontology. Repeated `start()` calls can turn IPC on or off; the choice is per fork and independent of LMDB durability `sync`.
 
 ## 7. Topology and durability are per world
 
