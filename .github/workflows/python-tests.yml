@@ -43,12 +43,17 @@ jobs:
         run: |
           python - <<'PY'
           import sys
+          import tempfile
+          from types import SimpleNamespace
+
           sys.path.insert(0, 'root')
           import o
-          type(o).__app__ = o
-          o.start()
-          import tester
-          o.tests.TestSync.run()
+
+          with tempfile.TemporaryDirectory(prefix='o_test_') as directory:
+          	type(o).__app__ = SimpleNamespace(__lib_path__=directory)
+          	o.start()
+          	import tester
+          	o.tests.TestSync.run()
           PY
 
       - name: Run Tracker public API correctness tests
@@ -56,12 +61,17 @@ jobs:
         run: |
           python - <<'PY'
           import sys
+          import tempfile
+          from types import SimpleNamespace
+
           sys.path.insert(0, 'root')
           import o
-          type(o).__app__ = o
-          o.start()
-          import tester
-          o.tests.TestTrackerPublicApi.run()
+
+          with tempfile.TemporaryDirectory(prefix='o_test_') as directory:
+          	type(o).__app__ = SimpleNamespace(__lib_path__=directory)
+          	o.start()
+          	import tester
+          	o.tests.TestTrackerPublicApi.run()
           PY
 
       - name: Run ontology tests

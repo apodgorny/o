@@ -69,14 +69,19 @@ class TestTransport(o.Tester):
 	@classmethod
 	def test_opt_in_default(cls):
 		script = '''
+import tempfile
 import threading
+
+from types import SimpleNamespace
+
 import o
 
-type(o).__app__ = o
-o.start()
+with tempfile.TemporaryDirectory(prefix='o_test_') as directory:
+	type(o).__app__ = SimpleNamespace(__lib_path__=directory)
+	o.start()
 
-assert not any(local_only for watched, local_only in o.services.Sync._subscribers.values())
-assert not any(thread.name == 'o-transport' for thread in threading.enumerate())
+	assert not any(local_only for watched, local_only in o.services.Sync._subscribers.values())
+	assert not any(thread.name == 'o-transport' for thread in threading.enumerate())
 '''
 		result = subprocess.run(
 			[sys.executable, '-c', script],
@@ -209,9 +214,11 @@ import json
 import queue
 import sys
 
+from types import SimpleNamespace
+
 import o
 
-type(o).__app__ = o
+type(o).__app__ = SimpleNamespace(__lib_path__=sys.argv[3])
 o.start(multiprocess=True)
 
 key      = sys.argv[1]
@@ -229,7 +236,7 @@ print('UPDATED', flush=True)
 		directory = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 		memory.set(key, 1, owner_id)
 		process = subprocess.Popen(
-			[sys.executable, '-c', script, key, str(owner_id)],
+			[sys.executable, '-c', script, key, str(owner_id), o.__app__.__lib_path__],
 			cwd    = directory,
 			stdout = subprocess.PIPE,
 			stderr = subprocess.PIPE,
