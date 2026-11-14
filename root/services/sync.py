@@ -116,15 +116,6 @@ class Sync(o.Service):
 		if self._closed:
 			raise RuntimeError('Sync is closed')
 
-		if not local and ids is not None:
-			if not isinstance(ids, (set, frozenset)):
-				raise TypeError('Sync invalidations must be a set or None')
-
-			if not ids or any(type(id) is not int or id <= 0 for id in ids):
-				raise ValueError('Sync invalidations must contain positive integer IDs')
-
-			ids = frozenset(ids)
-
 		self._queue.put((ids, local))
 
 
