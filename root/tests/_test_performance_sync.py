@@ -73,7 +73,7 @@ class TestPerformanceSync(o.Tester):
 						sync.publish_change([owner_id], local=True)
 
 						if mode == 'ipc':
-														while True:
+							while True:
 								frame = reader.readline()
 								assert frame, 'IPC peer disconnected before delivery'
 								if json.loads(frame) == [owner_id]:
