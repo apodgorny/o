@@ -103,11 +103,8 @@ if __name__ == '__main__':
 			o.start()
 
 			if args.sync == 'stub':
-				changes = {}
 				o.services.Memory.sync = SimpleNamespace(
-					changes         = changes,
-					register_change = lambda txn, owner_id: changes.setdefault(txn, []).append(owner_id),
-					publish_change  = lambda ids, local=True: None,
+					publish_change = lambda ids, local=True: None,
 				)
 
 			try:
