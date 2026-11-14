@@ -83,7 +83,7 @@ class MemoryBatch:
 				self.ctx      = None
 
 
-			if committed and ids:
+			if committed and (ids is None or ids):
 				try:
 					sync.publish_change(ids, local=True)
 				except Exception as error:
@@ -111,17 +111,22 @@ class MemoryBatch:
 	# Send every affected ID; each write operation owns its notification.
 	# ----------------------------------------------------------------------
 	def _notify(self, owner_id):
-		if type(owner_id) is int:
-			self.ids.append(owner_id)
+		if owner_id is None:
+			self.ids = None
+		elif type(owner_id) is int:
+			if owner_id <= 0:
+				raise ValueError('owner_id must be positive')
+
+			if self.ids is not None:
+				self.ids.append(owner_id)
 		else:
-			sent = False
+			ids = tuple(owner_id)
 
-			for id in owner_id:
-				self.ids.append(id)
-				sent = True
+			if not ids or any(type(id) is not int or id <= 0 for id in ids):
+				raise ValueError('owner_id iterable must contain positive IDs')
 
-			if not sent:
-				raise ValueError('owner_id iterable must contain at least one ID')
+			if self.ids is not None:
+				self.ids.extend(ids)
 
 	# Store a value, aborting the transaction when a write or notification fails.
 	# ----------------------------------------------------------------------
@@ -229,7 +234,7 @@ class Zone:
 		self.prefix   = prefix
 		self.cache    = {}
 		self.memory   = o.services.Memory
-		self.owner_id = 0
+		self.owner_id = None
 
 		if prefix.startswith('o.T.') and prefix.endswith('.'):
 			proto = prefix[:-1]
@@ -407,7 +412,7 @@ class Memory(o.Service):
 		return Zone(prefix)
 
 	# Store a value with its affected ID or iterable of IDs.
-	# ID zero requests full Sync invalidation for unknown owners.
+	# None requests full Sync invalidation for unknown owners.
 	# ----------------------------------------------------------------------
 	def set(self, key, value, owner_id):
 		with self.write() as batch:
@@ -419,7 +424,7 @@ class Memory(o.Service):
 		with self.write() as batch:
 			batch.unset(key, owner_id)
 
-	# Delete a prefix; report every affected owner or ID zero.
+	# Delete a prefix; report every affected owner or None.
 	# ----------------------------------------------------------------------
 	def unset_all(self, key_prefix, owner_id):
 		with self.write() as batch:
