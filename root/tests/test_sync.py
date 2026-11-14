@@ -39,20 +39,21 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_committed_change(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(lambda ids: results.put((ids, threading.get_ident())))
-			sync.register_change(7, 11)
-			sync.register_change(7, 11)
-			sync.register_change(7, 22)
-			sync.publish_change(sync.changes.pop(7), local=True)
+			pending.setdefault(7, []).append(11)
+			pending.setdefault(7, []).append(11)
+			pending.setdefault(7, []).append(22)
+			sync.publish_change(pending.pop(7), local=True)
 
 			ids, thread_id = results.get(timeout=2)
 			assert ids == frozenset({11, 22})
 			assert thread_id != threading.get_ident()
-			assert sync.changes == {}
+			assert pending == {}
 		finally:
 			sync.close()
 
@@ -60,14 +61,15 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_no_precommit_publication(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
-			sync.register_change(10, 19)
-			sync.register_change(10, 23)
-			assert sync.changes[10] == [19, 23]
+			pending.setdefault(10, []).append(19)
+			pending.setdefault(10, []).append(23)
+			assert pending[10] == [19, 23]
 
 			try:
 				unexpected = results.get(timeout=0.05)
@@ -75,7 +77,7 @@ class TestSync(o.Tester):
 				unexpected = None
 
 			assert unexpected is None
-			sync.publish_change(sync.changes.pop(10), local=True)
+			sync.publish_change(pending.pop(10), local=True)
 			assert results.get(timeout=2) == frozenset({19, 23})
 		finally:
 			sync.close()
@@ -84,6 +86,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_single_local_remote_dispatch(cls):
+		pending = {}
 		sync         = cls._sync()
 		published    = Queue()
 		subscribed   = Queue()
@@ -95,8 +98,8 @@ class TestSync(o.Tester):
 			sync.subscribe(transport.send, local_only=True)
 			sync.subscribe(lambda ids: subscribed.put((ids, threading.get_ident())))
 
-			sync.register_change(90001, 90002)
-			sync.publish_change(sync.changes.pop(90001), local=True)
+			pending.setdefault(90001, []).append(90002)
+			sync.publish_change(pending.pop(90001), local=True)
 
 			local_out, local_thread = published.get(timeout=2)
 			local_in, subscriber_thread = subscribed.get(timeout=2)
@@ -115,14 +118,15 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_abort(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
-			sync.register_change(20, 17)
-			sync.changes.pop(20, None)
-			assert sync.changes == {}
+			pending.setdefault(20, []).append(17)
+			pending.pop(20, None)
+			assert pending == {}
 
 			try:
 				unexpected = results.get(timeout=0.15)
@@ -137,14 +141,15 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_full_invalidation(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
-			sync.register_change(30, 100)
-			sync.register_change(30, 0)
-			sync.publish_change(sync.changes.pop(30), local=True)
+			pending.setdefault(30, []).append(100)
+			pending.setdefault(30, []).append(0)
+			sync.publish_change(pending.pop(30), local=True)
 			assert results.get(timeout=2) is None
 		finally:
 			sync.close()
@@ -155,6 +160,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_filtered_and_global_subscriptions(cls):
+		pending = {}
 		sync     = cls._sync()
 		global_q = Queue()
 		filter_q = Queue()
@@ -166,9 +172,9 @@ class TestSync(o.Tester):
 			sync.subscribe({77}, other_q.put)
 
 			for id in (11, 22, 33):
-				sync.register_change(801, id)
+				pending.setdefault(801, []).append(id)
 
-			sync.publish_change(sync.changes.pop(801), local=True)
+			sync.publish_change(pending.pop(801), local=True)
 
 			assert global_q.get(timeout=2) == frozenset({11, 22, 33})
 			assert filter_q.get(timeout=2) == frozenset({11, 33})
@@ -187,6 +193,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_filtered_full_invalidation(cls):
+		pending = {}
 		sync      = cls._sync()
 		global_q  = Queue()
 		filtered  = Queue()
@@ -196,9 +203,9 @@ class TestSync(o.Tester):
 			sync.subscribe(global_q.put)
 			sync.subscribe(frozenset({55}), filtered.put)
 			sync.subscribe(set(), empty_ids.put)
-			sync.register_change(802, 99)
-			sync.register_change(802, 0)
-			sync.publish_change(sync.changes.pop(802), local=True)
+			pending.setdefault(802, []).append(99)
+			pending.setdefault(802, []).append(0)
+			sync.publish_change(pending.pop(802), local=True)
 
 			for result in (global_q, filtered, empty_ids):
 				assert result.get(timeout=2) is None
@@ -210,6 +217,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_filtered_subscription_snapshot_and_replace(cls):
+		pending = {}
 		sync    = cls._sync()
 		global_q = Queue()
 		results = Queue()
@@ -222,16 +230,16 @@ class TestSync(o.Tester):
 
 			watched.clear()
 			watched.add(102)
-			sync.register_change(803, 101)
-			sync.publish_change(sync.changes.pop(803), local=True)
+			pending.setdefault(803, []).append(101)
+			sync.publish_change(pending.pop(803), local=True)
 
 			assert global_q.get(timeout=2) == frozenset({101})
 			assert results.get(timeout=2) == frozenset({101})
 
 			sync.subscribe({102}, callback)
-			sync.register_change(804, 101)
-			sync.register_change(804, 102)
-			sync.publish_change(sync.changes.pop(804), local=True)
+			pending.setdefault(804, []).append(101)
+			pending.setdefault(804, []).append(102)
+			sync.publish_change(pending.pop(804), local=True)
 
 			assert global_q.get(timeout=2) == frozenset({101, 102})
 			assert results.get(timeout=2) == frozenset({102})
@@ -250,6 +258,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_filtered_unsubscribe(cls):
+		pending = {}
 		sync     = cls._sync()
 		global_q = Queue()
 		filtered = Queue()
@@ -259,8 +268,8 @@ class TestSync(o.Tester):
 			callback = sync.subscribe({121}, filtered.put)
 			sync.unsubscribe(callback)
 
-			sync.register_change(805, 121)
-			sync.publish_change(sync.changes.pop(805), local=True)
+			pending.setdefault(805, []).append(121)
+			sync.publish_change(pending.pop(805), local=True)
 			assert global_q.get(timeout=2) == frozenset({121})
 
 			try:
@@ -275,14 +284,15 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_subscription_arguments(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			callback = sync.subscribe(callback=results.put)
 			assert callback == results.put
-			sync.register_change(807, 141)
-			sync.publish_change(sync.changes.pop(807), local=True)
+			pending.setdefault(807, []).append(141)
+			sync.publish_change(pending.pop(807), local=True)
 			assert results.get(timeout=2) == frozenset({141})
 
 			failed = False
@@ -300,14 +310,15 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_unsubscribe(cls):
+		pending = {}
 		sync     = cls._sync()
 		results  = Queue()
 		callback = sync.subscribe(results.put)
 
 		try:
 			sync.unsubscribe(callback)
-			sync.register_change(40, 81)
-			sync.publish_change(sync.changes.pop(40), local=True)
+			pending.setdefault(40, []).append(81)
+			sync.publish_change(pending.pop(40), local=True)
 
 			try:
 				unexpected = results.get(timeout=0.1)
@@ -318,19 +329,20 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# LMDB may reuse an aborted transaction ID; old IDs must not leak.
+	# A discarded batch cannot leak IDs into the next publication.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_transaction_id_reuse(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
-			sync.register_change(45, 1)
-			sync.changes.pop(45, None)
-			sync.register_change(45, 2)
-			sync.publish_change(sync.changes.pop(45), local=True)
+			pending.setdefault(45, []).append(1)
+			pending.pop(45, None)
+			pending.setdefault(45, []).append(2)
+			sync.publish_change(pending.pop(45), local=True)
 			assert results.get(timeout=2) == frozenset({2})
 		finally:
 			sync.close()
@@ -339,6 +351,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_failing_subscriber(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 		errors  = []
@@ -352,8 +365,8 @@ class TestSync(o.Tester):
 				sync.subscribe(results.put)
 
 				for txn, id in ((50, 41), (51, 42)):
-					sync.register_change(txn, id)
-					sync.publish_change(sync.changes.pop(txn), local=True)
+					pending.setdefault(txn, []).append(id)
+					sync.publish_change(pending.pop(txn), local=True)
 					assert results.get(timeout=2) == frozenset({id})
 
 				sync.close()
@@ -362,18 +375,19 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# Concurrent writers keep independent transaction data.
+	# Concurrent publishers keep their ID batches independent.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_concurrent_transactions(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
 		def write(txn):
 			for id in range(txn * 10, txn * 10 + 5):
-				sync.register_change(txn, id)
+				pending.setdefault(txn, []).append(id)
 
-			sync.publish_change(sync.changes.pop(txn), local=True)
+			sync.publish_change(pending.pop(txn), local=True)
 
 		try:
 			sync.subscribe(results.put)
@@ -398,76 +412,54 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# A MemoryBatch uses the LMDB ID for all nested writes and commit.
+	# Nested MemoryBatch writes publish once after the outer commit.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_memory_batch_uses_lmdb_transaction_id(cls):
 		state  = cls._patch_runtime()
 		memory = o.services.Memory
 		sync   = memory.sync
-		events  = []
-		changes = {}
-
-		def register_change(txn, id):
-			events.append(('change', txn, id))
-			changes.setdefault(txn, []).append(id)
+		events = []
 
 		memory.sync = SimpleNamespace(
-			changes         = changes,
-			register_change = register_change,
-			publish_change  = lambda ids, local=True: events.append(('publish', ids, local)),
+			publish_change = lambda ids, local=True: events.append(('publish', ids, local)),
 		)
 
 		try:
 			with memory.write() as batch:
-				txn_id = batch.tx.id()
-				assert batch.txn_id == txn_id
 				memory.set('sync/first', 1, 101)
 
 				with memory.write() as nested:
 					assert nested is batch
 					memory.set('sync/second', 2, 202)
 
-			assert events == [
-				('change', txn_id, 101),
-				('change', txn_id, 202),
-				('publish', [101, 202], True),
-			]
+			assert events == [('publish', [101, 202], True)]
 		finally:
 			memory.sync = sync
 			cls._restore_runtime(state)
 
-	# Aborted MemoryBatch sends cancellation with the same LMDB ID.
+	# Aborted MemoryBatch discards its IDs without publication.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_memory_batch_abort(cls):
 		state  = cls._patch_runtime()
 		memory = o.services.Memory
 		sync   = memory.sync
-		events  = []
-		changes = {}
-
-		def register_change(txn, id):
-			events.append(('change', txn, id))
-			changes.setdefault(txn, []).append(id)
+		events = []
 
 		memory.sync = SimpleNamespace(
-			changes         = changes,
-			register_change = register_change,
-			publish_change  = lambda ids, local=True: events.append(('publish', ids, local)),
+			publish_change = lambda ids, local=True: events.append(('publish', ids, local)),
 		)
 
 		try:
 			try:
 				with memory.write() as batch:
-					txn_id = batch.tx.id()
 					memory.set('sync/rolled_back', 3, 303)
 					raise ValueError('Rollback')
 			except ValueError:
 				pass
 
-			assert events == [('change', txn_id, 303)]
-			assert changes == {}
+			assert events == []
 			assert memory.get('sync/rolled_back') is o.Undefined
 		finally:
 			memory.sync = sync
@@ -477,6 +469,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_wake_after_idle(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
@@ -488,8 +481,8 @@ class TestSync(o.Tester):
 				time.sleep(0.002)
 
 			assert sync._sleeping
-			sync.register_change(70, 71)
-			sync.publish_change(sync.changes.pop(70), local=True)
+			pending.setdefault(70, []).append(71)
+			sync.publish_change(pending.pop(70), local=True)
 
 			assert results.get(timeout=2) == frozenset({71})
 		finally:
@@ -499,6 +492,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_repeated_idle_wakeups(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = Queue()
 
@@ -514,8 +508,8 @@ class TestSync(o.Tester):
 					time.sleep(0.0005)
 
 				assert sync._sleeping
-				sync.register_change(txn, txn + 1)
-				sync.publish_change(sync.changes.pop(txn), local=True)
+				pending.setdefault(txn, []).append(txn + 1)
+				sync.publish_change(pending.pop(txn), local=True)
 				assert results.get(timeout=2) == frozenset({txn + 1})
 		finally:
 			sync.close()
@@ -524,6 +518,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_burst_delivery(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = []
 
@@ -531,8 +526,8 @@ class TestSync(o.Tester):
 			sync.subscribe(results.append)
 
 			for txn in range(1000):
-				sync.register_change(txn, txn + 1)
-				sync.publish_change(sync.changes.pop(txn), local=True)
+				pending.setdefault(txn, []).append(txn + 1)
+				sync.publish_change(pending.pop(txn), local=True)
 
 			sync.close()
 
@@ -551,6 +546,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_many_concurrent_commits(cls):
+		pending = {}
 		sync     = cls._sync()
 		received = []
 		barrier  = threading.Barrier(6)
@@ -561,8 +557,8 @@ class TestSync(o.Tester):
 			for index in range(40):
 				id  = worker * 1000 + index + 1
 				txn = worker * 1000 + index
-				sync.register_change(txn, id)
-				sync.publish_change(sync.changes.pop(txn), local=True)
+				pending.setdefault(txn, []).append(id)
+				sync.publish_change(pending.pop(txn), local=True)
 
 		try:
 			sync.subscribe(received.append)
@@ -584,7 +580,7 @@ class TestSync(o.Tester):
 				for index in range(40)
 			}
 			assert observed == expected
-			assert sync.changes == {}
+			assert pending == {}
 			assert not sync._worker.is_alive()
 		finally:
 			sync.close()
@@ -593,6 +589,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_subscriber_reentrancy(cls):
+		pending = {}
 		sync    = cls._sync()
 		first   = Queue()
 		second  = Queue()
@@ -604,12 +601,12 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(change_subscriptions)
-			sync.register_change(304, 111)
-			sync.publish_change(sync.changes.pop(304), local=True)
+			pending.setdefault(304, []).append(111)
+			sync.publish_change(pending.pop(304), local=True)
 			assert first.get(timeout=2) == frozenset({111})
 
-			sync.register_change(305, 112)
-			sync.publish_change(sync.changes.pop(305), local=True)
+			pending.setdefault(305, []).append(112)
+			sync.publish_change(pending.pop(305), local=True)
 			assert second.get(timeout=2) == frozenset({112})
 
 			try:
@@ -626,6 +623,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_slow_subscriber_does_not_block_writes(cls):
+		pending = {}
 		sync     = cls._sync()
 		entered  = threading.Event()
 		release  = threading.Event()
@@ -638,13 +636,13 @@ class TestSync(o.Tester):
 
 		def write():
 			for txn in range(400, 600):
-				sync.register_change(txn, txn + 1000)
-				sync.publish_change(sync.changes.pop(txn), local=True)
+				pending.setdefault(txn, []).append(txn + 1000)
+				sync.publish_change(pending.pop(txn), local=True)
 
 		try:
 			sync.subscribe(callback)
-			sync.register_change(399, 1399)
-			sync.publish_change(sync.changes.pop(399), local=True)
+			pending.setdefault(399, []).append(1399)
+			sync.publish_change(pending.pop(399), local=True)
 			assert entered.wait(timeout=2)
 
 			with ThreadPoolExecutor(max_workers=1) as pool:
@@ -665,19 +663,19 @@ class TestSync(o.Tester):
 			release.set()
 			sync.close()
 
-	# Close delivers already committed changes but discards candidates
-	# belonging to transactions that never committed.
+	# Close delivers already published changes, not unpublished IDs.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_close_with_uncommitted_transaction(cls):
+		pending = {}
 		sync     = cls._sync()
 		received = []
 
 		try:
 			sync.subscribe(received.append)
-			sync.register_change(601, 1601)
-			sync.publish_change(sync.changes.pop(601), local=True)
-			sync.register_change(602, 1602)
+			pending.setdefault(601, []).append(1601)
+			sync.publish_change(pending.pop(601), local=True)
+			pending.setdefault(602, []).append(1602)
 			sync.close()
 
 			observed = set()
@@ -695,6 +693,7 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_close_from_subscriber(cls):
+		pending = {}
 		sync     = cls._sync()
 		received = Queue()
 
@@ -704,8 +703,8 @@ class TestSync(o.Tester):
 
 		try:
 			sync.subscribe(callback)
-			sync.register_change(603, 1603)
-			sync.publish_change(sync.changes.pop(603), local=True)
+			pending.setdefault(603, []).append(1603)
+			sync.publish_change(pending.pop(603), local=True)
 			assert received.get(timeout=2) == frozenset({1603})
 
 			sync.close()
@@ -714,7 +713,7 @@ class TestSync(o.Tester):
 			failed = False
 
 			try:
-				sync.register_change(604, 1604)
+				sync.publish_change([1604], local=True)
 			except RuntimeError:
 				failed = True
 
@@ -752,12 +751,13 @@ class TestSync(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_close(cls):
+		pending = {}
 		sync    = cls._sync()
 		results = []
 
 		sync.subscribe(results.append)
-		sync.register_change(60, 61)
-		sync.publish_change(sync.changes.pop(60), local=True)
+		pending.setdefault(60, []).append(61)
+		sync.publish_change(pending.pop(60), local=True)
 		sync.close()
 
 		assert results == [frozenset({61})]
@@ -765,7 +765,7 @@ class TestSync(o.Tester):
 		failed = False
 
 		try:
-			sync.register_change(61, 62)
+			sync.publish_change([62], local=True)
 		except RuntimeError:
 			failed = True
 
