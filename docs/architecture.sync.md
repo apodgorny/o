@@ -120,27 +120,21 @@ recomputation. Web owns those mechanisms.
 
 ## Producer API (O infrastructure only)
 
-Application-domain code must mutate public O objects, not use Sync's
-infrastructure methods directly. `Sync.register_change(txn_id, owner_id)`
-collects owner IDs during writes **without notifying anyone**. The collection
-stays in `Sync.changes`, not in `MemoryBatch`.
+Application code changes public O objects. `MemoryBatch` collects changed
+owner IDs in a local list during each LMDB write transaction. Nested writes
+share the same list, and failed transactions discard it.
 
-Once the **outermost** LMDB write commits successfully, `MemoryBatch`
-transfers the existing list into the queue without copying or iterating it:
+After the outermost successful commit, `MemoryBatch` passes that complete
+list to Sync in a single call, without copying or iterating it:
 
 ~~~python
-sync.publish_change(sync.changes.pop(txn_id), local=True)
+sync.publish_change(ids, local=True)
 ~~~
 
-For failed/rolled-back writes, it discards the pending list via a single
-`sync.changes.pop(txn_id, None)`. Nested scopes share the outer LMDB
-transaction and never publish independently.
-
-The commit hot path does only the existing dictionary pop and queue handoff.
-The worker handles deduplication, filtering, transport forwarding, and cache
-invalidation. Missing-key or empty-prefix deletions do not notify. Unknown
-owner ID `0` becomes a full invalidation (`None`) in the worker. Memory
-does not infer owners by parsing keys.
+The hot path only enqueues the list. The worker independently processes each
+publication, deduplicates IDs within it, filters subscribers, and forwards
+local events to Transport. Unknown owner ID `0` means full invalidation
+(`None`) for listeners. Missing-key or empty-prefix deletions do not notify.
 
 If publication fails after commit, the transaction remains committed and
 `MemoryBatch` raises `RuntimeError('LMDB committed; Sync publication failed')`.
@@ -151,16 +145,17 @@ crashes after committing.
 
 `Sync.initialize(batch_delay=0.001, idle_delay=0.02)` creates one worker.
 `publish_change(ids, local)` puts the event into a `SimpleQueue` and wakes
-the sleeping worker, without copying or coalescing owner IDs on the producer
+the sleeping worker, without copying or processing owner IDs on the producer
 side. There is no pre-commit speculative fallback.
 
-- `local=True`: the worker merges IDs, informs all matching local subscribers,
+- `local=True`: the worker normalizes IDs, informs matching local subscribers,
   and notifies Transport through its `local_only` subscription. It does not
   invalidate the writer's local object cache.
 - `local=False`: the worker invalidates affected cached objects, then informs
   ordinary subscribers. It does not re-send the change through Transport.
-- The worker deduplicates IDs within one delivery cycle, treats ID `0` or
-  `None` as full invalidation, and isolates callback failures.
+- Each queued event is delivered independently, in publication order. The
+  worker deduplicates IDs only within that event, treats ID `0` or `None` as
+  full invalidation, and isolates callback failures.
 - `close()` drains already queued committed events and terminates the worker.
 
 A Sync callback signals that locally committed or externally announced owner
@@ -170,7 +165,7 @@ Consumers re-read committed state through O APIs.
 ## Verification and non-goals
 
 - `test_sync.py`: filtered/global/empty subscriptions, scope replacement,
-  None/full invalidation, worker-thread callbacks, transaction IDs,
+  None/full invalidation, worker-thread callbacks, publication ordering,
   commit visibility, no pre-commit publication, abort, concurrent producers,
   wakeups, reentrant and failing callbacks, blocked listeners, and close.
 - `test_write_tracking.py`: actual field, collection, class and instance
