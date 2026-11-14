@@ -4,7 +4,6 @@
 # Deliver O invalidations between local processes over Unix domain sockets.
 # ==============================================================================
 
-import atexit
 import json
 import os
 import socket
@@ -53,7 +52,7 @@ class Transport(o.Service):
 		started    = False
 		deadline   = time.monotonic() + 4.0
 
-		while connection is None and not self._closed.is_set() and time.monotonic() < deadline:
+		while connection is None and time.monotonic() < deadline:
 			candidate = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 			candidate.settimeout(1.0)
 
@@ -97,12 +96,12 @@ class Transport(o.Service):
 	# Receive invalidations without retransmitting them.
 	# ----------------------------------------------------------------------
 	def _run_worker_loop(self, connection, reader):
-		while not self._closed.is_set():
+		while True:
 			if connection is None:
 				try:
 					connection, reader = self._connect()
 				except (OSError, ValueError, ConnectionError):
-					self._closed.wait(0.2)
+					time.sleep(0.2)
 				else:
 					with self._lock:
 						self._connection = connection
@@ -147,7 +146,6 @@ class Transport(o.Service):
 		self.sync        = sync
 		self.socket_path = self._socket_path()
 		self._lock       = threading.Lock()
-		self._closed     = threading.Event()
 
 		connection, reader = self._connect()
 		self._connection  = connection
@@ -160,7 +158,6 @@ class Transport(o.Service):
 			daemon = True,
 		)
 		self._worker.start()
-		atexit.register(self.close)
 
 	# Send only changes from the ontology registered with this relay.
 	# ----------------------------------------------------------------------
@@ -187,24 +184,3 @@ class Transport(o.Service):
 						pass
 
 					connection.close()
-
-	# Disconnect; the relay will exit when its final client is gone.
-	# ----------------------------------------------------------------------
-	def close(self):
-		self._closed.set()
-		self.sync.unsubscribe(self.send)
-
-		with self._lock:
-			connection      = self._connection
-			self._connection = None
-
-		if connection is not None:
-			try:
-				connection.shutdown(socket.SHUT_RDWR)
-			except OSError:
-				pass
-
-			connection.close()
-
-		if hasattr(self, '_worker') and self._worker is not threading.current_thread():
-			self._worker.join(timeout=1.0)
