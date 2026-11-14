@@ -64,7 +64,7 @@ graph for a new world), independent of notifications. See
 | `sync.subscribe({id1, id2}, callback)` | Observe only those owner IDs |
 | `sync.subscribe(frozenset(ids), callback)` | Immutable-set variant |
 | `sync.subscribe(callback, local_only=True)` | Notify only for changes originating in this process |
-| `sync.receive(ids)` | Enqueue an external invalidation; no LMDB transaction |
+| `sync.publish_change(ids, local=False)` | Enqueue an external invalidation |
 | `sync.unsubscribe(callback)` | Remove the callback from future deliveries |
 | `sync.close()` | End worker lifetime; flush queued committed batches |
 
@@ -78,7 +78,7 @@ only matching IDs; a global callback receives the full delivered batch.
 All subscriptions run through one `_update()` delivery point. Ordinary subscribers
 receive local and externally received changes. A `local_only=True` subscriber
 receives only local changes; Transport uses this filter to publish IPC updates
-without echoing incoming messages. Incoming changes are queued with `receive()`,
+without echoing incoming messages. Incoming changes are queued with `publish_change(ids, local=False)`,
 invalidate the local cache, and then notify ordinary subscribers.
 
 A filtered **empty** set receives no ordinary change events, but still
@@ -120,77 +120,58 @@ recomputation. Web owns those mechanisms.
 
 ## Producer API (O infrastructure only)
 
-Application-domain code must mutate public O objects, not call these methods:
+Application-domain code must mutate public O objects, not use Sync's
+infrastructure methods directly. `Sync.register_change(txn_id, owner_id)`
+collects owner IDs during writes **without notifying anyone**. The collection
+stays in `Sync.changes`, not in `MemoryBatch`.
+
+Once the **outermost** LMDB write commits successfully, `MemoryBatch`
+transfers the existing list into the queue without copying or iterating it:
 
 ~~~python
-sync.register_change(txn_id, owner_id)
-sync.register_change_commit(txn_id)
-sync.register_abort(txn_id)
+sync.publish_change(sync.changes.pop(txn_id), local=True)
 ~~~
 
-`MemoryBatch` takes `txn_id` from the actual LMDB write transaction.
-For each successful storage mutation with affected owners it calls
-`register_change` *inside* the transaction. An owner may be repeated.
-After the **outermost successful commit** has completed, it sends one
-`register_change_commit`, but only if owner changes were reported.
-On rollback it calls `register_abort` and restores tracked Zone caches.
+For failed/rolled-back writes, it discards the pending list via a single
+`sync.changes.pop(txn_id, None)`. Nested scopes share the outer LMDB
+transaction and never publish independently.
 
-Nested write scopes share the same LMDB transaction; even a caught
-nested failure poisons the outermost transaction. Internal Memory reads
-during an open write see staged data. Missing-key and empty-prefix
-deletions do not notify. Infrastructure writes require an explicit integer
-or nonempty iterable of affected IDs; `Zone` normally supplies its own
-owner ID and `0` represents unknown ownership. Sync translates that marker
-to `None` at the notification boundary. Memory does not infer owners by
-parsing key names.
+The commit hot path does only the existing dictionary pop and queue handoff.
+The worker handles deduplication, filtering, transport forwarding, and cache
+invalidation. Missing-key or empty-prefix deletions do not notify. Unknown
+owner ID `0` becomes a full invalidation (`None`) in the worker. Memory
+does not infer owners by parsing keys.
 
-A failure from registering a candidate marks the transaction failed and
-causes rollback. A failure from **post-commit** confirmation leaves LMDB
-committed, raises
-`RuntimeError('LMDB committed; Sync confirmation failed')`, and must not
-be mistaken for an aborted write.
+If publication fails after commit, the transaction remains committed and
+`MemoryBatch` raises `RuntimeError('LMDB committed; Sync publication failed')`.
+Sync is not a durable event log and cannot guarantee delivery if the process
+crashes after committing.
 
 ## Worker and delivery timing
 
-`Sync.initialize(batch_delay=0.001, fallback_delay=1.0,
-idle_delay=0.02)` starts one daemon worker. The producer tracks its own
-transaction records; handoff uses `SimpleQueue` for newly registered
-candidates and ready commit batches, with an Event for wakeup.
+`Sync.initialize(batch_delay=0.001, idle_delay=0.02)` creates one worker.
+`publish_change(ids, local)` puts the event into a `SimpleQueue` and wakes
+the sleeping worker, without copying or coalescing owner IDs on the producer
+side. There is no pre-commit speculative fallback.
 
-- **Normal path:** `register_change_commit` moves a committed owner list
-  into the ready queue. The worker drains and coalesces available lists,
-  deduplicates IDs, and sends a `frozenset` to each matching subscriber.
-  Real LMDB tests verify committed state is readable by callbacks.
-- **Open transaction fallback:** after `fallback_delay`, a still-open
-  candidate may be delivered as a **speculative invalidation**, and again
-  after further delays while open. If it later commits, the owner IDs are
-  delivered again from the committed batch; if it aborts, an already sent
-  fallback **cannot be retracted**.
-- **Abort:** removes the producer record and disables its pending
-  candidate. Unsent candidates are suppressed.
-- **Batching:** duplicate IDs are collapsed *within one delivery cycle*;
-  across cycles, repeated notifications are allowed. Reused LMDB
-  transaction IDs do not revive old candidate records.
-- **Idle/close:** the worker sleeps when quiet. `close()` wakes and joins
-  it, drains already confirmed batches, drops unconfirmed candidates,
-  clears subscribers, and rejects further producer registrations.
+- `local=True`: the worker merges IDs, informs all matching local subscribers,
+  and notifies Transport through its `local_only` subscription. It does not
+  invalidate the writer's local object cache.
+- `local=False`: the worker invalidates affected cached objects, then informs
+  ordinary subscribers. It does not re-send the change through Transport.
+- The worker deduplicates IDs within one delivery cycle, treats ID `0` or
+  `None` as full invalidation, and isolates callback failures.
+- `close()` drains already queued committed events and terminates the worker.
 
-**A Sync callback is an invalidation signal, NOT proof of commit.** The
-ordinary commit path delivers only after commit, but a long-running
-transaction can send early, repeated, even ultimately rolled-back signals.
-Consumers must tolerate spurious/duplicate invalidations and re-read
-committed state through normal O APIs. The scheduling parameters are
-not exact latency bounds or once-only guarantees.
-
-Do not use `close()` as per-view unsubscribe: its terminal worker state
-is not automatically reversed by `o.start()` reopening Memory. Use
-`unsubscribe()` for individual consumers.
+A Sync callback signals that locally committed or externally announced owner
+state may have changed, not that the subscriber has applied the change.
+Consumers re-read committed state through O APIs.
 
 ## Verification and non-goals
 
 - `test_sync.py`: filtered/global/empty subscriptions, scope replacement,
   None/full invalidation, worker-thread callbacks, transaction IDs,
-  commit visibility, fallback/repetition/abort, concurrent producers,
+  commit visibility, no pre-commit publication, abort, concurrent producers,
   wakeups, reentrant and failing callbacks, blocked listeners, and close.
 - `test_write_tracking.py`: actual field, collection, class and instance
   ownership; transaction nesting, rollback, Zone cache recovery and

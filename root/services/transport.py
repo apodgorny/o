@@ -109,7 +109,7 @@ class Transport(o.Service):
 
 					# A disconnected writer may have missed notifying peers.
 					# ------------------------------------------------------
-					self.sync.receive(None)
+					self.sync.publish_change(None, local=False)
 					self.send(None)
 			else:
 				try:
@@ -126,7 +126,7 @@ class Transport(o.Service):
 
 						ids = frozenset(ids)
 
-					self.sync.receive(ids)
+					self.sync.publish_change(ids, local=False)
 				except (OSError, ValueError, ConnectionError):
 					with self._lock:
 						if self._connection is connection:

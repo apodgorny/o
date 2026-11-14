@@ -1,7 +1,7 @@
 # ==============================================================================
 # TEST SYNC
 # ==============================================================================
-# Verify local delivery, fallback, isolation, and LMDB transaction integration.
+# Verify committed local/remote delivery, isolation, and LMDB integration.
 # ==============================================================================
 
 import threading
@@ -21,13 +21,13 @@ class TestSync(o.Tester):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Give each test its own service singleton with a short fallback deadline.
+	# Give each test its own service singleton and worker.
 	# ----------------------------------------------------------------------
 	@classmethod
-	def _sync(cls, fallback_delay=0.2):
+	def _sync(cls):
 		service_type = type('SyncTest', (type(o.services.Sync),), {})
 		service      = service_type()
-		service.initialize(fallback_delay=fallback_delay)
+		service.initialize()
 
 		return service
 
@@ -47,12 +47,36 @@ class TestSync(o.Tester):
 			sync.register_change(7, 11)
 			sync.register_change(7, 11)
 			sync.register_change(7, 22)
-			sync.register_change_commit(7)
+			sync.publish_change(sync.changes.pop(7), local=True)
 
 			ids, thread_id = results.get(timeout=2)
 			assert ids == frozenset({11, 22})
 			assert thread_id != threading.get_ident()
 			assert sync.changes == {}
+		finally:
+			sync.close()
+
+	# Pending IDs must remain invisible until the outer commit publishes.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_no_precommit_publication(cls):
+		sync    = cls._sync()
+		results = Queue()
+
+		try:
+			sync.subscribe(results.put)
+			sync.register_change(10, 19)
+			sync.register_change(10, 23)
+			assert sync.changes[10] == [19, 23]
+
+			try:
+				unexpected = results.get(timeout=0.05)
+			except Empty:
+				unexpected = None
+
+			assert unexpected is None
+			sync.publish_change(sync.changes.pop(10), local=True)
+			assert results.get(timeout=2) == frozenset({19, 23})
 		finally:
 			sync.close()
 
@@ -72,14 +96,14 @@ class TestSync(o.Tester):
 			sync.subscribe(lambda ids: subscribed.put((ids, threading.get_ident())))
 
 			sync.register_change(90001, 90002)
-			sync.register_change_commit(90001)
+			sync.publish_change(sync.changes.pop(90001), local=True)
 
 			local_out, local_thread = published.get(timeout=2)
 			local_in, subscriber_thread = subscribed.get(timeout=2)
 			assert local_out == local_in == frozenset({90002})
 			assert local_thread == subscriber_thread != threading.get_ident()
 
-			sync.receive(frozenset({90003}))
+			sync.publish_change(frozenset({90003}), local=False)
 
 			remote_in, remote_thread = subscribed.get(timeout=2)
 			assert remote_in == frozenset({90003})
@@ -87,38 +111,17 @@ class TestSync(o.Tester):
 			assert published.empty()
 		finally:
 			sync.close()
-
-	# An open transaction gets a fallback, then a final commit notification.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_fallback_then_commit(cls):
-		sync    = cls._sync(0.03)
-		results = Queue()
-
-		try:
-			sync.subscribe(results.put)
-			sync.register_change(10, 19)
-			assert results.get(timeout=2) == frozenset({19})
-			assert sync.changes[10][1] == [19]
-
-			sync.register_change(10, 23)
-			sync.register_change_commit(10)
-			assert results.get(timeout=2) == frozenset({19, 23})
-			assert sync.changes == {}
-		finally:
-			sync.close()
-
-	# Rollback cancels the deadline and does not publish a commit.
+	# Rollback removes pending IDs and never publishes.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_abort(cls):
-		sync    = cls._sync(0.1)
+		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
 			sync.register_change(20, 17)
-			sync.register_abort(20)
+			sync.changes.pop(20, None)
 			assert sync.changes == {}
 
 			try:
@@ -141,7 +144,7 @@ class TestSync(o.Tester):
 			sync.subscribe(results.put)
 			sync.register_change(30, 100)
 			sync.register_change(30, 0)
-			sync.register_change_commit(30)
+			sync.publish_change(sync.changes.pop(30), local=True)
 			assert results.get(timeout=2) is None
 		finally:
 			sync.close()
@@ -165,7 +168,7 @@ class TestSync(o.Tester):
 			for id in (11, 22, 33):
 				sync.register_change(801, id)
 
-			sync.register_change_commit(801)
+			sync.publish_change(sync.changes.pop(801), local=True)
 
 			assert global_q.get(timeout=2) == frozenset({11, 22, 33})
 			assert filter_q.get(timeout=2) == frozenset({11, 33})
@@ -195,7 +198,7 @@ class TestSync(o.Tester):
 			sync.subscribe(set(), empty_ids.put)
 			sync.register_change(802, 99)
 			sync.register_change(802, 0)
-			sync.register_change_commit(802)
+			sync.publish_change(sync.changes.pop(802), local=True)
 
 			for result in (global_q, filtered, empty_ids):
 				assert result.get(timeout=2) is None
@@ -220,7 +223,7 @@ class TestSync(o.Tester):
 			watched.clear()
 			watched.add(102)
 			sync.register_change(803, 101)
-			sync.register_change_commit(803)
+			sync.publish_change(sync.changes.pop(803), local=True)
 
 			assert global_q.get(timeout=2) == frozenset({101})
 			assert results.get(timeout=2) == frozenset({101})
@@ -228,7 +231,7 @@ class TestSync(o.Tester):
 			sync.subscribe({102}, callback)
 			sync.register_change(804, 101)
 			sync.register_change(804, 102)
-			sync.register_change_commit(804)
+			sync.publish_change(sync.changes.pop(804), local=True)
 
 			assert global_q.get(timeout=2) == frozenset({101, 102})
 			assert results.get(timeout=2) == frozenset({102})
@@ -257,7 +260,7 @@ class TestSync(o.Tester):
 			sync.unsubscribe(callback)
 
 			sync.register_change(805, 121)
-			sync.register_change_commit(805)
+			sync.publish_change(sync.changes.pop(805), local=True)
 			assert global_q.get(timeout=2) == frozenset({121})
 
 			try:
@@ -268,27 +271,6 @@ class TestSync(o.Tester):
 			assert unexpected is None
 		finally:
 			sync.close()
-
-	# Both speculative fallback and final confirmation must honor the
-	# same selective subscription without losing a newly registered ID.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_filtered_fallback_then_commit(cls):
-		sync    = cls._sync(0.04)
-		results = Queue()
-
-		try:
-			sync.subscribe({131, 133}, results.put)
-			sync.register_change(806, 131)
-			sync.register_change(806, 132)
-			assert results.get(timeout=2) == frozenset({131})
-
-			sync.register_change(806, 133)
-			sync.register_change_commit(806)
-			assert results.get(timeout=2) == frozenset({131, 133})
-		finally:
-			sync.close()
-
 	# Preserve the callback keyword and reject unsupported ID collections.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -300,7 +282,7 @@ class TestSync(o.Tester):
 			callback = sync.subscribe(callback=results.put)
 			assert callback == results.put
 			sync.register_change(807, 141)
-			sync.register_change_commit(807)
+			sync.publish_change(sync.changes.pop(807), local=True)
 			assert results.get(timeout=2) == frozenset({141})
 
 			failed = False
@@ -325,7 +307,7 @@ class TestSync(o.Tester):
 		try:
 			sync.unsubscribe(callback)
 			sync.register_change(40, 81)
-			sync.register_change_commit(40)
+			sync.publish_change(sync.changes.pop(40), local=True)
 
 			try:
 				unexpected = results.get(timeout=0.1)
@@ -336,19 +318,19 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# LMDB may reuse an aborted transaction ID; stale deadlines stay cancelled.
+	# LMDB may reuse an aborted transaction ID; old IDs must not leak.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_transaction_id_reuse(cls):
-		sync    = cls._sync(0.12)
+		sync    = cls._sync()
 		results = Queue()
 
 		try:
 			sync.subscribe(results.put)
 			sync.register_change(45, 1)
-			sync.register_abort(45)
+			sync.changes.pop(45, None)
 			sync.register_change(45, 2)
-			sync.register_change_commit(45)
+			sync.publish_change(sync.changes.pop(45), local=True)
 			assert results.get(timeout=2) == frozenset({2})
 		finally:
 			sync.close()
@@ -371,7 +353,7 @@ class TestSync(o.Tester):
 
 				for txn, id in ((50, 41), (51, 42)):
 					sync.register_change(txn, id)
-					sync.register_change_commit(txn)
+					sync.publish_change(sync.changes.pop(txn), local=True)
 					assert results.get(timeout=2) == frozenset({id})
 
 				sync.close()
@@ -391,7 +373,7 @@ class TestSync(o.Tester):
 			for id in range(txn * 10, txn * 10 + 5):
 				sync.register_change(txn, id)
 
-			sync.register_change_commit(txn)
+			sync.publish_change(sync.changes.pop(txn), local=True)
 
 		try:
 			sync.subscribe(results.put)
@@ -423,12 +405,17 @@ class TestSync(o.Tester):
 		state  = cls._patch_runtime()
 		memory = o.services.Memory
 		sync   = memory.sync
-		events = []
+		events  = []
+		changes = {}
+
+		def register_change(txn, id):
+			events.append(('change', txn, id))
+			changes.setdefault(txn, []).append(id)
 
 		memory.sync = SimpleNamespace(
-			register_change  = lambda txn, id: events.append(('change', txn, id)),
-			register_change_commit = lambda txn: events.append(('commit', txn)),
-			register_abort = lambda txn: events.append(('abort', txn)),
+			changes         = changes,
+			register_change = register_change,
+			publish_change  = lambda ids, local=True: events.append(('publish', ids, local)),
 		)
 
 		try:
@@ -444,7 +431,7 @@ class TestSync(o.Tester):
 			assert events == [
 				('change', txn_id, 101),
 				('change', txn_id, 202),
-				('commit', txn_id),
+				('publish', [101, 202], True),
 			]
 		finally:
 			memory.sync = sync
@@ -457,12 +444,17 @@ class TestSync(o.Tester):
 		state  = cls._patch_runtime()
 		memory = o.services.Memory
 		sync   = memory.sync
-		events = []
+		events  = []
+		changes = {}
+
+		def register_change(txn, id):
+			events.append(('change', txn, id))
+			changes.setdefault(txn, []).append(id)
 
 		memory.sync = SimpleNamespace(
-			register_change  = lambda txn, id: events.append(('change', txn, id)),
-			register_change_commit = lambda txn: events.append(('commit', txn)),
-			register_abort = lambda txn: events.append(('abort', txn)),
+			changes         = changes,
+			register_change = register_change,
+			publish_change  = lambda ids, local=True: events.append(('publish', ids, local)),
 		)
 
 		try:
@@ -474,7 +466,8 @@ class TestSync(o.Tester):
 			except ValueError:
 				pass
 
-			assert events == [('change', txn_id, 303), ('abort', txn_id)]
+			assert events == [('change', txn_id, 303)]
+			assert changes == {}
 			assert memory.get('sync/rolled_back') is o.Undefined
 		finally:
 			memory.sync = sync
@@ -496,7 +489,7 @@ class TestSync(o.Tester):
 
 			assert sync._sleeping
 			sync.register_change(70, 71)
-			sync.register_change_commit(70)
+			sync.publish_change(sync.changes.pop(70), local=True)
 
 			assert results.get(timeout=2) == frozenset({71})
 		finally:
@@ -522,7 +515,7 @@ class TestSync(o.Tester):
 
 				assert sync._sleeping
 				sync.register_change(txn, txn + 1)
-				sync.register_change_commit(txn)
+				sync.publish_change(sync.changes.pop(txn), local=True)
 				assert results.get(timeout=2) == frozenset({txn + 1})
 		finally:
 			sync.close()
@@ -539,7 +532,7 @@ class TestSync(o.Tester):
 
 			for txn in range(1000):
 				sync.register_change(txn, txn + 1)
-				sync.register_change_commit(txn)
+				sync.publish_change(sync.changes.pop(txn), local=True)
 
 			sync.close()
 
@@ -569,7 +562,7 @@ class TestSync(o.Tester):
 				id  = worker * 1000 + index + 1
 				txn = worker * 1000 + index
 				sync.register_change(txn, id)
-				sync.register_change_commit(txn)
+				sync.publish_change(sync.changes.pop(txn), local=True)
 
 		try:
 			sync.subscribe(received.append)
@@ -595,81 +588,6 @@ class TestSync(o.Tester):
 			assert not sync._worker.is_alive()
 		finally:
 			sync.close()
-
-	# Repeated fallback includes newly changed IDs while keeping the
-	# transaction open, and a later commit publishes its complete state.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_multiple_fallbacks_before_commit(cls):
-		sync    = cls._sync(0.04)
-		results = Queue()
-
-		try:
-			sync.subscribe(results.put)
-			sync.register_change(301, 81)
-			assert results.get(timeout=2) == frozenset({81})
-
-			sync.register_change(301, 82)
-			assert results.get(timeout=2) == frozenset({81, 82})
-
-			sync.register_change_commit(301)
-			assert results.get(timeout=2) == frozenset({81, 82})
-			assert sync.changes == {}
-		finally:
-			sync.close()
-
-	# Aborting after one speculative notification prevents subsequent
-	# fallback delivery from the abandoned transaction.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_abort_after_fallback(cls):
-		sync    = cls._sync(0.04)
-		results = Queue()
-
-		try:
-			sync.subscribe(results.put)
-			sync.register_change(302, 91)
-			assert results.get(timeout=2) == frozenset({91})
-
-			sync.register_abort(302)
-			assert sync.changes == {}
-
-			try:
-				unexpected = results.get(timeout=0.12)
-			except Empty:
-				unexpected = None
-
-			assert unexpected is None
-		finally:
-			sync.close()
-
-	# An LMDB ID reused after speculative invalidation must not revive
-	# the previous transaction or publish its old owner IDs.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_reuse_after_speculative_fallback(cls):
-		sync    = cls._sync(0.04)
-		results = Queue()
-
-		try:
-			sync.subscribe(results.put)
-			sync.register_change(303, 101)
-			assert results.get(timeout=2) == frozenset({101})
-			sync.register_abort(303)
-
-			sync.register_change(303, 102)
-			sync.register_change_commit(303)
-			assert results.get(timeout=2) == frozenset({102})
-
-			try:
-				unexpected = results.get(timeout=0.12)
-			except Empty:
-				unexpected = None
-
-			assert unexpected is None
-		finally:
-			sync.close()
-
 	# Callbacks may change subscriptions during delivery without deadlock.
 	# Only subscribers registered for the next dispatch receive it.
 	# ----------------------------------------------------------------------
@@ -687,11 +605,11 @@ class TestSync(o.Tester):
 		try:
 			sync.subscribe(change_subscriptions)
 			sync.register_change(304, 111)
-			sync.register_change_commit(304)
+			sync.publish_change(sync.changes.pop(304), local=True)
 			assert first.get(timeout=2) == frozenset({111})
 
 			sync.register_change(305, 112)
-			sync.register_change_commit(305)
+			sync.publish_change(sync.changes.pop(305), local=True)
 			assert second.get(timeout=2) == frozenset({112})
 
 			try:
@@ -721,12 +639,12 @@ class TestSync(o.Tester):
 		def write():
 			for txn in range(400, 600):
 				sync.register_change(txn, txn + 1000)
-				sync.register_change_commit(txn)
+				sync.publish_change(sync.changes.pop(txn), local=True)
 
 		try:
 			sync.subscribe(callback)
 			sync.register_change(399, 1399)
-			sync.register_change_commit(399)
+			sync.publish_change(sync.changes.pop(399), local=True)
 			assert entered.wait(timeout=2)
 
 			with ThreadPoolExecutor(max_workers=1) as pool:
@@ -758,7 +676,7 @@ class TestSync(o.Tester):
 		try:
 			sync.subscribe(received.append)
 			sync.register_change(601, 1601)
-			sync.register_change_commit(601)
+			sync.publish_change(sync.changes.pop(601), local=True)
 			sync.register_change(602, 1602)
 			sync.close()
 
@@ -787,7 +705,7 @@ class TestSync(o.Tester):
 		try:
 			sync.subscribe(callback)
 			sync.register_change(603, 1603)
-			sync.register_change_commit(603)
+			sync.publish_change(sync.changes.pop(603), local=True)
 			assert received.get(timeout=2) == frozenset({1603})
 
 			sync.close()
@@ -839,7 +757,7 @@ class TestSync(o.Tester):
 
 		sync.subscribe(results.append)
 		sync.register_change(60, 61)
-		sync.register_change_commit(60)
+		sync.publish_change(sync.changes.pop(60), local=True)
 		sync.close()
 
 		assert results == [frozenset({61})]

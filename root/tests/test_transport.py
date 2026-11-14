@@ -98,7 +98,7 @@ assert not any(thread.name == 'o-transport' for thread in threading.enumerate())
 		try:
 			o.services.Sync.register_change(7800001, 780001)
 			o.services.Sync.register_change(7800001, 780002)
-			o.services.Sync.register_change_commit(7800001)
+			o.services.Sync.publish_change(o.services.Sync.changes.pop(7800001), local=True)
 
 			assert cls._frame(peer) == [780001, 780002]
 		finally:

@@ -1,7 +1,7 @@
 # ==============================================================================
 # TEST WRITE INVALIDATION
 # ==============================================================================
-# Send every owner immediately; confirm once after successful LMDB commit.
+# Collect owner IDs in Sync during writes; publish only after LMDB commit.
 # ==============================================================================
 
 from types import SimpleNamespace
@@ -20,11 +20,17 @@ class TestWriteTracking(o.Tester):
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _observe(cls):
-		events = []
+		events  = []
+		changes = {}
+
+		def register_change(txn, owner_id):
+			changes.setdefault(txn, []).append(owner_id)
+			events.append(('register_change', owner_id))
+
 		o.services.Memory.sync = SimpleNamespace(
-			register_change  = lambda txn, owner_id: events.append(('register_change', owner_id)),
-			register_change_commit = lambda txn: events.append(('register_change_commit', None)),
-			register_abort = lambda txn: None,
+			changes         = changes,
+			register_change = register_change,
+			publish_change  = lambda ids, local=True: events.append(('register_change_commit', None)),
 		)
 
 		return events
@@ -63,7 +69,7 @@ class TestWriteTracking(o.Tester):
 			o.services.Memory.sync = o.services.Sync
 			cls._restore_runtime(state)
 
-	# register_change happens during the transaction; register_change_commit after commit.
+	# Collection happens during writes; publication happens after commit.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_precedes_commit_and_confirms_afterward(cls):
@@ -75,14 +81,18 @@ class TestWriteTracking(o.Tester):
 			owner_id = o.services.Id.hash('o.T.WriteBoundary._1')
 			events   = []
 
+			changes = {}
+
 			def register_change(txn, entity_id):
 				with memory.env.begin() as tx:
 					assert tx.get(memory._key(key)) is None
 
+				changes.setdefault(txn, []).append(entity_id)
 				events.append(('register_change', entity_id))
 
-			def register_change_commit(txn):
+			def publish_change(ids, local=True):
 				assert memory._write is None
+				assert ids == [owner_id] and local
 
 				with memory.env.begin() as tx:
 					assert memory.from_bytes(tx.get(memory._key(key))) == 17
@@ -90,9 +100,9 @@ class TestWriteTracking(o.Tester):
 				events.append(('register_change_commit', None))
 
 			memory.sync = SimpleNamespace(
-				register_change  = register_change,
-				register_change_commit = register_change_commit,
-				register_abort = lambda txn: None,
+				changes         = changes,
+				register_change = register_change,
+				publish_change  = publish_change,
 			)
 			memory.set(key, 17, owner_id)
 
@@ -284,9 +294,9 @@ class TestWriteTracking(o.Tester):
 				raise RuntimeError('Sync disconnected')
 
 			memory.sync = SimpleNamespace(
-				register_change  = fail,
-				register_change_commit = lambda txn: calls.append('register_change_commit'),
-				register_abort = lambda txn: None,
+				changes         = {},
+				register_change = fail,
+				publish_change  = lambda ids, local=True: calls.append('register_change_commit'),
 			)
 
 			failed = False
@@ -544,15 +554,19 @@ class TestWriteTracking(o.Tester):
 			zone   = memory.zone('o.T.WriteNestedFailure._1.')
 			events = []
 
+			changes = {}
+
 			def register_change(txn, owner_id):
 				events.append(('register_change', owner_id))
 				if len(events) == 2:
 					raise ValueError('Sync refused change')
 
+				changes.setdefault(txn, []).append(owner_id)
+
 			memory.sync = SimpleNamespace(
-				register_change  = register_change,
-				register_change_commit = lambda txn: events.append(('register_change_commit', None)),
-				register_abort = lambda txn: None,
+				changes         = changes,
+				register_change = register_change,
+				publish_change  = lambda ids, local=True: events.append(('register_change_commit', None)),
 			)
 			aborted = False
 
@@ -626,14 +640,20 @@ class TestWriteTracking(o.Tester):
 			owner_id = o.services.Id.hash('o.T.WriteCommitError._1')
 			events   = []
 
-			def fail(txn):
+			changes = {}
+
+			def register_change(txn, id):
+				changes.setdefault(txn, []).append(id)
+				events.append(('register_change', id))
+
+			def fail(ids, local=True):
 				events.append('register_change_commit')
 				raise ValueError('transport failed after commit')
 
 			memory.sync = SimpleNamespace(
-				register_change  = lambda txn, id: events.append(('register_change', id)),
-				register_change_commit = fail,
-				register_abort = lambda txn: None,
+				changes         = changes,
+				register_change = register_change,
+				publish_change  = fail,
 			)
 			committed = False
 
@@ -641,7 +661,7 @@ class TestWriteTracking(o.Tester):
 				memory.set(key, 7, owner_id)
 			except RuntimeError as error:
 				committed = (
-					str(error) == 'LMDB committed; Sync confirmation failed'
+					str(error) == 'LMDB committed; Sync publication failed'
 					and isinstance(error.__cause__, ValueError)
 				)
 

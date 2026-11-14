@@ -1,8 +1,8 @@
 # ==============================================================================
 # SYNC SERVICE
 # ==============================================================================
-# Keep transaction bookkeeping in the producer and notification delivery in a
-# separate worker. Handoff uses SimpleQueue; the worker sleeps when idle.
+# Keep changed IDs in Sync until LMDB commits; use one queued publication
+# entry point for both local and externally received changes.
 # ==============================================================================
 
 import logging
@@ -36,8 +36,8 @@ class Sync(o.Service):
 
 	# One delivery point for local and external invalidations.
 	# ----------------------------------------------------------------------
-	def _update(self, ids, remote=False):
-		if remote:
+	def _update(self, ids, local=True):
+		if not local:
 			o.services.Cache.invalidate(ids)
 
 		with self._lock:
@@ -46,7 +46,7 @@ class Sync(o.Service):
 		full = ids is None
 
 		for callback, (watched, local_only) in callbacks:
-			if remote and local_only:
+			if not local and local_only:
 				continue
 
 			matching = ids if full or watched is None else ids & watched
@@ -59,7 +59,7 @@ class Sync(o.Service):
 
 	# Coalesce once, then dispatch local or remote invalidations.
 	# ----------------------------------------------------------------------
-	def _deliver(self, batches, remote=False):
+	def _deliver(self, batches, local=True):
 		ids = set()
 
 		for batch in batches:
@@ -72,99 +72,63 @@ class Sync(o.Service):
 		if ids is not None:
 			ids = None if 0 in ids else frozenset(ids)
 
-		self._update(ids, remote=remote)
+		self._update(ids, local=local)
 
-	# Sleep without a deadline when idle; otherwise poll for committed
-	# batches and fallback candidates with minimal producer interference.
+	# Group queued committed changes by origin and deliver them in the worker.
 	# ----------------------------------------------------------------------
 	def _run(self):
-		pending       = []
 		last_activity = monotonic()
 
-		while not self._closed:
-			# Recheck the queues after declaring sleep, so a simultaneous
-			# commit can always wake the worker.
-			# ----------------------------------------------------------
-			if (
-				monotonic() - last_activity >= self.idle_delay
-				and not pending and self._registered.empty()
-				and self._ready.empty() and self._remote.empty()
-			):
+		while not self._closed or not self._queue.empty():
+			if not self._closed and monotonic() - last_activity >= self.idle_delay and self._queue.empty():
 				self._wake.clear()
 				self._sleeping = True
 
-				if not pending and self._registered.empty() and self._ready.empty() and self._remote.empty():
+				if self._queue.empty() and not self._closed:
 					self._wake.wait()
 
 				self._sleeping = False
-			else:
+			elif not self._closed:
 				self._wake.wait(self.batch_delay)
 
 			self._wake.clear()
 
-			# The worker owns the list of pending fallback records. Records
-			# are uniquely allocated, so reused LMDB txn IDs cannot collide.
-			# ----------------------------------------------------------
-			for record in self._drain(self._registered):
-				if record[2]:
-					pending.append(record)
+			events = self._drain(self._queue)
 
-			batches = self._drain(self._ready)
-			remote  = self._drain(self._remote)
-			now     = monotonic()
-			active  = []
+			if events:
+				last_activity  = monotonic()
+				local_batches  = []
+				remote_batches = []
 
-			for record in pending:
-				if record[2]:
-					if now >= record[0]:
-						batches.append(tuple(record[1]))
-						record[0] = now + self.fallback_delay
+				for ids, local in events:
+					if local:
+						local_batches.append(ids)
+					else:
+						remote_batches.append(ids)
 
-					active.append(record)
+				if local_batches:
+					self._deliver(local_batches, local=True)
 
-			pending = active
-
-			if batches:
-				last_activity = now
-				self._deliver(batches)
-
-			if remote:
-				last_activity = now
-				self._deliver(remote, remote=True)
-
-		# A close requested after commit must still deliver queued changes.
-		# ------------------------------------------------------------------
-		batches = self._drain(self._ready)
-		remote  = self._drain(self._remote)
-
-		if batches:
-			self._deliver(batches)
-
-		if remote:
-			self._deliver(remote, remote=True)
+				if remote_batches:
+					self._deliver(remote_batches, local=False)
 
 	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Create one worker per ontology. Default delivery poll is 1 ms,
-	# fallback is 1 second, and the worker sleeps after 20 ms of quiet.
+	# Create one worker per ontology; there is no pre-commit fallback.
 	# ----------------------------------------------------------------------
-	def initialize(self, batch_delay=0.001, fallback_delay=1.0, idle_delay=0.02):
-		if batch_delay <= 0 or fallback_delay <= 0 or idle_delay <= 0:
+	def initialize(self, batch_delay=0.001, idle_delay=0.02):
+		if batch_delay <= 0 or idle_delay <= 0:
 			raise ValueError('Sync delays must be positive')
 
-		self.batch_delay    = batch_delay
-		self.fallback_delay = fallback_delay
-		self.idle_delay     = idle_delay
+		self.batch_delay = batch_delay
+		self.idle_delay  = idle_delay
 
-		# The producer exclusively owns changes; the worker receives
-		# independently allocated records and completed ID lists.
+		# Only the worker handles delivery; pending IDs stay in Sync.
 		# --------------------------------------------------------------
 		self.changes      = {}
-		self._registered  = SimpleQueue()
-		self._ready       = SimpleQueue()
-		self._remote      = SimpleQueue()
+		self._queue       = SimpleQueue()
 		self._wake        = threading.Event()
 		self._lock        = threading.Lock()
 		self._subscribers = {}
@@ -206,13 +170,13 @@ class Sync(o.Service):
 
 		return callback
 
-	# Queue externally received invalidations; no new local transaction.
+	# Queue changes immediately; only the worker coalesces and dispatches.
 	# ----------------------------------------------------------------------
-	def receive(self, ids):
+	def publish_change(self, ids, local=True):
 		if self._closed:
 			raise RuntimeError('Sync is closed')
 
-		if ids is not None:
+		if not local and ids is not None:
 			if not isinstance(ids, (set, frozenset)):
 				raise TypeError('Sync invalidations must be a set or None')
 
@@ -221,8 +185,10 @@ class Sync(o.Service):
 
 			ids = frozenset(ids)
 
-		self._remote.put(ids)
-		self._wake.set()
+		self._queue.put((ids, local))
+
+		if self._sleeping:
+			self._wake.set()
 
 	# Stop notifications to the given callback.
 	# ----------------------------------------------------------------------
@@ -230,8 +196,7 @@ class Sync(o.Service):
 		with self._lock:
 			self._subscribers.pop(callback, None)
 
-	# Append an ID without acquiring the worker's lock. Each LMDB write
-	# transaction has one producer and a private record.
+	# Collect owner IDs during writes without publishing speculative changes.
 	# ----------------------------------------------------------------------
 	def register_change(self, txn, id):
 		if self._closed:
@@ -240,34 +205,9 @@ class Sync(o.Service):
 		record = self.changes.get(txn)
 
 		if record is None:
-			record = [monotonic() + self.fallback_delay, [id], True]
-			self.changes[txn] = record
-			self._registered.put(record)
-
-			if self._sleeping:
-				self._wake.set()
+			self.changes[txn] = [id]
 		else:
-			record[1].append(id)
-
-	# Transfer a committed record to the worker without waiting for it.
-	# ----------------------------------------------------------------------
-	def register_change_commit(self, txn):
-		if self._closed:
-			raise RuntimeError('Sync is closed')
-
-		record = self.changes.pop(txn, None)
-
-		if record is not None:
-			record[2] = False
-			self._ready.put(record[1])
-
-	# Drop a rolled-back candidate. A fallback already delivered is allowed.
-	# ----------------------------------------------------------------------
-	def register_abort(self, txn):
-		record = self.changes.pop(txn, None)
-
-		if record is not None:
-			record[2] = False
+			record.append(id)
 
 	# Flush confirmed notifications and terminate cleanly.
 	# ----------------------------------------------------------------------

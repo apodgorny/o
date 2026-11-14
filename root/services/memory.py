@@ -86,13 +86,13 @@ class MemoryBatch:
 				self.ctx      = None
 
 				if not committed and sync is not None:
-					sync.register_abort(txn_id)
+					sync.changes.pop(txn_id, None)
 
 			if committed and sync is not None:
 				try:
-					sync.register_change_commit(txn_id)
+					sync.publish_change(sync.changes.pop(txn_id), local=True)
 				except Exception as error:
-					raise RuntimeError('LMDB committed; Sync confirmation failed') from error
+					raise RuntimeError('LMDB committed; Sync publication failed') from error
 
 			if aborted and exc_type is None:
 				raise RuntimeError('Transaction aborted after an earlier failure')
