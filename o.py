@@ -15,5 +15,6 @@ o.TREE_MODE   = False
 
 # Each ontology starts explicitly; fork() only selects its isolated world.
 # sync=True flushes LMDB commits; False favors throughput over durability.
+# multiprocess=True enables IPC; default False is in-process only.
 o.start = o.services.Ontology.start
 o.fork  = o.services.Ontology.fork
