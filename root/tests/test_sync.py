@@ -64,13 +64,11 @@ class TestSync(o.Tester):
 		published    = Queue()
 		subscribed   = Queue()
 		transport    = SimpleNamespace(
-			path  = o.services.Memory.path,
-			send  = lambda ids: published.put((ids, threading.get_ident())),
-			close = lambda: None,
+			send = lambda ids: published.put((ids, threading.get_ident())),
 		)
 
 		try:
-			sync.attach_transport(transport)
+			sync.subscribe(transport.send, local_only=True)
 			sync.subscribe(lambda ids: subscribed.put((ids, threading.get_ident())))
 
 			sync.register_change(90001, 90002)
