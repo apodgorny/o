@@ -7,8 +7,7 @@
 import logging
 import threading
 
-from queue import Empty, SimpleQueue
-from time  import monotonic
+from queue import SimpleQueue
 
 import o
 
@@ -45,31 +44,15 @@ class Sync(o.Service):
 	# Deliver each queued change separately, in publication order.
 	# ----------------------------------------------------------------------
 	def _run_worker_loop(self):
-		last_activity = monotonic()
+		while True:
+			event = self._queue.get()
 
-		while not self._closed or not self._queue.empty():
-			if not self._closed and monotonic() - last_activity >= self.idle_delay and self._queue.empty():
-				self._wake.clear()
-				self._sleeping = True
+			if event is self._stop:
+				break
 
-				if self._queue.empty() and not self._closed:
-					self._wake.wait()
-
-				self._sleeping = False
-			elif not self._closed:
-				self._wake.wait(self.batch_delay)
-
-			self._wake.clear()
-
-			while not self._queue.empty():
-				try:
-					ids, local = self._queue.get_nowait()
-				except Empty:
-					break
-
-				last_activity = monotonic()
-				ids = None if ids is None or 0 in ids else frozenset(ids)
-				self._update(ids, local=local)
+			ids, local = event
+			ids = None if ids is None or 0 in ids else frozenset(ids)
+			self._update(ids, local=local)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -77,20 +60,13 @@ class Sync(o.Service):
 
 	# Create one worker per ontology; there is no pre-commit fallback.
 	# ----------------------------------------------------------------------
-	def initialize(self, batch_delay=0.001, idle_delay=0.02):
-		if batch_delay <= 0 or idle_delay <= 0:
-			raise ValueError('Sync delays must be positive')
-
-		self.batch_delay = batch_delay
-		self.idle_delay  = idle_delay
-
+	def initialize(self):
 		# Only the worker handles delivery.
 		# --------------------------------------------------------------
 		self._queue       = SimpleQueue()
-		self._wake        = threading.Event()
+		self._stop        = object()
 		self._lock        = threading.Lock()
 		self._subscribers = {}
-		self._sleeping    = False
 		self._closed      = False
 
 		self._worker = threading.Thread(
@@ -151,15 +127,13 @@ class Sync(o.Service):
 
 		self._queue.put((ids, local))
 
-		if self._sleeping:
-			self._wake.set()
-
 
 	# Flush confirmed notifications and terminate cleanly.
 	# ----------------------------------------------------------------------
 	def close(self):
-		self._closed = True
-		self._wake.set()
+		if not self._closed:
+			self._closed = True
+			self._queue.put(self._stop)
 
 		if self._worker is not threading.current_thread():
 			self._worker.join()
