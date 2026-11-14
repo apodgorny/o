@@ -168,12 +168,7 @@ class Transport(o.Service):
 		if o.services.Memory.path != self.path:
 			return
 
-		if ids is None:
-			payload = None
-		elif isinstance(ids, (set, frozenset)) and ids and all(type(id) is int and id > 0 for id in ids):
-			payload = sorted(ids)
-		else:
-			raise ValueError('Transport expects None or a nonempty set of positive IDs')
+		payload = None if ids is None else sorted(ids)
 
 		message = json.dumps(payload, separators=(',', ':')).encode('utf-8') + b'\n'
 
