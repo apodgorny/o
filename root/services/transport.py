@@ -156,25 +156,22 @@ class Transport(o.Service):
 	# Send only changes from the ontology registered with this relay.
 	# ----------------------------------------------------------------------
 	def send(self, ids):
-		if o.services.Memory.path != self.path:
-			return
+		if o.services.Memory.path == self.path:
+			payload = None if ids is None else list(ids)
+			message = json.dumps(payload, separators=(',', ':')).encode('utf-8') + b'\n'
 
-		payload = None if ids is None else sorted(ids)
+			with self._lock:
+				connection = self._connection
 
-		message = json.dumps(payload, separators=(',', ':')).encode('utf-8') + b'\n'
-
-		with self._lock:
-			connection = self._connection
-
-			if connection is not None:
-				try:
-					connection.sendall(message)
-				except OSError:
-					self._connection = None
-
+				if connection is not None:
 					try:
-						connection.shutdown(socket.SHUT_RDWR)
+						connection.sendall(message)
 					except OSError:
-						pass
+						self._connection = None
 
-					connection.close()
+						try:
+							connection.shutdown(socket.SHUT_RDWR)
+						except OSError:
+							pass
+
+						connection.close()
