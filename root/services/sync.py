@@ -1,8 +1,7 @@
 # ==============================================================================
 # SYNC SERVICE
 # ==============================================================================
-# Keep changed IDs in Sync until LMDB commits; use one queued publication
-# entry point for both local and externally received changes.
+# Queue committed changes from memory and transport through one worker.
 # ==============================================================================
 
 import logging
@@ -125,9 +124,8 @@ class Sync(o.Service):
 		self.batch_delay = batch_delay
 		self.idle_delay  = idle_delay
 
-		# Only the worker handles delivery; pending IDs stay in Sync.
+		# Only the worker handles delivery.
 		# --------------------------------------------------------------
-		self.changes      = {}
 		self._queue       = SimpleQueue()
 		self._wake        = threading.Event()
 		self._lock        = threading.Lock()
@@ -196,18 +194,6 @@ class Sync(o.Service):
 		if self._sleeping:
 			self._wake.set()
 
-	# Collect owner IDs during writes without publishing speculative changes.
-	# ----------------------------------------------------------------------
-	def register_change(self, txn, id):
-		if self._closed:
-			raise RuntimeError('Sync is closed')
-
-		record = self.changes.get(txn)
-
-		if record is None:
-			self.changes[txn] = [id]
-		else:
-			record.append(id)
 
 	# Flush confirmed notifications and terminate cleanly.
 	# ----------------------------------------------------------------------
