@@ -143,10 +143,10 @@ crashes after committing.
 
 ## Worker and delivery timing
 
-`Sync.initialize(batch_delay=0.001, idle_delay=0.02)` creates one worker.
-`publish_change(ids, local)` puts the event into a `SimpleQueue` and wakes
-the sleeping worker, without copying or processing owner IDs on the producer
-side. There is no pre-commit speculative fallback.
+`Sync.initialize()` starts one worker. It blocks on `SimpleQueue.get()`
+until a change arrives, without timers or polling. `publish_change(ids, local)`
+enqueues one event without copying or processing IDs on the producer side.
+There is no pre-commit speculative fallback.
 
 - `local=True`: the worker normalizes IDs, informs matching local subscribers,
   and notifies Transport through its `local_only` subscription. It does not
@@ -156,7 +156,7 @@ side. There is no pre-commit speculative fallback.
 - Each queued event is delivered independently, in publication order. The
   worker deduplicates IDs only within that event, treats ID `0` or `None` as
   full invalidation, and isolates callback failures.
-- `close()` drains already queued committed events and terminates the worker.
+- `close()` queues a shutdown sentinel after pending events and joins the worker.
 
 A Sync callback signals that locally committed or externally announced owner
 state may have changed, not that the subscriber has applied the change.
@@ -167,7 +167,7 @@ Consumers re-read committed state through O APIs.
 - `test_sync.py`: filtered/global/empty subscriptions, scope replacement,
   None/full invalidation, worker-thread callbacks, publication ordering,
   commit visibility, no pre-commit publication, abort, concurrent producers,
-  wakeups, reentrant and failing callbacks, blocked listeners, and close.
+  blocking queue delivery, reentrant and failing callbacks, blocked listeners, and close.
 - `test_write_tracking.py`: actual field, collection, class and instance
   ownership; transaction nesting, rollback, Zone cache recovery and
   post-commit failure.
