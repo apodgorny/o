@@ -83,7 +83,7 @@ class MemoryBatch:
 				self.ctx      = None
 
 
-			if committed and (ids is None or ids):
+			if committed and sync is not None and (ids is None or ids):
 				try:
 					sync.publish_change(ids, local=True)
 				except Exception as error:
