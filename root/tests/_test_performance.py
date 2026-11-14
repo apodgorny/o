@@ -228,6 +228,7 @@ if __name__ == '__main__':
 	parser.add_argument('--workload', choices=['legacy', 'expanded'], default='legacy')
 	parser.add_argument('--instrumented', action='store_true')
 	parser.add_argument('--mode', choices=['both', 'tree', 'graph'], default='both')
+	parser.add_argument('--multiprocess', action='store_true', help='Include O Transport and its IPC relay')
 	parser.add_argument('--baseline', nargs='?', const=DEFAULT_BASELINE, metavar='GIT_REF', help='Compare with a git revision (default: pre-tree)')
 	parser.add_argument('--profile', action='store_true', help='Run separate cProfile passes without affecting timing results')
 	parser.add_argument('--profile-case', choices=[
@@ -268,7 +269,7 @@ if __name__ == '__main__':
 			if mode == 'baseline':
 				o.start()
 			else:
-				o.start(tree_mode=mode == 'tree')
+				o.start(tree_mode=mode == 'tree', multiprocess=args.multiprocess)
 
 			o.Timer.enabled = args.instrumented and args._profile_only
 
@@ -314,7 +315,7 @@ if __name__ == '__main__':
 				modes.insert(0, 'baseline')
 
 			measurements = {mode: {} for mode in modes}
-			print(f'{args.rounds} rounds × {args.size} iterations; independent LMDB per run.', flush=True)
+			print(f'{args.rounds} rounds × {args.size} iterations; independent LMDB per run; multiprocess={args.multiprocess}.', flush=True)
 
 			for round_index in range(args.rounds):
 				order = modes if round_index % 2 == 0 else list(reversed(modes))
@@ -328,6 +329,9 @@ if __name__ == '__main__':
 						'--_mode', mode,
 						'--_json',
 					]
+
+					if args.multiprocess:
+						command.append('--multiprocess')
 					environment = dict(os.environ)
 
 					if mode == 'baseline':
@@ -384,6 +388,9 @@ if __name__ == '__main__':
 						'--profile-top', str(args.profile_top),
 						'--_profile_only',
 					]
+
+					if args.multiprocess:
+						command.append('--multiprocess')
 					environment = dict(os.environ)
 
 					if mode == 'baseline':
