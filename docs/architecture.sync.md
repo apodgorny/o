@@ -1,14 +1,15 @@
 # Architecture: Sync — owner-ID invalidation delivery
 
-**Status:** Implemented in-process notification service; not an inter-process
-transport or a durable event log.
+**Status:** Implemented in-process notification service with optional host-local
+Transport forwarding; not a durable event log.
 
 **Sources:** `root/services/sync.py`, `root/services/memory.py`,
 `root/services/ontology.py`.
 **Tests:** `root/tests/test_sync.py`, `root/tests/test_write_tracking.py`.
 **Related:** [Tracker](architecture.tracker.md),
 [application object API](architecture.public_api.md),
-[ontology forks](architecture.fork.md).
+[ontology forks](architecture.fork.md),
+[Transport](architecture.transport.md).
 
 ## Responsibility
 
@@ -66,7 +67,6 @@ graph for a new world), independent of notifications. See
 | `sync.subscribe(callback, local_only=True)` | Notify only for changes originating in this process |
 | `sync.publish_change(ids, local=False)` | Enqueue an external invalidation |
 | `sync.unsubscribe(callback)` | Remove the callback from future deliveries |
-| `sync.close()` | End worker lifetime; flush queued committed batches |
 
 `subscribe` returns the **callback**, not a separate token.
 Subscriptions are keyed by callback: registering the same callback again
@@ -82,11 +82,10 @@ without echoing incoming messages. Incoming changes are queued with `publish_cha
 invalidate the local cache, and then notify ordinary subscribers.
 
 A filtered **empty** set receives no ordinary change events, but still
-receives a full invalidation (`None`). Memory retains its existing internal
-owner ID `0` for unknown affected owners; Sync converts it to `None` only
-when delivering callbacks or sending notifications through Transport.
-When full and specific invalidations combine, `None` supersedes the IDs.
-Unsubscribing an unknown callback is harmless.
+receives a full invalidation (`None`). An unknown owner is represented by
+`None` at the Memory boundary; `0` is not a full-invalidation sentinel.
+When full and specific invalidations combine in a write batch, `None`
+supersedes the IDs. Unsubscribing an unknown callback is harmless.
 
 Callbacks receive `frozenset[int] | None` and execute on the **`o-sync` worker
 thread**, not the writer's thread or an asyncio task. Cross-thread consumers
@@ -132,9 +131,10 @@ sync.publish_change(ids, local=True)
 ~~~
 
 The hot path only enqueues the list. The worker independently processes each
-publication, deduplicates IDs within it, filters subscribers, and forwards
-local events to Transport. Unknown owner ID `0` means full invalidation
-(`None`) for listeners. Missing-key or empty-prefix deletions do not notify.
+publication, deduplicates IDs within it with `frozenset`, filters subscribers,
+and forwards local events to Transport. Passing `None` requests full
+invalidation for listeners. Empty write batches, missing-key deletions, and
+empty-prefix deletions do not notify. Read transactions do not publish.
 
 If publication fails after commit, the transaction remains committed and
 `MemoryBatch` raises `RuntimeError('LMDB committed; Sync publication failed')`.
@@ -154,9 +154,14 @@ There is no pre-commit speculative fallback.
 - `local=False`: the worker invalidates affected cached objects, then informs
   ordinary subscribers. It does not re-send the change through Transport.
 - Each queued event is delivered independently, in publication order. The
-  worker deduplicates IDs only within that event, treats ID `0` or `None` as
-  full invalidation, and isolates callback failures.
-- `close()` queues a shutdown sentinel after pending events and joins the worker.
+  worker deduplicates IDs only within that event, treats `None` as full
+  invalidation, and isolates subscriber callback failures.
+- The worker is a daemon thread and runs for the application process lifetime.
+  There is no `Sync.close()`, shutdown sentinel or queue flush on process exit.
+  Events still queued at exit may be lost.
+- If remote `Cache.invalidate(ids)` raises an exception, Sync logs the critical
+  failure and terminates the process with `os._exit(1)` rather than continuing
+  with potentially stale cached entities.
 
 A Sync callback signals that locally committed or externally announced owner
 state may have changed, not that the subscriber has applied the change.
@@ -167,7 +172,7 @@ Consumers re-read committed state through O APIs.
 - `test_sync.py`: filtered/global/empty subscriptions, scope replacement,
   None/full invalidation, worker-thread callbacks, publication ordering,
   commit visibility, no pre-commit publication, abort, concurrent producers,
-  blocking queue delivery, reentrant and failing callbacks, blocked listeners, and close.
+  blocking queue delivery, reentrant and failing callbacks, and blocked listeners.
 - `test_write_tracking.py`: actual field, collection, class and instance
   ownership; transaction nesting, rollback, Zone cache recovery and
   post-commit failure.
