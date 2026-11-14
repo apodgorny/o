@@ -470,7 +470,7 @@ class TestWriteTracking(o.Tester):
 			events = cls._observe()
 
 			assert memory.get('o.T.Absent') is o.Undefined
-			memory.unset('o.T.Absent', 0)
+			memory.unset('o.T.Absent', None)
 
 			with memory.write():
 				pass
@@ -610,13 +610,13 @@ class TestWriteTracking(o.Tester):
 			key    = 'o.T.WriteReadYourWrites._1.value'
 
 			with memory.write():
-				memory.set(key, 11, 0)
+				memory.set(key, 11, None)
 				assert memory.get(key) == 11
 				assert memory.has(key)
 				assert list(memory.items(key)) == [(key, 11)]
 				assert list(memory.keys(key)) == [key]
 
-				memory.unset(key, 0)
+				memory.unset(key, None)
 				assert memory.get(key) is o.Undefined
 				assert not memory.has(key)
 				assert list(memory.items(key)) == []
