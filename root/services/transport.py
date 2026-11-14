@@ -152,6 +152,7 @@ class Transport(o.Service):
 		connection, reader = self._connect()
 		self._connection  = connection
 		o.services.Cache.invalidate_all()
+		self.sync.subscribe(self.send, local_only=True)
 		self._worker = threading.Thread(
 			target = self._run,
 			args   = (connection, reader),
@@ -193,6 +194,7 @@ class Transport(o.Service):
 	# ----------------------------------------------------------------------
 	def close(self):
 		self._closed.set()
+		self.sync.unsubscribe(self.send)
 
 		with self._lock:
 			connection      = self._connection
