@@ -248,6 +248,9 @@ if __name__ == '__main__':
 	if args.baseline is not None and args.mode != 'both':
 		parser.error('--baseline requires --mode both')
 
+	if args.baseline is not None and args.multiprocess:
+		parser.error('--baseline comparison requires the default in-process mode')
+
 	if args.instrumented and not (args.profile or args._profile_only):
 		parser.error('--instrumented requires --profile')
 
