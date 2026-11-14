@@ -503,7 +503,15 @@ class TestInstance(o.Tester):
 			root_name = os.path.basename(state['root'])
 			Tracked   = o.T.extend(f'Tracked_{root_name}', foo=str)
 			x         = Tracked(foo='a')
-			callback  = sync.subscribe(received.put)
+			checkpoint = Queue()
+			barrier    = sync.subscribe(checkpoint.put)
+			sync.publish_change([x.id], local=True)
+
+			while x.id not in checkpoint.get(timeout=2):
+				pass
+
+			sync.unsubscribe(barrier)
+			callback = sync.subscribe({x.id}, received.put)
 
 			x.foo = 'b'
 			assert x.id in received.get(timeout=2)
