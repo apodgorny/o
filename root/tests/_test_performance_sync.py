@@ -63,16 +63,21 @@ class TestPerformanceSync(o.Tester):
 					peer, reader = cls._peer(o.services.Transport, memory.path)
 				else:
 					arrivals = Queue()
-					sync.subscribe(arrivals.put)
+					watched = set(range(1 << 60, (1 << 60) + latency_samples))
+					sync.subscribe(watched, arrivals.put)
 
 				try:
 					for index in range(latency_samples):
-						owner_id = index + 1
+						owner_id = (1 << 60) + index
 						started  = time.perf_counter_ns()
 						sync.publish_change([owner_id], local=True)
 
 						if mode == 'ipc':
-							assert json.loads(reader.readline()) == [owner_id]
+														while True:
+								frame = reader.readline()
+								assert frame, 'IPC peer disconnected before delivery'
+								if json.loads(frame) == [owner_id]:
+									break
 						else:
 							assert arrivals.get(timeout=5) == frozenset({owner_id})
 
