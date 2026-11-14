@@ -34,9 +34,14 @@ class Sync(o.Service):
 
 		return items
 
-	# Notify subscribers after coalescing all available committed batches.
+	# Publish from the worker: remote refresh or local relay, then subscribers.
 	# ----------------------------------------------------------------------
-	def _update(self, ids):
+	def _update(self, ids, remote=False):
+		if remote:
+			o.services.Cache.invalidate(ids)
+		elif self._transport is not None and o.services.Memory.path == self._transport.path:
+			self._transport.send(ids)
+
 		with self._lock:
 			callbacks = tuple(self._subscribers.items())
 
@@ -66,12 +71,7 @@ class Sync(o.Service):
 		if ids is not None:
 			ids = None if 0 in ids else frozenset(ids)
 
-		if remote:
-			o.services.Cache.invalidate(ids)
-		elif self._transport is not None and o.services.Memory.path == self._transport.path:
-			self._transport.send(ids)
-
-		self._update(ids)
+		self._update(ids, remote=remote)
 
 	# Sleep without a deadline when idle; otherwise poll for committed
 	# batches and fallback candidates with minimal producer interference.
