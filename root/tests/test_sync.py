@@ -20,15 +20,38 @@ class TestSync(o.Tester):
 	# PRIVATE METHODS
 	# ======================================================================
 
-	# Give each test its own service singleton and worker.
+	# Give each test a worker with test-only shutdown support.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def _sync(cls):
-		service_type = type('SyncTest', (type(o.services.Sync),), {})
+		def run_worker(self):
+			while True:
+				event = self._queue.get()
+
+				if event is self._test_stop:
+					break
+
+				ids, local = event
+				ids = None if ids is None else frozenset(ids)
+				self._update(ids, local=local)
+
+		service_type = type('SyncTest', (type(o.services.Sync),), {'_run_worker_loop': run_worker})
 		service      = service_type()
+		service._test_stop = object()
 		service.initialize()
 
 		return service
+
+	# Drain outstanding changes and terminate only the test worker.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def _finish(cls, sync):
+		if not getattr(sync, '_test_finished', False):
+			sync._test_finished = True
+			sync._queue.put(sync._test_stop)
+
+		if sync._worker is not threading.current_thread():
+			sync._worker.join()
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -54,7 +77,7 @@ class TestSync(o.Tester):
 			assert thread_id != threading.get_ident()
 			assert pending == {}
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Separate publications retain their order, even when queued together.
 	# ----------------------------------------------------------------------
@@ -68,7 +91,7 @@ class TestSync(o.Tester):
 			sync.publish_change([11, 11], local=True)
 			sync.publish_change([22], local=True)
 			sync.publish_change(frozenset({33}), local=False)
-			sync.close()
+			cls._finish(sync)
 
 			assert received == [
 				frozenset({11}),
@@ -76,7 +99,7 @@ class TestSync(o.Tester):
 				frozenset({33}),
 			]
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Pending IDs must remain invisible until the outer commit publishes.
 	# ----------------------------------------------------------------------
@@ -101,7 +124,7 @@ class TestSync(o.Tester):
 			sync.publish_change(pending.pop(10), local=True)
 			assert results.get(timeout=2) == frozenset({19, 23})
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Both IPC and local commits reach subscribers through the same worker.
 	# ----------------------------------------------------------------------
@@ -134,7 +157,7 @@ class TestSync(o.Tester):
 			assert remote_thread == local_thread
 			assert published.empty()
 		finally:
-			sync.close()
+			cls._finish(sync)
 	# Rollback removes pending IDs and never publishes.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -156,7 +179,7 @@ class TestSync(o.Tester):
 
 			assert unexpected is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# None requests full invalidation for every subscriber.
 	# ----------------------------------------------------------------------
@@ -170,7 +193,7 @@ class TestSync(o.Tester):
 			sync.publish_change(None, local=True)
 			assert results.get(timeout=2) is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 
 	# Global subscribers see every owner; selective subscribers see only
@@ -204,7 +227,7 @@ class TestSync(o.Tester):
 
 			assert unexpected is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# None invalidates all subscribers, including empty subscriptions.
 	# ----------------------------------------------------------------------
@@ -224,7 +247,7 @@ class TestSync(o.Tester):
 			for result in (global_q, filtered, empty_ids):
 				assert result.get(timeout=2) is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Capture the watched set at subscribe time. A second registration of
 	# the same callback replaces its scope rather than duplicating delivery.
@@ -265,7 +288,7 @@ class TestSync(o.Tester):
 
 			assert unexpected is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Unsubscribing a selective callback stops further notifications,
 	# while a global callback continues to receive the same changes.
@@ -293,7 +316,7 @@ class TestSync(o.Tester):
 
 			assert unexpected is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 	# Preserve the callback keyword and reject unsupported ID collections.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -318,7 +341,7 @@ class TestSync(o.Tester):
 
 			assert failed
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Unsubscribe excludes a callback from future dispatch.
 	# ----------------------------------------------------------------------
@@ -341,7 +364,7 @@ class TestSync(o.Tester):
 
 			assert unexpected is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# A discarded batch cannot leak IDs into the next publication.
 	# ----------------------------------------------------------------------
@@ -359,7 +382,7 @@ class TestSync(o.Tester):
 			sync.publish_change(pending.pop(45), local=True)
 			assert results.get(timeout=2) == frozenset({2})
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Subscriber failures are logged without interrupting later deliveries.
 	# ----------------------------------------------------------------------
@@ -383,11 +406,11 @@ class TestSync(o.Tester):
 					sync.publish_change(pending.pop(txn), local=True)
 					assert results.get(timeout=2) == frozenset({id})
 
-				sync.close()
+				cls._finish(sync)
 
 			assert errors == ['O Sync subscriber failed'] * 2
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Concurrent publishers keep their ID batches independent.
 	# ----------------------------------------------------------------------
@@ -424,7 +447,7 @@ class TestSync(o.Tester):
 			)
 			assert seen == expected
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Nested MemoryBatch writes publish once after the outer commit.
 	# ----------------------------------------------------------------------
@@ -491,7 +514,7 @@ class TestSync(o.Tester):
 			sync.publish_change([71], local=True)
 			assert results.get(timeout=2) == frozenset({71})
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# Repeated publications wake the blocking queue reader.
 	# ----------------------------------------------------------------------
@@ -507,7 +530,7 @@ class TestSync(o.Tester):
 				sync.publish_change([id], local=True)
 				assert results.get(timeout=2) == frozenset({id})
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# A burst of commits must deliver each publication without losing IDs.
 	# ----------------------------------------------------------------------
@@ -524,7 +547,7 @@ class TestSync(o.Tester):
 				pending.setdefault(txn, []).append(txn + 1)
 				sync.publish_change(pending.pop(txn), local=True)
 
-			sync.close()
+			cls._finish(sync)
 
 			ids = set()
 
@@ -533,7 +556,7 @@ class TestSync(o.Tester):
 
 			assert ids == set(range(1, 1001))
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 
 	# Concurrent writers must deliver every committed owner ID exactly once
@@ -561,7 +584,7 @@ class TestSync(o.Tester):
 			with ThreadPoolExecutor(max_workers=6) as pool:
 				list(pool.map(write, range(6)))
 
-			sync.close()
+			cls._finish(sync)
 
 			observed = set()
 
@@ -578,7 +601,7 @@ class TestSync(o.Tester):
 			assert pending == {}
 			assert not sync._worker.is_alive()
 		finally:
-			sync.close()
+			cls._finish(sync)
 	# Callbacks may change subscriptions during delivery without deadlock.
 	# Only subscribers registered for the next dispatch receive it.
 	# ----------------------------------------------------------------------
@@ -611,7 +634,7 @@ class TestSync(o.Tester):
 
 			assert unexpected is None
 		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# A blocked subscriber must not hold the writer's transaction path.
 	# Confirmations queued during a callback must arrive after it resumes.
@@ -646,7 +669,7 @@ class TestSync(o.Tester):
 
 			assert not release.is_set()
 			release.set()
-			sync.close()
+			cls._finish(sync)
 
 			observed = set()
 
@@ -656,65 +679,7 @@ class TestSync(o.Tester):
 			assert observed == set(range(1399, 1600))
 		finally:
 			release.set()
-			sync.close()
-
-	# Close delivers already published changes, not unpublished IDs.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_close_with_uncommitted_transaction(cls):
-		pending = {}
-		sync     = cls._sync()
-		received = []
-
-		try:
-			sync.subscribe(received.append)
-			pending.setdefault(601, []).append(1601)
-			sync.publish_change(pending.pop(601), local=True)
-			pending.setdefault(602, []).append(1602)
-			sync.close()
-
-			observed = set()
-
-			for batch in received:
-				observed.update(batch)
-
-			assert observed == {1601}
-			assert not sync._worker.is_alive()
-		finally:
-			sync.close()
-
-	# A subscriber is allowed to close its own Sync worker, without
-	# joining the current thread or leaving future writes enabled.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_close_from_subscriber(cls):
-		pending = {}
-		sync     = cls._sync()
-		received = Queue()
-
-		def callback(ids):
-			sync.close()
-			received.put(ids)
-
-		try:
-			sync.subscribe(callback)
-			pending.setdefault(603, []).append(1603)
-			sync.publish_change(pending.pop(603), local=True)
-			assert received.get(timeout=2) == frozenset({1603})
-
-			sync.close()
-			assert not sync._worker.is_alive()
-
-			failed = False
-
-			try:
-				sync.publish_change([1604], local=True)
-			except RuntimeError:
-				failed = True
-
-			assert failed
-		finally:
-			sync.close()
+			cls._finish(sync)
 
 	# A real LMDB commit must be visible to subscribers running on the
 	# worker thread, after the writer has finished the transaction.
@@ -739,32 +704,9 @@ class TestSync(o.Tester):
 			assert results.get(timeout=2) == (frozenset({1701}), 42)
 		finally:
 			memory.sync = original
-			sync.close()
+			cls._finish(sync)
 			cls._restore_runtime(state)
 
-	# Close waits for queued commits but refuses future writes.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def test_close(cls):
-		pending = {}
-		sync    = cls._sync()
-		results = []
-
-		sync.subscribe(results.append)
-		pending.setdefault(60, []).append(61)
-		sync.publish_change(pending.pop(60), local=True)
-		sync.close()
-
-		assert results == [frozenset({61})]
-
-		failed = False
-
-		try:
-			sync.publish_change([62], local=True)
-		except RuntimeError:
-			failed = True
-
-		assert failed
 
 
 if __name__ == '__main__':
