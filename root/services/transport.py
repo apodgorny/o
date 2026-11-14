@@ -118,13 +118,7 @@ class Transport(o.Service):
 						raise ConnectionError('Invalid O Transport frame')
 
 					ids = json.loads(frame)
-
-					if ids is not None:
-						if not isinstance(ids, list) or not ids or any(type(id) is not int or id <= 0 for id in ids):
-							raise ValueError('Invalid O Transport IDs')
-
-						ids = frozenset(ids)
-
+					ids = None if ids is None else frozenset(ids)
 					self.sync.publish_change(ids, local=False)
 				except (OSError, ValueError, ConnectionError):
 					with self._lock:
