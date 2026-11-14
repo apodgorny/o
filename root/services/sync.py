@@ -5,6 +5,7 @@
 # ==============================================================================
 
 import logging
+import os
 import threading
 
 from queue import SimpleQueue
@@ -22,7 +23,11 @@ class Sync(o.Service):
 	# ----------------------------------------------------------------------
 	def _update(self, ids, local=True):
 		if not local:
-			o.services.Cache.invalidate(ids)
+			try:
+				o.services.Cache.invalidate(ids)
+			except Exception:
+				logging.exception('Critical cache invalidation failure')
+				os._exit(1)
 
 		with self._lock:
 			callbacks = tuple(self._subscribers.items())
