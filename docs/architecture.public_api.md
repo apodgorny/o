@@ -156,7 +156,7 @@ read dependencies, or the result can remain stale.
 
 This is a necessary correctness condition, not a claim that all public transformations already satisfy it.
 
- `Tracker` records **reads only** and does not determine transaction
+`Tracker` records **reads only** and does not determine transaction
 success. `MemoryBatch` collects affected owner IDs during LMDB write
 transactions, publishes them through `Sync.publish_change(ids, local=True)`
 only after a successful outermost commit, and discards them on rollback.
