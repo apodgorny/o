@@ -26,8 +26,7 @@ class MemoryBatch:
 		self.tx       = None
 		self.depth    = 0
 		self.sync     = None
-		self.txn_id   = None
-		self.notified = False
+		self.ids      = None
 		self.failed   = False
 		self.zones    = None
 
@@ -37,9 +36,8 @@ class MemoryBatch:
 		if self.tx is None:
 			self.ctx      = self.memory.env.begin(write=self.write)
 			self.tx       = self.ctx.__enter__()
-			self.txn_id   = self.tx.id() if self.write else None
 			self.sync     = self.memory.sync if self.write else None
-			self.notified = False
+			self.ids      = [] if self.sync is not None else None
 			self.failed   = False
 			self.zones    = None
 
@@ -58,8 +56,8 @@ class MemoryBatch:
 		if self.ctx is not None and self.depth == 0:
 			aborted   = self.failed
 			committed = False
-			sync      = self.sync if self.notified else None
-			txn_id    = self.txn_id
+			sync      = self.sync
+			ids       = self.ids
 
 			try:
 				if aborted:
@@ -78,19 +76,16 @@ class MemoryBatch:
 					self.memory._read = None
 
 				self.sync     = None
-				self.txn_id   = None
-				self.notified = False
+				self.ids      = None
 				self.failed   = False
 				self.zones    = None
 				self.tx       = None
 				self.ctx      = None
 
-				if not committed and sync is not None:
-					sync.changes.pop(txn_id, None)
 
-			if committed and sync is not None:
+			if committed and ids:
 				try:
-					sync.publish_change(sync.changes.pop(txn_id), local=True)
+					sync.publish_change(ids, local=True)
 				except Exception as error:
 					raise RuntimeError('LMDB committed; Sync publication failed') from error
 
@@ -116,15 +111,13 @@ class MemoryBatch:
 	# Send every affected ID; each write operation owns its notification.
 	# ----------------------------------------------------------------------
 	def _notify(self, owner_id):
-		self.notified = True
-
 		if type(owner_id) is int:
-			self.sync.register_change(self.txn_id, owner_id)
+			self.ids.append(owner_id)
 		else:
 			sent = False
 
 			for id in owner_id:
-				self.sync.register_change(self.txn_id, id)
+				self.ids.append(id)
 				sent = True
 
 			if not sent:
