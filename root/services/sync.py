@@ -41,14 +41,11 @@ class Sync(o.Service):
 				except Exception:
 					logging.exception('O Sync subscriber failed')
 
-	# Deliver each queued change separately, in publication order.
+	# Deliver each queued change separately until the process exits.
 	# ----------------------------------------------------------------------
 	def _run_worker_loop(self):
 		while True:
 			event = self._queue.get()
-
-			if event is self._stop:
-				break
 
 			ids, local = event
 			ids = None if ids is None else frozenset(ids)
@@ -64,10 +61,8 @@ class Sync(o.Service):
 		# Only the worker handles delivery.
 		# --------------------------------------------------------------
 		self._queue       = SimpleQueue()
-		self._stop        = object()
 		self._lock        = threading.Lock()
 		self._subscribers = {}
-		self._closed      = False
 
 		self._worker = threading.Thread(
 			target = self._run_worker_loop,
@@ -97,9 +92,6 @@ class Sync(o.Service):
 			ids = frozenset(ids)
 
 		with self._lock:
-			if self._closed:
-				raise RuntimeError('Sync is closed')
-
 			self._subscribers[callback] = (ids, local_only)
 
 		return callback
@@ -113,21 +105,4 @@ class Sync(o.Service):
 	# Queue changes immediately; the worker dispatches each event.
 	# ----------------------------------------------------------------------
 	def publish_change(self, ids, local=True):
-		if self._closed:
-			raise RuntimeError('Sync is closed')
-
 		self._queue.put((ids, local))
-
-
-	# Flush confirmed notifications and terminate cleanly.
-	# ----------------------------------------------------------------------
-	def close(self):
-		if not self._closed:
-			self._closed = True
-			self._queue.put(self._stop)
-
-		if self._worker is not threading.current_thread():
-			self._worker.join()
-
-		with self._lock:
-			self._subscribers.clear()
