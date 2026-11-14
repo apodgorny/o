@@ -94,7 +94,7 @@ class Ontology(o.Service):
 
 		if tree_mode is None or tree_mode == saved_mode:
 			if not has_mode:
-				o.services.Memory.set('system/tree_mode', saved_mode, 0)
+				o.services.Memory.set('system/tree_mode', saved_mode, None)
 		else:
 			raise ValueError('Tree mode does not match the existing ontology')
 
@@ -122,7 +122,4 @@ class Ontology(o.Service):
 				path = o.services.Memory.path,
 				sync = o.services.Sync,
 			)
-		elif not multiprocess and self._multiprocess_enabled:
-			o.services.Transport.close()
-
-		self._multiprocess_enabled = multiprocess
+			self._multiprocess_enabled = True
