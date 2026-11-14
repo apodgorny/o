@@ -57,6 +57,28 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
+	# Separate publications retain their order, even when queued together.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def test_publication_order_without_grouping(cls):
+		sync     = cls._sync()
+		received = []
+
+		try:
+			sync.subscribe(received.append)
+			sync.publish_change([11, 11], local=True)
+			sync.publish_change([22], local=True)
+			sync.publish_change(frozenset({33}), local=False)
+			sync.close()
+
+			assert received == [
+				frozenset({11}),
+				frozenset({22}),
+				frozenset({33}),
+			]
+		finally:
+			sync.close()
+
 	# Pending IDs must remain invisible until the outer commit publishes.
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -514,7 +536,7 @@ class TestSync(o.Tester):
 		finally:
 			sync.close()
 
-	# A burst of confirmations must not lose IDs while the worker coalesces.
+	# A burst of commits must deliver each publication without losing IDs.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_burst_delivery(cls):
@@ -542,7 +564,7 @@ class TestSync(o.Tester):
 
 
 	# Concurrent writers must deliver every committed owner ID exactly once
-	# or in a coalesced batch, without leaking aborted transaction records.
+	# without leaking aborted transaction records.
 	# ----------------------------------------------------------------------
 	@classmethod
 	def test_many_concurrent_commits(cls):
