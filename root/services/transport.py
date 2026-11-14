@@ -152,6 +152,7 @@ class Transport(o.Service):
 		connection, reader = self._connect()
 		self._connection  = connection
 		o.services.Cache.invalidate_all()
+		self.sync.subscribe(self.send, local_only=True)
 		self._worker = threading.Thread(
 			target = self._run,
 			args   = (connection, reader),
@@ -161,9 +162,12 @@ class Transport(o.Service):
 		self._worker.start()
 		atexit.register(self.close)
 
-	# Send one owner-ID set, or None for full invalidation.
+	# Send only changes from the ontology registered with this relay.
 	# ----------------------------------------------------------------------
 	def send(self, ids):
+		if o.services.Memory.path != self.path:
+			return
+
 		if ids is None:
 			payload = None
 		elif isinstance(ids, (set, frozenset)) and ids and all(type(id) is int and id > 0 for id in ids):
@@ -193,6 +197,7 @@ class Transport(o.Service):
 	# ----------------------------------------------------------------------
 	def close(self):
 		self._closed.set()
+		self.sync.unsubscribe(self.send)
 
 		with self._lock:
 			connection      = self._connection

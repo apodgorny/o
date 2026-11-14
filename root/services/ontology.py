@@ -11,6 +11,8 @@ import o
 
 class Ontology(o.Service):
 
+	_multiprocess_enabled = False
+
 	# ======================================================================
 	# PRIVATE METHODS
 	# ======================================================================
@@ -55,9 +57,9 @@ class Ontology(o.Service):
 		return result
 
 	# Open or create this ontology under the application-owned ontology folder.
-	# sync=False favors throughput; sync=True favors crash durability.
+	# sync=False favors throughput; multiprocess=True enables IPC.
 	# ----------------------------------------------------------------------
-	def start(self, sync: bool = False, tree_mode: bool | None = None):
+	def start(self, sync: bool = False, tree_mode: bool | None = None, multiprocess: bool = False):
 		app = o.__app__
 		if app is None:
 			raise RuntimeError('O requires an active Almasi application before start()')
@@ -67,6 +69,9 @@ class Ontology(o.Service):
 
 		if tree_mode is not None and type(tree_mode) is not bool:
 			raise TypeError('tree_mode must be bool or None')
+
+		if type(multiprocess) is not bool:
+			raise TypeError('multiprocess must be bool')
 
 		is_reconnecting = 'env' in o.services.Memory.__dict__
 
@@ -111,10 +116,13 @@ class Ontology(o.Service):
 		o.services.Entity.ensure_value()
 		o.__cached_names__.add('V')
 
-		if not is_reconnecting:
+		if multiprocess and not self._multiprocess_enabled:
 			self._initialize_service(
 				o.services.Transport,
 				path = o.services.Memory.path,
 				sync = o.services.Sync,
 			)
-			o.services.Sync.attach_transport(o.services.Transport)
+		elif not multiprocess and self._multiprocess_enabled:
+			o.services.Transport.close()
+
+		self._multiprocess_enabled = multiprocess

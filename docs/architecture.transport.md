@@ -10,7 +10,7 @@ O already owns the application-level contract:
 - `Sync` coalesces those IDs and dispatches subscriptions.
 - `Cache` invalidates existing O entities without changing identity.
 
-`Transport` only carries invalidation sets between processes. It never reads or transfers LMDB values. Remote notifications enter `Sync.receive(ids)`, invalidate the local cache, and notify subscribers without broadcasting the same message again.
+`Transport` only carries invalidation sets between processes. It never reads or transfers LMDB values. It subscribes via `Sync.subscribe(self.send, local_only=True)` to forward locally originated invalidations only. Incoming messages use `Sync.receive(ids)`: the Sync worker invalidates local caches, then notifies ordinary subscribers without echoing these messages.
 
 ## Layout
 
@@ -32,7 +32,9 @@ The service derives the daemon script path from its own `__file__` with `os.path
 
 ## Startup and lifetime
 
-`o.start()` initializes `Transport` after `Sync`, `Memory` and ontology classes. The first client starts the daemon if its Unix socket is absent. A nonblocking OS file lock prevents simultaneous processes from creating competing relays. Other clients connect to that same socket.
+`o.start()` defaults to **in-process only**: it does not initialize `Transport` or launch the daemon. `o.start(multiprocess=True)` activates IPC for that ontology after `Sync`, `Memory` and ontology classes are ready. The first client starts the daemon if its Unix socket is absent. A nonblocking OS file lock prevents simultaneous processes from creating competing relays. Other clients connect to that same socket.
+
+A subsequent `o.start(multiprocess=False)` disconnects the transport again (and reopens LMDB as with any repeated `start()`). Re-enabling it with `True` reconnects. Each O fork makes this choice independently.
 
 The daemon stops approximately three seconds after the final client disconnects. It is a normal subprocess, not a second O ontology or an Almasi service. The socket directory defaults to a private directory named `o-transport-<uid>` beneath `tempfile.gettempdir()`. `O_TRANSPORT_DIR` may specify a shared, private directory for a deployment; it must be owned by the calling UID and inaccessible to group/other users.
 

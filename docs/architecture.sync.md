@@ -63,6 +63,8 @@ graph for a new world), independent of notifications. See
 | `sync.subscribe(callback=callback)` | Same, explicit keyword |
 | `sync.subscribe({id1, id2}, callback)` | Observe only those owner IDs |
 | `sync.subscribe(frozenset(ids), callback)` | Immutable-set variant |
+| `sync.subscribe(callback, local_only=True)` | Notify only for changes originating in this process |
+| `sync.receive(ids)` | Enqueue an external invalidation; no LMDB transaction |
 | `sync.unsubscribe(callback)` | Remove the callback from future deliveries |
 | `sync.close()` | End worker lifetime; flush queued committed batches |
 
@@ -72,6 +74,12 @@ Subscriptions are keyed by callback: registering the same callback again
 must be a `set` or `frozenset`; it is snapshotted at registration, so
 mutating the caller's set later has no effect. A filtered callback receives
 only matching IDs; a global callback receives the full delivered batch.
+
+All subscriptions run through one `_update()` delivery point. Ordinary subscribers
+receive local and externally received changes. A `local_only=True` subscriber
+receives only local changes; Transport uses this filter to publish IPC updates
+without echoing incoming messages. Incoming changes are queued with `receive()`,
+invalidate the local cache, and then notify ordinary subscribers.
 
 A filtered **empty** set receives no ordinary change events, but still
 receives a full invalidation (`None`). Memory retains its existing internal
@@ -191,8 +199,10 @@ is not automatically reversed by `o.start()` reopening Memory. Use
   `--sync stub` compares native Sync with no-op producer callbacks, not
   distributed transport or browser latency.
 
-Sync is **in-process, non-durable, non-replayable** and has no cross-process
-coherence, revision ordering, authorization or UI responsibility.
+Sync itself is **in-process, non-durable, non-replayable**. Optional Transport
+provides host-local invalidation forwarding; Sync never references Transport
+or owns its lifecycle. There is no revision ordering, authorization or UI
+responsibility in Sync.
 Consumers supply those capabilities where required. Web integrates it
 through an optional injected pair `Tracker` / `Sync` without making O
 depend on Web; see [Web MCP architecture](https://github.com/apodgorny/web/blob/master/docs/architecture.mcp.md).
